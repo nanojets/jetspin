@@ -1,0 +1,26 @@
+The 'execute' Sub-directory
+
+In the supplied version of JETSPIN, this sub-directory is intended to
+be the `working' directory from which jobs are submitted for execution
+and the data files manipulated. 
+
+Executing the Program
+
+To run JETSPIN, it is necessary first to ensure that the program is
+compiled (from the source sub-directory) and that the file input.dat
+is present in the execute subdirectory. 
+Note that a Message Passing Interface Implementation is necessary 
+to compile and run JETSPIN in parallel mode.
+All output data files will be returned to the execute sub-directory.
+Remember that the input file HAS TO BE NAMED 'input.dat' and put in
+the 'execute' Sub-directory.
+
+Example command to run JETSPIN in serial mode:
+
+./main.x
+
+Example command to run JETSPIN in parallel mode on 4 CPUs:
+
+mpirun -np 4 ./main.x
+
+

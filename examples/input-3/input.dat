@@ -1,0 +1,41 @@
+ 
+ !Example JETSPIN input file 3 for PVP electrospinning simulation
+
+ system 3
+ integrator 2
+ 
+ timestep 1.d-8                             !s
+ 
+ print time 1.d-2                           !s
+ final time 0.5d0
+ seed 317
+ 
+ print xyz 1.d-4                            !s
+ print xyz maxnumber 400                    
+
+ print list t x vn vc yz n curn curc
+ printstat list t x vn yz n curn curc
+  
+ inserting yes
+ removing yes
+ gravity yes
+
+ points 1
+ initial length 0.02                         !cm
+ nozzle velocity 0.282942121d0               !cm/s
+ nozzle stress 0.d0                          !g cm-1 s-2
+ yield stress   0.d0                         !g cm-1 s-2
+ nozzle cross 0.005d0                        !cm 
+ density mass 0.839253525d0                  !g cm-3
+ density charge 44000.0d0                    !g1/2 cm-3/2 s-1
+ viscosity    20.d0                          !g cm-1 s-1
+ elastic modulus   50000.d0                  !g cm-1 s-2
+ collector distance 16.d0                    !cm
+ external potential 30.02076857d0            !g1/2 cm1/2 s-1
+ surface tension 21.133d0                    !g s-2
+ perturbation yes
+ perturbation frequency  1.d+4               !s^1  
+ perturbation amplitude  1.d-3               ! cm
+ 
+ Finish
+

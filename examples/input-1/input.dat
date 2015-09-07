@@ -1,0 +1,23 @@
+
+!Example JETSPIN input file 1 for electrospinning simulation
+
+system 1
+integrator 2
+timestep 1.d-8
+final time 1.d-1
+print time 1.d-3
+print list ts xs sts vxs cpu cpur cpu
+printstat list ts xs sts vxs cpu cpur cpu
+inserting no
+removing no
+points 1
+initial length 3.19d-1
+nozzle cross 1.5d-2
+density mass 8.18912288d-1
+density charge 3761.26389d0
+viscosity 100.d0
+elastic modulus 10000.d
+collector distance 200.d0
+external potential 277.8141d0
+
+finish

@@ -182,7 +182,7 @@
   write(iu,of)"*    Dario Pisignano, Sauro Succi,                                            *"
   write(iu,of)"*    JETSPIN: A specific-purpose open-source software for                     *"
   write(iu,of)"*    electrospinning simulations of nanofibers,                               *"
-  write(iu,of)"*    Submitted to Computer Physics Communications, 2015.                      *"
+  write(iu,of)"*    Computer Physics Communications, 2015, doi:10.1016/j.cpc.2015.08.013.    *"
   write(iu,of)"*                                                                             *"
   write(iu,of)"*                                                                             *"
   write(iu,of)"*******************************************************************************"

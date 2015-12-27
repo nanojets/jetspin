@@ -13,9 +13,9 @@ SHELL=/bin/sh
 
 
 OBJ_MOD = serial_version_mod.o parallel_version_mod.o parse_mod.o error_mod.o \
-	utility_mod.o nanojet_mod.o support_functions_mod.o viscoelastic_force_mod.o \
-	coulomb_force_mod.o eom_mod.o driver_eom_mod.o integrator_mod.o statistic_mod.o \
-	io_mod.o
+	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
+	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
+	eom_mod.o driver_eom_mod.o integrator_mod.o statistic_mod.o io_mod.o
 
 OBJ_SRC = main.o
 
@@ -38,6 +38,7 @@ all:
 	@echo "gfortran-debugger                  "
 	@echo "gfortran-mpidebugger               "
 	@echo "intel-debugger                     "
+	@echo "intel-mpidebugger                  "
 	@echo "                                   "
 	@echo "Please examine Makefile for further details "
 
@@ -58,6 +59,7 @@ help:
 	@echo "gfortran-debugger                  "
 	@echo "gfortran-mpidebugger               "
 	@echo "intel-debugger                     "
+	@echo "intel-mpidebugger                  "
 	@echo "                                   "
 	@echo "Please examine Makefile for further details "
 
@@ -120,31 +122,42 @@ intel-mpi:
 intel-openmpi:
 	$(MAKE) FC=mpif90 \
 	FFLAGS="-O2 -c" \
-	LDFLAGS="-O2 -o" \
+	LDFLAGS="-O2  -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
 intel-debugger:
 	$(MAKE) FC=ifort \
-	FFLAGS="-O0 -g -check all -c" \
-	LDFLAGS="-O0 -g -check all -o" \
+	FFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -c" \
+	LDFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -o" \
 	TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 
+intel-mpidebugger:
+	$(MAKE) FC=mpiifort \
+	FFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -c" \
+	LDFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -o" \
+	TYPE=mpi \
+	EX=$(EX) BINROOT=$(BINROOT) mpi
+
 seq:serial_version_mod.o parse_mod.o error_mod.o utility_mod.o nanojet_mod.o \
-	support_functions_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
-	eom_mod.o driver_eom_mod.o integrator_mod.o statistic_mod.o io_mod.o main.o
+	fit_mod.o support_functions_mod.o dynamic_refinement_mod.o \
+	viscoelastic_force_mod.o coulomb_force_mod.o eom_mod.o driver_eom_mod.o \
+	integrator_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o parse_mod.o error_mod.o utility_mod.o \
-	nanojet_mod.o support_functions_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
-	eom_mod.o driver_eom_mod.o integrator_mod.o statistic_mod.o io_mod.o main.o
+	nanojet_mod.o fit_mod.o support_functions_mod.o dynamic_refinement_mod.o \
+	viscoelastic_force_mod.o coulomb_force_mod.o eom_mod.o driver_eom_mod.o \
+	integrator_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 	
 mpi:parallel_version_mod.o parse_mod.o error_mod.o utility_mod.o nanojet_mod.o \
-	support_functions_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
-	eom_mod.o driver_eom_mod.o integrator_mod.o statistic_mod.o io_mod.o main.o
+	fit_mod.o support_functions_mod.o dynamic_refinement_mod.o \
+	viscoelastic_force_mod.o coulomb_force_mod.o eom_mod.o driver_eom_mod.o \
+	integrator_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o parse_mod.o error_mod.o utility_mod.o \
-	nanojet_mod.o support_functions_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
-	eom_mod.o driver_eom_mod.o integrator_mod.o statistic_mod.o io_mod.o main.o
+	nanojet_mod.o fit_mod.o support_functions_mod.o dynamic_refinement_mod.o \
+	viscoelastic_force_mod.o coulomb_force_mod.o eom_mod.o driver_eom_mod.o \
+	integrator_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 
 serial_version_mod.o:serial_version_mod.f90
@@ -165,8 +178,14 @@ utility_mod.o:utility_mod.f90
 nanojet_mod.o:nanojet_mod.f90
 	$(FC) $(FFLAGS) nanojet_mod.f90
 	
+fit_mod.o:fit_mod.f90
+	$(FC) $(FFLAGS) fit_mod.f90
+	
 support_functions_mod.o:support_functions_mod.f90
 	$(FC) $(FFLAGS) support_functions_mod.f90
+	
+dynamic_refinement_mod.o:dynamic_refinement_mod.f90
+	$(FC) $(FFLAGS) dynamic_refinement_mod.f90
 	
 viscoelastic_force_mod.o: viscoelastic_force_mod.f90
 	$(FC) $(FFLAGS) viscoelastic_force_mod.f90

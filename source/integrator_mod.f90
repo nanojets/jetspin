@@ -7,18 +7,21 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification july 2015
 !     
 !***********************************************************************
 
  use version_mod,       only : mystart,myend,mxchunk,sum_world_darr, &
-                         set_chunk
- use error_mod,         only : error
+                         set_chunk,set_mxchunk,idrank
+ use error_mod,         only : error,warning
  use utility_mod,       only : gauss,wiener_process1,wiener_process2
  use nanojet_mod,       only : doallocate,mxnpjet,npjet,inpjet,systype,&
                          jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetst, &
-                         jetms,jetch,compute_posnoinserted
- use coulomb_force_mod, only : smooth_charge,restore_charge
+                         jetms,jetch,jetvl,compute_posnoinserted, &
+                         jetpt
+ use dynamic_refinement_mod, only : driver_dynamic_refinement
+ use coulomb_force_mod, only : smooth_charge,restore_charge, &
+                         coulforce,compute_coulomelec
  use driver_eom_mod,    only : xpsys,xpsys_pos,xpsys_stress
 
  implicit none
@@ -31,12 +34,12 @@
  double precision, public, save :: initime = 0.d0
  double precision, public, save :: endtime = 5.d0
  logical, public, save :: lendtime
-
+ 
  public :: driver_integrator
 
  contains
   
- subroutine driver_integrator(timesub,h,k)
+ subroutine driver_integrator(timesub,h,k,dorefinment)
  
 !***********************************************************************
 !     
@@ -45,17 +48,25 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification july 2015
 !     
 !***********************************************************************
   
   implicit none
   
+  logical, intent(inout) :: dorefinment
   integer, intent(in) :: k
   double precision, intent(inout) :: timesub
   double precision, intent(in) :: h
   
+  integer :: i
+  logical :: ltestinst
+  
+! perform the dynamic refinement if is requested
+  call driver_dynamic_refinement(k,dorefinment)
+    
   call set_chunk(inpjet,npjet)
+  call set_mxchunk(mxnpjet)
   
   select case(integrator)
     case(1)
@@ -69,6 +80,22 @@
     case default
       call error(1)
   end select 
+    
+  ltestinst=.false.
+  do i=inpjet,npjet
+    if(isnan(dcos(jetxx(i))))ltestinst=.true.
+    if(isnan(dcos(jetyy(i))))ltestinst=.true.
+    if(isnan(dcos(jetzz(i))))ltestinst=.true.
+    if(isnan(dcos(jetst(i))))ltestinst=.true.
+    if(isnan(dcos(jetvx(i))))ltestinst=.true.
+    if(isnan(dcos(jetvy(i))))ltestinst=.true.
+    if(isnan(dcos(jetvz(i))))ltestinst=.true.
+  enddo
+  
+  if(ltestinst)then
+    call warning(67,dble(k))
+    call error(14)
+  endif
   
   doallocate=.false.
   
@@ -85,7 +112,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification july 2015
 !     
 !***********************************************************************
   
@@ -116,10 +143,7 @@
   integer :: ipoint,j
   
   logical, save :: lfirstsub=.true.
-  logical, parameter :: lverbose=.false.
-  integer,save :: iit=0
   
-  iit=iit+1
   
 ! check and eventually reallocate the service arrays
   if(doallocate)then
@@ -179,11 +203,12 @@
   select case(systype)
     case(1)
       call smooth_charge(jetxx)
+      call compute_coulomelec(coulforce,jetxx)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-          fxx(j),fyy(j),fzz(j),fst(j), &
-          fvx(j),fvy(j),fvz(j),timesub) 
+          jetvl,coulforce,fxx(j),fyy(j),fzz(j),fst(j), &
+          fvx(j),fvy(j),fvz(j),timesub,k)
         j=j+1
       enddo
       j=0
@@ -206,11 +231,12 @@
     case default
       call smooth_charge(jetxx,jetyy,jetzz)
       call compute_posnoinserted(jetxx,jetyy,jetzz,timesub)
+      call compute_coulomelec(coulforce,jetxx,jetyy,jetzz)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-          fxx(j),fyy(j),fzz(j),fst(j), &
-          fvx(j),fvy(j),fvz(j),timesub) 
+          jetvl,coulforce,fxx(j),fyy(j),fzz(j),fst(j), &
+          fvx(j),fvy(j),fvz(j),timesub,k)
         j=j+1
       enddo
       call restore_charge()
@@ -243,7 +269,7 @@
       call compute_posnoinserted(jetxx,jetyy,jetzz)
   end select
   
-   
+  
   return
   
   
@@ -382,13 +408,14 @@
   select case(systype)
     case(1)
       call smooth_charge(jetxx)
+      call compute_coulomelec(coulforce,jetxx)
       j=0
       yxx(:)=0.d0
       yst(:)=0.d0
       yvx(:)=0.d0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-          fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub)
+          jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k)
         f1xx(j)=fxx
         f1st(j)=fst
         f1vx(j)=fvx
@@ -403,11 +430,12 @@
       call sum_world_darr(yvx,npjet+1)
       
       call smooth_charge(yxx)
+      call compute_coulomelec(coulforce,yxx)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h)
+         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
+         f2vx(j),f2vy(j),f2vz(j),timesub+h,k)
          j=j+1
       enddo
       j=0
@@ -428,6 +456,7 @@
     case default
       call smooth_charge(jetxx,jetyy,jetzz)
       call compute_posnoinserted(jetxx,jetyy,jetzz)
+      call compute_coulomelec(coulforce,jetxx,jetyy,jetzz)
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -438,7 +467,7 @@
       yvz(:)=0.d0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-          fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub)
+          jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k)
         f1xx(j)=fxx
         f1yy(j)=fyy
         f1zz(j)=fzz
@@ -456,6 +485,7 @@
 	    j=j+1
       enddo
       call restore_charge()
+      
       call sum_world_darr(yxx,npjet+1)
       call sum_world_darr(yyy,npjet+1)
       call sum_world_darr(yzz,npjet+1)
@@ -466,11 +496,12 @@
       
       call smooth_charge(yxx,yyy,yzz)
       call compute_posnoinserted(yxx,yyy,yzz)
+      call compute_coulomelec(coulforce,yxx,yyy,yzz)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h)
+         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
+         f2vx(j),f2vy(j),f2vz(j),timesub+h,k)
         j=j+1
       enddo
       j=0
@@ -690,13 +721,14 @@
   select case(systype)
     case(1)
       call smooth_charge(jetxx)
+      call compute_coulomelec(coulforce,jetxx)
       j=0
       yxx(:)=0.d0
       yst(:)=0.d0
       yvx(:)=0.d0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-          fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub)
+          jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k)
         f1xx(j)=fxx
         f1st(j)=fst
         f1vx(j)=fvx
@@ -711,11 +743,12 @@
       call sum_world_darr(yvx,npjet+1)
       
       call smooth_charge(yxx)
+      call compute_coulomelec(coulforce,yxx)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h/2.d0)
+         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
+         f2vx(j),f2vy(j),f2vz(j),timesub+h/2.d0,k)
          j=j+1
       enddo
       j=0
@@ -734,11 +767,12 @@
       call sum_world_darr(yvx,npjet+1)
       
       call smooth_charge(yxx)
+      call compute_coulomelec(coulforce,yxx)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f3xx(j),f3yy(j),f3zz(j),f3st(j), &
-         f3vx(j),f3vy(j),f3vz(j),timesub+h/2.d0)
+         jetvl,coulforce,f3xx(j),f3yy(j),f3zz(j),f3st(j), &
+         f3vx(j),f3vy(j),f3vz(j),timesub+h/2.d0,k)
          j=j+1
       enddo
       j=0
@@ -757,11 +791,12 @@
       call sum_world_darr(yvx,npjet+1)
       
       call smooth_charge(yxx)
+      call compute_coulomelec(coulforce,yxx)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f4xx(j),f4yy(j),f4zz(j),f4st(j), &
-         f4vx(j),f4vy(j),f4vz(j),timesub+h)
+         jetvl,coulforce,f4xx(j),f4yy(j),f4zz(j),f4st(j), &
+         f4vx(j),f4vy(j),f4vz(j),timesub+h,k)
          j=j+1
       enddo
       j=0
@@ -786,6 +821,7 @@
       
       call smooth_charge(jetxx,jetyy,jetzz)
       call compute_posnoinserted(jetxx,jetyy,jetzz)
+      call compute_coulomelec(coulforce,jetxx,jetyy,jetzz)
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -796,7 +832,7 @@
       yvz(:)=0.d0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-         fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub) 
+         jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k) 
         f1xx(j)=fxx
         f1yy(j)=fyy
         f1zz(j)=fzz
@@ -824,11 +860,12 @@
       
       call smooth_charge(yxx,yyy,yzz)
       call compute_posnoinserted(yxx,yyy,yzz)
+      call compute_coulomelec(coulforce,yxx,yyy,yzz)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h/2.d0)
+         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
+         f2vx(j),f2vy(j),f2vz(j),timesub+h/2.d0,k)
         j=j+1
       enddo
       j=0
@@ -860,11 +897,12 @@
       
       call smooth_charge(yxx,yyy,yzz)
       call compute_posnoinserted(yxx,yyy,yzz)
+      call compute_coulomelec(coulforce,yxx,yyy,yzz)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f3xx(j),f3yy(j),f3zz(j),f3st(j), &
-         f3vx(j),f3vy(j),f3vz(j),timesub+h/2.d0)
+         jetvl,coulforce,f3xx(j),f3yy(j),f3zz(j),f3st(j), &
+         f3vx(j),f3vy(j),f3vz(j),timesub+h/2.d0,k)
         j=j+1
       enddo
       j=0
@@ -896,11 +934,12 @@
       
       call smooth_charge(yxx,yyy,yzz)
       call compute_posnoinserted(yxx,yyy,yzz)
+      call compute_coulomelec(coulforce,yxx,yyy,yzz)
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         f4xx(j),f4yy(j),f4zz(j),f4st(j), &
-         f4vx(j),f4vy(j),f4vz(j),timesub+h)
+         jetvl,coulforce,f4xx(j),f4yy(j),f4zz(j),f4st(j), &
+         f4vx(j),f4vy(j),f4vz(j),timesub+h,k)
         j=j+1
       enddo
       j=0
@@ -950,7 +989,7 @@
 !***********************************************************************
 !     
 !     JETSPIN subroutine for integrating the stochastic equation
-!     of motion by the 1.5° order accurate Platen scheme
+!     of motion by the 1.5Â° order accurate Platen scheme
 !     for the velocity stochastic part and by the second order accurate
 !     Heun scheme for deterministic part
 !     ONLY FOR DEVELOPERS
@@ -1136,6 +1175,7 @@
   select case(systype)
     case(1)
       call smooth_charge(jetxx)
+      call compute_coulomelec(coulforce,jetxx)
       j=0
       y1xx(:)=0.d0
       y1st(:)=0.d0
@@ -1145,7 +1185,8 @@
       y2vx(:)=0.d0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-         fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,fstocvx,fstocvy,fstocvz) 
+         jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k, &
+         fstocvx,fstocvy,fstocvz) 
         f1xx(j)=fxx
         f1st(j)=fst
         f1vx(j)=fvx
@@ -1167,10 +1208,12 @@
       call sum_world_darr(y2vx,npjet+1)
       
       call smooth_charge(y1xx)
+      call compute_coulomelec(coulforce,y1xx)
       j=0
       do ipoint=mystart,myend
-        call xpsys(ipoint,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
-         fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,fstocvx,fstocvy,fstocvz)
+        call xpsys(ipoint,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,jetvl, &
+         coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k,fstocvx, &
+         fstocvy,fstocvz)
         f2xx(j)=fxx
         f2st(j)=fst
         f2vx(j)=fvx
@@ -1179,12 +1222,13 @@
       call restore_charge()
       
       call smooth_charge(y2xx)
+      call compute_coulomelec(coulforce,y2xx)
       j=0
       y1vx(:)=0.d0
       do ipoint=mystart,myend
-        call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz, &
-         f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,f3stocvx,f3stocvy, &
-          f3stocvz)
+        call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
+         coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,k, &
+         f3stocvx,f3stocvy,f3stocvz)
         u1=gauss()
         u2=gauss()
         ww(1)=(dsqrh*u1)
@@ -1213,7 +1257,7 @@
       j=0
       do ipoint=mystart,myend
         call xpsys_pos(ipoint,y1xx,y1yy,y1zz,y1st,jetvx,jetvy,jetvz, &
-         f2xx(j),f2yy(j),f2zz(j),timesub+h)
+         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),timesub+h,k)
          j=j+1
       enddo
       j=0
@@ -1227,7 +1271,7 @@
       j=0
       do ipoint=mystart,myend
         call xpsys_stress(ipoint,jetxx,jetyy,jetzz,y1st,jetvx,jetvy, &
-         jetvz,f2st(j),timesub+h)
+         jetvz,jetvl,coulforce,f2st(j),timesub+h,k)
          j=j+1
       enddo
       j=0
@@ -1242,6 +1286,7 @@
     case default
       call smooth_charge(jetxx,jetyy,jetzz)
       call compute_posnoinserted(jetxx,jetyy,jetzz)
+      call compute_coulomelec(coulforce,jetxx,jetyy,jetzz)
       j=0
       y1xx(:)=0.d0
 	  y1yy(:)=0.d0
@@ -1259,7 +1304,8 @@
 	  y2vz(:)=0.d0
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-         fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,fstocvx,fstocvy,fstocvz)
+         jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k, &
+         fstocvx,fstocvy,fstocvz)
         f1xx(j)=fxx
         f1yy(j)=fyy
         f1zz(j)=fzz
@@ -1304,10 +1350,12 @@
       
       call smooth_charge(y1xx,y1yy,y1zz)
       call compute_posnoinserted(y1xx,y1yy,y1zz)
+      call compute_coulomelec(coulforce,y1xx,y1yy,y1zz)
       j=0
       do ipoint=mystart,myend
-        call xpsys(ipoint,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
-         fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,fstocvx,fstocvy,fstocvz)
+        call xpsys(ipoint,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,jetvl, &
+         coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k,fstocvx, &
+         fstocvy,fstocvz)
         f2xx(j)=fxx
         f2yy(j)=fyy
         f2zz(j)=fzz
@@ -1321,14 +1369,15 @@
       
       call smooth_charge(y2xx,y2yy,y2zz)
       call compute_posnoinserted(y2xx,y2yy,y2zz)
+      call compute_coulomelec(coulforce,y2xx,y2yy,y2zz)
       j=0
       y1vx(:)=0.d0
       y1vy(:)=0.d0
       y1vz(:)=0.d0
       do ipoint=mystart,myend
-        call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz, &
-         f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,f3stocvx,f3stocvy, &
-         f3stocvz)
+        call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
+         coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,k, &
+         f3stocvx,f3stocvy,f3stocvz)
         u1=gauss()
         u2=gauss()
         ww(1)=(dsqrh*u1)
@@ -1382,7 +1431,7 @@
       j=0
       do ipoint=mystart,myend
         call xpsys_pos(ipoint,y1xx,y1yy,y1zz,y1st,jetvx,jetvy,jetvz, &
-         f2xx(j),f2yy(j),f2zz(j),timesub+h)
+         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),timesub+h,k)
          j=j+1
       enddo
       j=0
@@ -1403,7 +1452,7 @@
       j=0
       do ipoint=mystart,myend
         call xpsys_stress(ipoint,jetxx,jetyy,jetzz,y1st,jetvx,jetvy, &
-         jetvz,f2st(j),timesub+h)
+         jetvz,jetvl,coulforce,f2st(j),timesub+h,k)
          j=j+1
       enddo
       j=0

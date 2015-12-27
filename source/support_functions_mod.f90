@@ -8,14 +8,16 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2015
 !     
 !***********************************************************************
  
- use version_mod, only : mystart,myend,sum_world_darr
+ use version_mod, only : mystart,myend,sum_world_darr,memyend, &
+                   set_chunk,set_mxchunk
  use utility_mod, only : Pi,modulvec,cross,dot
  use nanojet_mod, only : systype,icrossec,inpjet,npjet,resolution, &
-                   velext,linserted,airdragamp,jetms
+                   velext,linserted,airdragamp,jetms,mxnpjet, &
+                   linserting,luppot,kuppot,jetms
  
  implicit none
  
@@ -36,6 +38,7 @@
  public :: compute_stocforce_3d
  public :: compute_crosssec
  public :: compute_length_path
+ public :: upwall
  
  contains
  
@@ -647,7 +650,7 @@
   
  end subroutine compute_stocforce_3d
  
- subroutine compute_crosssec(jetxxs,jetyys,jetzzs,jetcrs)
+ subroutine compute_crosssec(jetxxs,jetyys,jetzzs,jetvls,jetcrs)
  
 !***********************************************************************
 !     
@@ -663,79 +666,193 @@
   implicit none
   
   double precision, allocatable, dimension (:), &
-   intent(in) ::  jetxxs,jetyys,jetzzs
+   intent(in) ::  jetxxs,jetyys,jetzzs,jetvls
   double precision, allocatable, dimension (:), &
    intent(inout) ::  jetcrs
   
   integer :: ipoint
+  double precision :: tempmod0
   
-  if(systype==1)then
-    do ipoint=inpjet,npjet-1
-      jetcrs(ipoint)=dsqrt((icrossec**2.d0)* &
-       resolution/beadlength1d(ipoint,jetxxs))
-    enddo
-    jetcrs(npjet)=icrossec
-    return
+  call set_chunk(inpjet,npjet)
+  call set_mxchunk(mxnpjet)
+  
+  jetcrs(:)=0.d0
+    
+  if(linserting)then
+    if(.not.linserted)then
+      select case(systype)
+        case(1)
+          do ipoint=mystart,myend
+            if(ipoint<npjet-2)then
+              tempmod0=jetxxs(ipoint)-jetxxs(ipoint+1)
+              jetcrs(ipoint) = dsqrt(jetvls(ipoint)/(tempmod0*Pi))
+            else
+              jetcrs(ipoint) = icrossec
+            endif
+          enddo
+        case default
+          do ipoint=mystart,myend
+            if(ipoint<npjet-2)then
+              tempmod0=dsqrt((jetxxs(ipoint)-jetxxs(ipoint+1))**2.d0+ &
+               (jetyys(ipoint)-jetyys(ipoint+1))**2.d0+ &
+               (jetzzs(ipoint)-jetzzs(ipoint+1))**2.d0)
+              jetcrs(ipoint) = dsqrt(jetvls(ipoint)/(tempmod0*Pi))
+            else
+              jetcrs(ipoint) = icrossec
+            endif
+          enddo
+      end select
+    else
+      select case(systype)
+        case(1)
+          do ipoint=mystart,myend
+            if(ipoint<npjet-1)then
+              tempmod0=jetxxs(ipoint)-jetxxs(ipoint+1)
+              jetcrs(ipoint) = dsqrt(jetvls(ipoint)/(tempmod0*Pi))
+            else
+              jetcrs(ipoint) = icrossec
+            endif
+          enddo
+        case default
+          do ipoint=mystart,myend
+            if(ipoint<npjet-1)then
+              tempmod0=dsqrt((jetxxs(ipoint)-jetxxs(ipoint+1))**2.d0+ &
+               (jetyys(ipoint)-jetyys(ipoint+1))**2.d0+ &
+               (jetzzs(ipoint)-jetzzs(ipoint+1))**2.d0)
+              jetcrs(ipoint) = dsqrt(jetvls(ipoint)/(tempmod0*Pi))
+            else
+              jetcrs(ipoint) = icrossec
+            endif
+          enddo
+      end select
+    endif
+  else
+    select case(systype)
+      case(1)
+        do ipoint=mystart,myend
+          if(ipoint<npjet)then
+            tempmod0=jetxxs(ipoint)-jetxxs(ipoint+1)
+            jetcrs(ipoint) = dsqrt(jetvls(ipoint)/(tempmod0*Pi))
+          else
+            jetcrs(ipoint) = icrossec
+          endif
+        enddo
+      case default
+        do ipoint=mystart,myend
+          if(ipoint<npjet)then
+            tempmod0=dsqrt((jetxxs(ipoint)-jetxxs(ipoint+1))**2.d0+ &
+             (jetyys(ipoint)-jetyys(ipoint+1))**2.d0+ &
+             (jetzzs(ipoint)-jetzzs(ipoint+1))**2.d0)
+            jetcrs(ipoint) = dsqrt(jetvls(ipoint)/(tempmod0*Pi))
+          else
+            jetcrs(ipoint) = icrossec
+          endif
+        enddo
+    end select
   endif
   
-  do ipoint=inpjet,npjet-1
-    jetcrs(ipoint)=dsqrt((icrossec**2.d0)* &
-     resolution/beadlength(ipoint,jetxxs,jetyys,jetzzs))
-  enddo
-  jetcrs(npjet)=icrossec
+  call sum_world_darr(jetcrs,npjet+1)
   
   return
   
  end subroutine compute_crosssec
  
  subroutine compute_length_path(yxx,yyy,yzz, &
-  lengthpath)
+  ypt,lengthpathsub)
   
 !***********************************************************************
 !     
 !     JETSPIN subroutine for computing the path length of the nanofiber
-!     between the nozzle and the collector
+!     between the nozzle and the collector and the curve parameter ypt
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2015
 !     
 !***********************************************************************
  
   implicit none
   
-  double precision, allocatable, dimension (:), intent(in) ::  yxx
-  double precision, allocatable, dimension (:), intent(in) ::  yyy
-  double precision, allocatable, dimension (:), intent(in) ::  yzz
+  double precision, allocatable, dimension(:), intent(in) :: yxx
+  double precision, allocatable, dimension(:), intent(in) :: yyy
+  double precision, allocatable, dimension(:), intent(in) :: yzz
   
-  double precision, intent(out) :: lengthpath
+  double precision,allocatable,dimension(:),intent(inout) :: ypt
+  double precision, intent(out) :: lengthpathsub
   
   integer :: ipoint
-  double precision :: tempmod0,tempmod(1)
+  double precision :: tempmod0,tempmod,tempmod1(1)
   
-  tempmod(1)=0.d0
+  call set_chunk(inpjet,npjet)
+  call set_mxchunk(mxnpjet)
+  
+  tempmod=0.d0
+  ypt(:)=0.d0
   select case(systype)
     case(1)
-      do ipoint=mystart,myend
-        tempmod0 = yxx(ipoint)-yxx(ipoint+1)
-        tempmod(1)=tempmod(1)+tempmod0
+    do ipoint=mystart+1,memyend
+        tempmod0 = yxx(ipoint-1)-yxx(ipoint)
+        tempmod = tempmod+tempmod0
+        ypt(ipoint) = tempmod
       enddo
     case default
-      do ipoint=mystart,myend
-        tempmod0 = dsqrt((yxx(ipoint)-yxx(ipoint+1))**2.d0+ &
-         (yyy(ipoint)-yyy(ipoint+1))**2.d0+ &
-          (yzz(ipoint)-yzz(ipoint+1))**2.d0)
-        tempmod(1)=tempmod(1)+tempmod0
+      do ipoint=mystart+1,memyend
+        tempmod0 = dsqrt((yxx(ipoint-1)-yxx(ipoint))**2.d0+ &
+         (yyy(ipoint-1)-yyy(ipoint))**2.d0+ &
+         (yzz(ipoint-1)-yzz(ipoint))**2.d0)
+        tempmod = tempmod+tempmod0
+        ypt(ipoint) = tempmod
       enddo
   end select
   
-  call sum_world_darr(tempmod,1)
+  tempmod1(1)=tempmod
+  call sum_world_darr(tempmod1,1)
+  lengthpathsub=tempmod1(1)
   
-  lengthpath=tempmod(1)
+  ypt(myend+1:npjet)=tempmod
+  
+  call sum_world_darr(ypt,npjet+1)
+  
+  ypt(inpjet:npjet) = ypt(inpjet:npjet)/lengthpathsub
   
   return
   
  end subroutine compute_length_path
+ 
+ function upwall(ipoint,yxx)
+ 
+!***********************************************************************
+!     
+!     JETSPIN function for computing the acceleration given by the 
+!     uppest soft wall located behind the nozzle at x equal zero
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2015
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: ipoint
+  
+  double precision, allocatable, dimension (:), intent(in) ::  yxx
+  
+  double precision :: upwall
+  
+  if(luppot)then
+    if(yxx(ipoint)>=0.d0)then
+      upwall=0.d0
+    else
+      upwall=-1.d0*kuppot*yxx(ipoint)/jetms(ipoint)
+    endif
+  else
+    upwall=0.d0
+  endif
+  
+  return
+  
+ end function upwall
  
  end module support_functions_mod
 

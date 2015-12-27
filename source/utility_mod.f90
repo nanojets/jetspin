@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
  
@@ -17,6 +17,13 @@
  implicit none
  
  private
+ 
+ integer, public, save :: nlbuffservice=0
+ integer, public, save :: nibuffservice=0
+ integer, public, save :: nbuffservice=0
+ logical, public, allocatable, save :: lbuffservice(:)
+ integer, public, allocatable, save :: ibuffservice(:)
+ double precision, public, allocatable, save :: buffservice(:)
   
  double precision, public, parameter :: & 
   Pi=3.141592653589793238462643383279502884d0
@@ -24,13 +31,113 @@
  double precision,save :: hwiener
  integer,save :: winenernodes
  
+ public :: allocate_array_lbuffservice
+ public :: allocate_array_ibuffservice
+ public :: allocate_array_buffservice
  public :: init_random_seed,gauss,wiener_process1,wiener_process2,wiener
  public :: modulvec
  public :: dot
  public :: cross
  public :: sig
+ public :: write_fmtnumb
  
  contains
+ 
+ subroutine allocate_array_lbuffservice(imiomax)
+
+!***********************************************************************
+!     
+!     JETSPIN subroutine for reallocating the service array buff 
+!     which is used within this module
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification August 2015
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: imiomax
+  
+  if(nlbuffservice/=0)then
+    if(imiomax>nlbuffservice)then
+      deallocate(lbuffservice)
+      nlbuffservice=imiomax+100
+      allocate(lbuffservice(0:nlbuffservice))
+    endif
+  else
+    nlbuffservice=imiomax+100
+    allocate(lbuffservice(0:nlbuffservice))
+  endif
+  
+  return
+  
+ end subroutine allocate_array_lbuffservice
+ 
+ subroutine allocate_array_ibuffservice(imiomax)
+
+!***********************************************************************
+!     
+!     JETSPIN subroutine for reallocating the service array buff 
+!     which is used within this module
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2015
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: imiomax
+  
+  if(nibuffservice/=0)then
+    if(imiomax>nibuffservice)then
+      deallocate(ibuffservice)
+      nibuffservice=imiomax+100
+      allocate(ibuffservice(0:nibuffservice))
+    endif
+  else
+    nibuffservice=imiomax+100
+    allocate(ibuffservice(0:nibuffservice))
+  endif
+  
+  return
+  
+ end subroutine allocate_array_ibuffservice
+ 
+ subroutine allocate_array_buffservice(imiomax)
+
+!***********************************************************************
+!     
+!     JETSPIN subroutine for reallocating the service array buff 
+!     which is used within this module
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2015
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: imiomax
+  
+  if(nbuffservice/=0)then
+    if(imiomax>nbuffservice)then
+      deallocate(buffservice)
+      nbuffservice=imiomax+100
+      allocate(buffservice(0:nbuffservice))
+    endif
+  else
+    nbuffservice=imiomax+100
+    allocate(buffservice(0:nbuffservice))
+  endif
+  
+  return
+  
+ end subroutine allocate_array_buffservice
  
  subroutine init_random_seed(myseed)
  
@@ -318,6 +425,71 @@
   return
  
  end function sig
+ 
+ function dimenumb(inum)
+ 
+!***********************************************************************
+!     
+!     JETSPIN function for returning the number of digits
+!     of an integer number
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2015
+!     
+!***********************************************************************
+
+  implicit none
+
+  integer,intent(in) :: inum
+  integer :: dimenumb
+  integer :: i
+  double precision :: tmp
+
+  i=1
+  tmp=dble(inum)
+  do 
+    if(tmp<10.d0)exit
+    i=i+1
+    tmp=tmp/10.d0
+  enddo
+
+  dimenumb=i
+
+  return
+
+ end function dimenumb
+
+ function write_fmtnumb(inum)
+ 
+!***********************************************************************
+!     
+!     JETSPIN function for returning the string of six characters 
+!     with integer digits and leading zeros to the left
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2015
+!     
+!***********************************************************************
+ 
+  implicit none
+
+  integer,intent(in) :: inum
+  character(len=6) :: write_fmtnumb
+  integer :: numdigit,irest
+  double precision :: tmp
+  character(len=22) :: cnumberlabel
+
+  numdigit=dimenumb(inum)
+  irest=6-numdigit
+  write(cnumberlabel,"(a,i8,a,i8,a)")"(a",irest,",i",numdigit,")"
+  write(write_fmtnumb,fmt=cnumberlabel)repeat('0',irest),inum
+
+
+  return
+
+ end function write_fmtnumb
  
  end module utility_mod
 

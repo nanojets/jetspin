@@ -1,93 +1,96 @@
-The JETSPIN README File
-
-JETSPIN is a specific-purpose open-source software for electrospinning 
-simulations of nanofibers. The code was originally written by
-Marco Lauricella at Applicazioni del Calcolo "Mauro Picone" -
-Consiglio Nazionale delle Ricerche with contributions from:
-Ivan Coluzza             University of Vienna              Austria
-Dario Pisignano          University of Salento             Italy 
-Giuseppe Pontrelli       IAC-CNR, Rome                     Italy
-Sauro Succi              IAC-CNR, Rome                     Italy 
-
-The software development process has received funding from the
-European Research Council under the European Union's Seventh Framework
-Programme (FP/2007-2013)/ERC Grant Agreement n. 306357 (NANO-JETS).
-
-This is an experimental code. The authors accept no responsibility
-for the performance of the code or for the correctness of the results.
-
-The code is licensed under Open Software License v. 3.0 (OSL-3.0).
-
-If results obtained with this code are published, an appropriate 
-citation would be:
-
-Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano, 
-Sauro Succi, JETSPIN: A specific-purpose open-source software for 
-electrospinning simulations of nanofibers, Computer Physics 
-Communications, 2015, doi:10.1016/j.cpc.2015.08.013.
-
-Structure
-
-JETSPIN is supplied as a main UNIX directory with 4 subdirectories. 
-All the source code files are contained in the source sub-directory. 
-The examples sub-directory contains different test cases that can help 
-the user to edit new input files. For further details on the input 
-directives the reader is referred to the article:
-
-Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano, 
-Sauro Succi, JETSPIN: A specific-purpose open-source software for 
-electrospinning simulations of nanofibers, Submitted to Computer Physics
-Communications, 2015.
-
-Compiling JETSPIN
-
-The build sub-directory stores a UNIX makefile that assembles the 
-executable versions of the code both in serial and parallel version 
-with different compilers. Note that JETSPIN may be compiled on any UNIX 
-platform. The makefile should be copied (and eventually modified for 
-several common workstations and parallel computers) into the source 
-sub-directory, where the code is compiled and linked. Finally, the 
-binary executable file can be run in the execute sub-directory, which is
-intended to be the 'working' directory from which jobs are submitted for 
-execution and the data files manipulated. A list of targets for several 
-common workstations and parallel computers can be used by the command 
-"make target", where target is one of the following options:
-gfortran      ---> compile in serial mode using the GFortran compiler.
-gfortran-mpi  ---> compile in serial mode using the GFortran compiler 
-                   under the command-line interface Cygwin for Windows.
-cygwin        ---> ompile in serial mode using the GFortran compiler 
-                   under the command-line interface Cygwin for Windows.
-cygwin-mpi    ---> compile in parallel mode using the GFortran compiler 
-                   and the Open Mpi library under the command-line 
-                   interface Cygwin for Windows (note a precompiled 
-                   package of the Open Mpi library is already available 
-                   on Cygwin).
-intel         ---> compile in serial mode using the Intel compiler.
-intel-mpi     ---> compile in parallel mode using the Intel compiler and 
-                   the Intel Mpi library.
-intel-openmpi ---> compile in parallel mode using the Intel compiler and 
-                   the Open Mpi library.
-help          ---> return the list of possible target choices.
-On Windows system we advice the user to compile JETSPIN under the 
-command-line interface Cygwin.Note that a Message Passing Interface 
-Implementation is necessary to compile and run JETSPIN in parallel mode.
-
-Executing JETSPIN
-
-To run JETSPIN, it is necessary first to ensure that the program is
-compiled (from the source sub-directory) and that the file input.dat
-is present in the execute subdirectory. 
-All output data files will be returned to the execute sub-directory.
-Remember that the input file HAS TO BE NAMED 'input.dat' and put in
-the 'execute' Sub-directory. Few example input files are contained in 
-the examples sub-directory which can be used as test cases.
-
-Example command to run JETSPIN in serial mode:
-
-./main.x
-
-Example command to run JETSPIN in parallel mode on 4 CPUs:
-
-mpirun -np 4 ./main.x
-
-
+The JETSPIN README File                                                 
+Version 1.20 (December 2015)                                               
+                                                                        
+JETSPIN is a specific-purpose open-source software for electrospinning  
+simulations of nanofibers. The code was originally written by           
+Marco Lauricella at Applicazioni del Calcolo "Mauro Picone" -           
+Consiglio Nazionale delle Ricerche with contributions from:             
+Ivan Coluzza             University of Vienna              Austria      
+Dario Pisignano          University of Salento             Italy        
+Giuseppe Pontrelli       IAC-CNR, Rome                     Italy        
+Sauro Succi              IAC-CNR, Rome                     Italy        
+                                                                        
+The software development process has received funding from the          
+European Research Council under the European Union's Seventh Framework  
+Programme (FP/2007-2013)/ERC Grant Agreement n. 306357 (NANO-JETS).     
+                                                                        
+This is an experimental code. The authors accept no responsibility      
+for the performance of the code or for the correctness of the results.  
+                                                                        
+The code is licensed under Open Software License v. 3.0 (OSL-3.0).      
+                                                                        
+If results obtained with this code are published, an appropriate        
+citation would be:                                                      
+                                                                        
+Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,    
+Sauro Succi, JETSPIN: A specific-purpose open-source software for       
+electrospinning simulations of nanofibers, Submitted to Computer        
+Physics Communications, 2015.                                           
+                                                                        
+Structure                                                               
+                                                                        
+JETSPIN is supplied as a main UNIX directory with 4 subdirectories.     
+All the source code files are contained in the source sub-directory.    
+The examples sub-directory contains different test cases that can help  
+the user to edit new input files. For further details on the input      
+directives the reader is referred to the article:                       
+                                                                        
+Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,    
+Sauro Succi, JETSPIN: A specific-purpose open-source software for       
+electrospinning simulations of nanofibers, Submitted to Computer        
+Physics Communications, 2015.                                           
+                                                                        
+Compiling JETSPIN                                                       
+                                                                        
+The build sub-directory stores a UNIX makefile that assembles the       
+executable versions of the code both in serial and parallel version     
+with different compilers. Note that JETSPIN may be compiled on any      
+UNIX platform. The makefile should be copied (and eventually modified   
+for several common workstations and parallel computers) into the        
+source sub-directory, where the code is compiled and linked. Finally,   
+the binary executable file can be run in the execute sub-directory,     
+which isintended to be the 'working' directory from which jobs are      
+submitted for execution and the data files manipulated. A list of       
+targets for several common workstations and parallel computers can be    
+used by the command "make target", where target is one of the           
+following options:                                                      
+gfortran      ---> compile in serial mode using the GFortran compiler.  
+gfortran-mpi  ---> compile in serial mode using the GFortran compiler   
+                   under the command-line interface Cygwin for Windows.  
+cygwin        ---> compile in serial mode using the GFortran compiler   
+                   under the command-line interface Cygwin for Windows.  
+cygwin-mpi    ---> compile in parallel mode using the GFortran compiler  
+                   and the Open Mpi library under the command-line      
+                   interface Cygwin for Windows (note a precompiled     
+                   package of the Open Mpi library is already available  
+                   on Cygwin).                                          
+intel         ---> compile in serial mode using the Intel compiler.     
+intel-mpi     ---> compile in parallel mode using the Intel compiler    
+                   and the Intel Mpi library.                           
+intel-openmpi ---> compile in parallel mode using the Intel compiler    
+                   and the Open Mpi library.                            
+help          ---> return the list of possible target choices.          
+On Windows system we advice the user to compile JETSPIN under the       
+command-line interface Cygwin. Note that a Message Passing Interface     
+Implementation is necessary to compile and run JETSPIN in parallel      
+mode.                                                                   
+                                                                        
+Executing JETSPIN                                                       
+                                                                        
+To run JETSPIN, it is necessary first to ensure that the program is     
+compiled (from the source sub-directory) and that the file input.dat    
+is present in the execute subdirectory.                                 
+All output data files will be returned to the execute sub-directory.    
+Remember that the input file HAS TO BE NAMED 'input.dat' and put in     
+the 'execute' Sub-directory. Few example input files are contained in   
+the examples sub-directory which can be used as test cases.             
+                                                                        
+Example command to run JETSPIN in serial mode:                          
+                                                                        
+./main.x                                                                
+                                                                        
+Example command to run JETSPIN in parallel mode on 4 CPUs:              
+                                                                        
+mpirun -np 4 ./main.x                                                   
+                                                                        
+                                                                        

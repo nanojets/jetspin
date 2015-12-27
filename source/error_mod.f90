@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2015
 !     
 !***********************************************************************
  
@@ -46,32 +46,46 @@
   if(idrank==0)then
      select case (kode)
       case (1)
-        write(outp,outf)'ERROR - ktype error'
+        write(outp,outf)'ERROR - ktype error.'
       case (2)
         write(outp,outf)'ERROR - ftype is wrong!'
       case (3)
         write(outp,outf) &
         'ERROR - wrong number of variables for the selected function!'
       case (4)
-        write(outp,outf)'ERROR - ftype is wrong for this integrator'
+        write(outp,outf)'ERROR - ftype is wrong for this integrator.'
       case (5)
-        write(outp,outf)'ERROR - error in reading the input file'
+        write(outp,outf)'ERROR - error in reading input file'
         write(outp,outf2)'ERROR - none FINISH directive found ', &
-         'in the input file'
+         'in the input file.'
       case (6)
-        write(outp,outf)'ERROR - unknown directive in the input file'
+        write(outp,outf)'ERROR - unknown directive in input file.'
       case (7)
-        write(outp,outf)'ERROR - incomplete input file'
+        write(outp,outf)'ERROR - incomplete input file.'
       case (8)
         write(outp,outf2)'ERROR - the resolution of jet ', &
-         'discretization is too small'
+         'discretization is too small.'
       case (9)
         write(outp,outf2)'ERROR - wrong selection of print dat ', &
-        'style in input file'
+        'style in input file.'
       case (10)
-        write(outp,outf)'ERROR - input file named input.dat not found'
+        write(outp,outf)'ERROR - input file named input.dat not found.'
       case (11)
-        write(outp,outf)'ERROR - input file opened with error'
+        write(outp,outf)'ERROR - input file opened with error.'
+      case (12)
+        write(outp,outf2)'ERROR - requested a spline fitting beyond ', &
+         'the spline boundaries.'
+      case (13)
+        write(outp,outf2)'ERROR - in allocating jetptc in ', &
+         'allocate_array_jetptc_mod.'
+      case (14)
+        write(outp,outf2)'ERROR - numerical instability.', &
+         ' Please check the time step.'
+      case (15)
+        write(outp,outf)'ERROR - restart.dat file not found!'
+      case (16)
+        write(outp,outf2)'ERROR - dynamic refinement threshold too small!', &
+         ' Please increase the dynamic refinement threshold.'
       case default
         write(outp,'(a,i18)')'unknown ERROR! code = ',kode
     end select
@@ -90,7 +104,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification July 2015
 !     
 !***********************************************************************
   
@@ -241,7 +255,7 @@
       write(outp,'(a,/)')"WARNING - 'printstat list' should be specified as 'printstat list [keys]'"
     case (59)
       write(outp,'(/,a,g20.10,a,/)') &
-      "The 'print time' value is automatically set equal to ",ddata, ' s'
+      "WARNING - The 'print time' value is automatically set equal to ",ddata, ' s'
     case (60)
       write(outp,'(/,a)') &
       "WARNING - possible [keys] to be used are reported in the following table"
@@ -311,6 +325,10 @@
       "WARNING - * lp                   * length path of jet                         *"
       write(outp,'(a)') &
       "WARNING - * rlp                  * length path of jet / collector distance    *"
+      write(outp,'(a)') &
+      "WARNING - * nref                 * number of performed dynamic refinements    *"
+      write(outp,'(a)') &
+      "WARNING - * angl                 * instantaneus angular aperture              *"
       write(outp,'(a,/)') &
       "WARNING - *********************************************************************"
     case (61)
@@ -325,9 +343,23 @@
       write(outp,'(/,a)')"WARNING - wrong selection of 'print dat style' in input file"
       write(outp,'(2a,/)')"WARNING - the actual selection is : ",trim(adjustl(r_char))
     case (64)
-      write(outp,'(/,a,/)')"WARNING - 'surface tension'  set equal to ",ddata," g s^-2"
+      write(outp,'(/,a,g20.10,a,/)')"WARNING - 'surface tension'  set equal to ",ddata," g s^-2"
     case (65)
-      write(outp,'(/,a,/)')"WARNING - 'external potential' set equal to ",ddata," statV"
+      write(outp,'(/,a,g20.10,a,/)')"WARNING - 'external potential' set equal to ",ddata," statV"
+    case (66)
+      write(outp,'(/,a,g20.10,a,/)')"WARNING - 'dynamic refinement threshold' set equal to ",ddata," cm"
+    case (67)
+      write (r_char,'(i10)')nint(ddata)
+      write(outp,'(/,2a,/)')"WARNING - numerical instability at nstep ",trim(adjustl(r_char))
+    case (68)
+      write(outp,'(/,a,g20.10,a,/)') &
+      "WARNING - 'dynamic refinement every' value automatically set equal to ",ddata, ' s'
+    case (69)
+      write(outp,'(/,2a,g20.10,a,/)')"WARNING - JETSPIN is restarting from 'restart.dat' file", &
+      "WARNING - The simulation restarts at the simulation time ",ddata, ' s'
+    case (70)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'variable mass typemass 3' is availabe only in refinement mode activated"
     case default
       write(outp,'(/,a,i8,/)')"unknown WARNING! code = ",kode
   end select

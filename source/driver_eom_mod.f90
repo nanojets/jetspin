@@ -28,8 +28,8 @@
  
  contains
  
- subroutine xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,fstocvx,fstocvy,fstocvz) 
+ subroutine xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k,fstocvx,fstocvy,fstocvz) 
  
 !***********************************************************************
 !     
@@ -52,6 +52,8 @@
   double precision, allocatable, dimension (:), intent(in) ::  yvx
   double precision, allocatable, dimension (:), intent(in) ::  yvy
   double precision, allocatable, dimension (:), intent(in) ::  yvz
+  double precision, allocatable, dimension (:), intent(in) ::  yvl
+  double precision, allocatable, dimension (:,:), intent(in) ::  ycf
   double precision, intent(inout) ::  fxx
   double precision, intent(inout) ::  fyy
   double precision, intent(inout) ::  fzz
@@ -63,18 +65,18 @@
   double precision, optional, intent(inout) ::  fstocvy
   double precision, optional, intent(inout) ::  fstocvz
   double precision, intent(in) :: timesub
-  
+  integer, intent(in) :: k
   
   select case(systype)
     case (1)
-      call eom1(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub) 
+      call eom1(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k)
     case (3)
-      call eom3(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub) 
+      call eom3(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k)
     case (4)
-      call eom4(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,fstocvx,fstocvy,fstocvz)
+      call eom4(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k,fstocvx,fstocvy,fstocvz)
     case default
       call error(2)
   end select
@@ -83,8 +85,8 @@
   
  end subroutine xpsys 
  
- subroutine xpsys_pos(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fxx,fyy,fzz,timesub) 
+ subroutine xpsys_pos(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fxx,fyy,fzz,timesub,k) 
        
 !***********************************************************************
 !     
@@ -108,16 +110,19 @@
   double precision, allocatable, dimension (:), intent(in) ::  yvx
   double precision, allocatable, dimension (:), intent(in) ::  yvy
   double precision, allocatable, dimension (:), intent(in) ::  yvz
+  double precision, allocatable, dimension (:), intent(in) ::  yvl
+  double precision, allocatable, dimension (:,:), intent(in) ::  ycf
   double precision, intent(inout) ::  fxx
   double precision, intent(inout) ::  fyy
   double precision, intent(inout) ::  fzz
   double precision, intent(in) :: timesub
+  integer, intent(in) :: k
   
   
   select case(systype)
     case (4)
-      call eom4_pos(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fxx,fyy,fzz,timesub)
+      call eom4_pos(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fxx,fyy,fzz,timesub,k)
     case default
       call error(2)
   end select
@@ -126,8 +131,8 @@
   
  end subroutine xpsys_pos
  
- subroutine xpsys_stress(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fst,timesub) 
+ subroutine xpsys_stress(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fst,timesub,k) 
   
 !***********************************************************************
 !     
@@ -151,14 +156,17 @@
   double precision, allocatable, dimension (:), intent(in) ::  yvx
   double precision, allocatable, dimension (:), intent(in) ::  yvy
   double precision, allocatable, dimension (:), intent(in) ::  yvz
+  double precision, allocatable, dimension (:), intent(in) ::  yvl
+  double precision, allocatable, dimension (:,:), intent(in) ::  ycf
   double precision, intent(inout) ::  fst
   double precision, intent(in) :: timesub
+  integer, intent(in) :: k
   
   
   select case(systype)
     case (4)
-      call eom4_stress(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-       fst,timesub)
+      call eom4_stress(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf, &
+       fst,timesub,k)
     case default
       call error(2)
   end select

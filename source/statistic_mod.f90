@@ -7,51 +7,54 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
  
  use version_mod,           only : time_world
+ use utility_mod,           only : Pi
  use nanojet_mod,           only : icrossec,inpjet,resolution,systype,&
                              insvx,insvy,insvz,jetxx,jetyy,jetzz,jetvx,&
                              jetvy,jetvz,jetst,jetms,jetch,npjet,g,h,&
-                             chargescale,jetcr,lengthscale,massscale,tao
+                             chargescale,jetcr,lengthscale,massscale,&
+                             tao,jetpt,jetvl
+ use dynamic_refinement_mod,only : irefinementdone
  use support_functions_mod, only : compute_crosssec,compute_length_path
  
  implicit none
  
  private
  
- integer, public, parameter :: nmaxstatdata=38
+ integer, public, parameter :: nmaxstatdata=40
  
  double precision, public, save, dimension(nmaxstatdata) :: statdata
  
- double precision, save :: addedcharge=0.d0
- double precision, save :: removedcharge=0.d0
+ double precision, public, save :: addedcharge=0.d0
+ double precision, public, save :: removedcharge=0.d0
  
- double precision, save :: countericurr=0.d0 
- double precision, save :: counterecurr=0.d0
+ double precision, public, save :: countericurr=0.d0 
+ double precision, public, save :: counterecurr=0.d0
  double precision, public, save :: meanicurr=0.d0
  double precision, public, save :: meanecurr=0.d0
  
- double precision, save :: addedmass=0.d0
- double precision, save :: removedmass=0.d0
+ double precision, public, save :: addedmass=0.d0
+ double precision, public, save :: removedmass=0.d0
  
- double precision, save :: counterimass=0.d0
- double precision, save :: counteremass=0.d0
+ double precision, public, save :: counterimass=0.d0
+ double precision, public, save :: counteremass=0.d0
  double precision, public, save :: meanimass=0.d0
  double precision, public, save :: meanemass=0.d0
  
- integer, save :: ncounterevel=0
- integer, save :: ncounterevelrel=0
- double precision, save :: counterevel=0.d0
- double precision, save :: counterevelrel=0.d0
+ integer, public, save :: ncounterevel=0
+ integer, public, save :: ncounterevelrel=0
+ double precision, public, save :: counterevel=0.d0
+ double precision, public, save :: counterevelrel=0.d0
  double precision, public, save :: meanevel=0.d0
  double precision, public, save :: meanevelrel=0.d0
  
- integer, save :: ncountergeom=0
- double precision, save :: counterelen=0.d0
- double precision, save :: counterecross=0.d0
+ integer, public, save :: ncountergeom=0
+ double precision, public, save :: counterelen=0.d0
+ double precision, public, save :: counterecross=0.d0
  double precision, public, save :: meanelen=0.d0
  double precision, public, save :: meanecross=0.d0
  
@@ -61,12 +64,12 @@
  
  integer, public, save :: reprinttime=0
  
- integer, save :: ncounterivel=0
- double precision, save :: counterivel=0.d0
+ integer, public, save :: ncounterivel=0
+ double precision, public, save :: counterivel=0.d0
  double precision, public, save :: meanivel=0.d0
  
- integer, save :: ncounterlpath=0
- double precision, save :: counterlpath=0.d0
+ integer, public, save :: ncounterlpath=0
+ double precision, public, save :: counterlpath=0.d0
  double precision, public, save :: meanlpath=0.d0
  
  public :: statistic_driver
@@ -74,7 +77,8 @@
  
  contains
  
- subroutine statistic_driver(timesub,tstepsub,nstepsub,ladd,lrem)
+ subroutine statistic_driver(timesub,tstepsub,nstepsub,nremovedsub, &
+  ladd,lrem)
  
 !***********************************************************************
 !     
@@ -83,14 +87,14 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
   
   implicit none
   
   double precision, intent(in) :: timesub,tstepsub
-  integer, intent(in) :: nstepsub
+  integer, intent(in) :: nstepsub,nremovedsub
   logical, intent(in) :: ladd,lrem
   
 ! update the counter for all the observables
@@ -99,13 +103,13 @@
   call store_addedmass(ladd)
   call store_mass_init(ladd)
   
-  call store_removedcharge(lrem)
-  call store_current_end(lrem)
-  call store_removedmass(lrem)
-  call store_mass_end(lrem)
-  call store_vel_end(lrem)
-  call store_velrel_end(lrem)
-  call store_geometry_end(lrem)
+  call store_removedcharge(lrem,nremovedsub)
+  call store_current_end(lrem,nremovedsub)
+  call store_removedmass(lrem,nremovedsub)
+  call store_mass_end(lrem,nremovedsub)
+  call store_vel_end(lrem,nremovedsub)
+  call store_velrel_end(lrem,nremovedsub)
+  call store_geometry_end(lrem,nremovedsub)
   
   call store_vel_init()
   call store_length_path()
@@ -136,7 +140,7 @@
   
   
 ! compute all the observables
-  call compute_crosssec(jetxx,jetyy,jetzz,jetcr)
+  call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
   call compute_current_init(tempint)
   call compute_mass_init(tempint)
   
@@ -204,6 +208,13 @@
   statdata(36)=meanivel*(lengthscale/tao)
   statdata(37)=meanlpath*lengthscale
   statdata(38)=meanlpath*lengthscale/h
+  statdata(39)=dble(irefinementdone)
+  if(jetxx(ipoint)/=0.d0)then
+    statdata(40)=2.d0*datan(dsqrt(jetyy(ipoint)**2.d0+ &
+     jetzz(ipoint)**2.d0)/dabs(jetxx(ipoint)))*(180.d0/Pi)
+  else
+    statdata(40)=0.d0
+  endif
   
 ! update the counter
   icount=icount+1
@@ -235,7 +246,7 @@
   
  end subroutine store_addedcharge
  
- subroutine store_removedcharge(lrem)
+ subroutine store_removedcharge(lrem,nremovedsub)
  
 !***********************************************************************
 !     
@@ -244,15 +255,22 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
   
   implicit none
   
   logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
   
-  if(lrem)removedcharge=removedcharge+jetch(inpjet-1)
+  integer :: ipoint
+  
+  if(lrem)then
+    do ipoint=inpjet-nremovedsub,inpjet-1
+      removedcharge=removedcharge+jetch(ipoint)
+    enddo
+  endif
   
   return
   
@@ -304,7 +322,7 @@
   
  end subroutine compute_current_init
  
- subroutine store_current_end(lrem)
+ subroutine store_current_end(lrem,nremovedsub)
  
 !***********************************************************************
 !     
@@ -312,15 +330,22 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
  
   implicit none
   
   logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
   
-  if(lrem)counterecurr=counterecurr+jetch(inpjet-1)
+  integer :: ipoint
+  
+  if(lrem)then
+    do ipoint=inpjet-nremovedsub,inpjet-1
+      counterecurr=counterecurr+jetch(ipoint)
+    enddo
+  endif
   
   return
   
@@ -373,7 +398,7 @@
   
  end subroutine store_addedmass
  
- subroutine store_removedmass(lrem)
+ subroutine store_removedmass(lrem,nremovedsub)
  
 !***********************************************************************
 !     
@@ -382,15 +407,22 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
   
   implicit none
   
   logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
   
-  if(lrem)removedmass=removedmass+jetms(inpjet-1)
+  integer :: ipoint
+  
+  if(lrem)then
+    do ipoint=inpjet-nremovedsub,inpjet-1
+      removedmass=removedmass+jetms(ipoint)
+    enddo
+  endif
   
   return
   
@@ -442,7 +474,7 @@
   
  end subroutine compute_mass_init
  
- subroutine store_mass_end(lrem)
+ subroutine store_mass_end(lrem,nremovedsub)
  
 !***********************************************************************
 !     
@@ -450,15 +482,22 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
  
   implicit none
   
   logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
   
-  if(lrem)counteremass=counteremass+jetms(inpjet-1)
+  integer :: ipoint
+  
+  if(lrem)then
+    do ipoint=inpjet-nremovedsub,inpjet-1
+      counteremass=counteremass+jetms(ipoint)
+    enddo
+  endif
   
   return
   
@@ -497,7 +536,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2015
 !     
 !***********************************************************************
  
@@ -507,7 +546,7 @@
   
   
   call compute_length_path(jetxx,jetyy,jetzz, &
-  tempmod0)
+  jetpt,tempmod0)
   
   ncounterlpath=ncounterlpath+1
   counterlpath=counterlpath+tempmod0
@@ -531,8 +570,11 @@
   
   implicit none
   
-  
-  meanlpath=counterlpath/dble(ncounterlpath)
+  if(ncounterlpath/=0)then
+    meanlpath=counterlpath/dble(ncounterlpath)
+  else
+    meanlpath=0.d0
+  endif
   
   ncounterlpath=0
   counterlpath=0.d0
@@ -589,8 +631,11 @@
   
   implicit none
   
-  
-  meanivel=counterivel/dble(ncounterivel)
+  if(ncounterivel/=0)then
+    meanivel=counterivel/dble(ncounterivel)
+  else
+    meanivel=0.d0
+  endif
   
   ncounterivel=0
   counterivel=0.d0
@@ -599,7 +644,7 @@
   
  end subroutine compute_vel_init
  
- subroutine store_vel_end(lrem)
+ subroutine store_vel_end(lrem,nremovedsub)
  
 !***********************************************************************
 !     
@@ -608,27 +653,34 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
  
   implicit none
   
   logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
+  
+  integer :: ipoint
   double precision :: tempmod0
   
   if(.not.lrem)return
   
-  select case(systype)
-    case(1:2)
-      tempmod0=jetvx(inpjet-1)
-    case default
-      tempmod0=dsqrt(jetvx(inpjet-1)**2.d0+ &
-       jetvy(inpjet-1)**2.d0+jetvz(inpjet-1)**2.d0)
-  end select
+  do ipoint=inpjet-nremovedsub,inpjet-1
   
-  ncounterevel=ncounterevel+1
-  counterevel=counterevel+tempmod0
+    select case(systype)
+      case(1:2)
+        tempmod0=jetvx(ipoint)
+      case default
+        tempmod0=dsqrt(jetvx(ipoint)**2.d0+ &
+         jetvy(ipoint)**2.d0+jetvz(ipoint)**2.d0)
+    end select
+    
+    ncounterevel=ncounterevel+1
+    counterevel=counterevel+tempmod0
+    
+  enddo
   
   return
   
@@ -649,8 +701,11 @@
   
   implicit none
   
-  
-  meanevel=counterevel/dble(ncounterevel)
+  if(ncounterevel/=0)then
+    meanevel=counterevel/dble(ncounterevel)
+  else
+    meanevel=0.d0
+  endif
   
   ncounterevel=0
   counterevel=0.d0
@@ -659,7 +714,7 @@
   
  end subroutine compute_vel_end
  
- subroutine store_velrel_end(lrem)
+ subroutine store_velrel_end(lrem,nremovedsub)
  
 !***********************************************************************
 !     
@@ -671,29 +726,36 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
  
   implicit none
   
   logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
+  
+  integer :: ipoint
   double precision :: tempmod0
   
   if(.not.lrem)return
   
-  select case(systype)
-    case(1:2)
-      continue
-      tempmod0=jetvx(inpjet-1)-jetvx(inpjet)
-    case default
-      tempmod0=dsqrt((jetvx(inpjet-1)-jetvx(inpjet))**2.d0+ &
-       (jetvy(inpjet-1)-jetvy(inpjet))**2.d0+(jetvz(inpjet-1)- &
-        jetvz(inpjet))**2.d0)
-  end select
+  do ipoint=inpjet-nremovedsub,inpjet-1
   
-  ncounterevelrel=ncounterevelrel+1
-  counterevelrel=counterevelrel+tempmod0
+    select case(systype)
+      case(1:2)
+        continue
+        tempmod0=jetvx(ipoint)-jetvx(ipoint+1)
+      case default
+        tempmod0=dsqrt((jetvx(ipoint)-jetvx(ipoint+1))**2.d0+ &
+         (jetvy(ipoint)-jetvy(ipoint+1))**2.d0+(jetvz(ipoint)- &
+          jetvz(ipoint+1))**2.d0)
+    end select
+  
+    ncounterevelrel=ncounterevelrel+1
+    counterevelrel=counterevelrel+tempmod0
+  
+  enddo
   
   return
   
@@ -714,8 +776,11 @@
   
   implicit none
   
-  
-  meanevelrel=counterevelrel/dble(ncounterevelrel)
+  if(ncounterevelrel/=0)then
+    meanevelrel=counterevelrel/dble(ncounterevelrel)
+  else
+    meanevelrel=0.d0
+  endif
   
   ncounterevelrel=0
   counterevelrel=0.d0
@@ -724,7 +789,7 @@
   
  end subroutine compute_velrel_end
  
- subroutine store_geometry_end(lrem)
+ subroutine store_geometry_end(lrem,nremovedsub)
  
 !***********************************************************************
 !     
@@ -733,31 +798,37 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification August 2015
 !     
 !***********************************************************************
  
   implicit none
   
   logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
+  
+  integer :: ipoint
   double precision :: tempmod0,tempmod1
   
   if(.not.lrem)return
   
-  select case(systype)
-    case(1:2)
-      tempmod0=jetxx(inpjet-1)-jetxx(inpjet)
-    case default
-      tempmod0=dsqrt((jetxx(inpjet-1)-jetxx(inpjet))**2.d0+ &
-       (jetyy(inpjet-1)-jetyy(inpjet))**2.d0+(jetzz(inpjet-1)- &
-        jetzz(inpjet))**2.d0)
-  end select
+  do ipoint=inpjet-nremovedsub,inpjet-1
+    select case(systype)
+      case(1:2)
+        tempmod0=jetxx(ipoint)-jetxx(ipoint+1)
+      case default
+        tempmod0=dsqrt((jetxx(ipoint)-jetxx(ipoint+1))**2.d0+ &
+         (jetyy(ipoint)-jetyy(ipoint+1))**2.d0+(jetzz(ipoint)- &
+          jetzz(ipoint+1))**2.d0)
+      end select
   
-  tempmod1=dsqrt((icrossec**2.d0)*resolution/tempmod0)
+    tempmod1=dsqrt((icrossec**2.d0)*resolution/tempmod0)
   
-  ncountergeom=ncountergeom+1
-  counterelen=counterelen+tempmod0
-  counterecross=counterecross+tempmod1
+    ncountergeom=ncountergeom+1
+    counterelen=counterelen+tempmod0
+    counterecross=counterecross+tempmod1
+    
+  enddo
   
   return
   
@@ -778,8 +849,13 @@
   
   implicit none
   
-  meanelen=counterelen/dble(ncountergeom)
-  meanecross=counterecross/dble(ncountergeom)
+  if(ncountergeom/=0)then
+    meanelen=counterelen/dble(ncountergeom)
+    meanecross=counterecross/dble(ncountergeom)
+  else
+    meanelen=0.d0
+    meanecross=0.d0
+  endif
   
   ncountergeom=0
   counterelen=0.d0

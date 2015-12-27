@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2015
 !     
 !***********************************************************************
  
@@ -24,6 +24,8 @@
  integer, public, save :: mxchunk
  integer, public, save :: mystart
  integer, public, save :: myend
+ integer, public, save :: memystart
+ integer, public, save :: memyend
  integer, public, save, allocatable, dimension(:) :: inidom,enddom,minidom,menddom
  
  public :: print_version
@@ -134,7 +136,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2015
 !     
 !***********************************************************************
   
@@ -149,8 +151,11 @@
   enddom(:)=npjet
   menddom(:)=npjet
   
-  mystart=inpjet
-  myend=npjet
+  mystart=inidom(idrank)
+  myend=enddom(idrank)
+  
+  memystart=minidom(idrank)
+  memyend=menddom(idrank)
   
   return
   

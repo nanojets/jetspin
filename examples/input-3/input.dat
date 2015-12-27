@@ -13,7 +13,7 @@
  print xyz 1.d-4                            !s
  print xyz maxnumber 400                    
 
- print list t x vn vc yz n curn curc
+ print list t x vn vc yz n angl lp rc
  printstat list t x vn yz n curn curc
   
  inserting yes

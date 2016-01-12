@@ -24,8 +24,8 @@ citation would be:
                                                                         
 Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,    
 Sauro Succi, JETSPIN: A specific-purpose open-source software for       
-electrospinning simulations of nanofibers, Computer Physics 
-Communications, 197 (2015), pp. 227-238.                                           
+electrospinning simulations of nanofibers, Computer Physics             
+Communications, 197 (2015), pp. 227-238.                                
                                                                         
 Structure                                                               
                                                                         

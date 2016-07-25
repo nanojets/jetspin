@@ -6,7 +6,7 @@
  
  timestep 1.d-8
  
- print time 1.d-2
+ print time 1.d-3
  final time 0.2d0
  seed 317
  
@@ -17,7 +17,10 @@
  
  dynamic refinement yes 
  dynamic refinement every 1.d-3
- dynamic refinement threshold 0.2d0
+ dynamic refinement threshold 0.4d0
+ 
+ print pdb frame 1.d-3
+ print pdb rescalepdb 1.d1
  
  print list t x vn vc yz n nref angl
  printstat list t x vn yz n curn curc
@@ -25,6 +28,11 @@
  inserting yes
  removing yes
  gravity yes
+ 
+ multiple step yes
+ multiple step every 100
+ primary cutoff 1.d0
+ maximum displacement 1.d-1
 
  points 1
  initial length 0.02                         !cm

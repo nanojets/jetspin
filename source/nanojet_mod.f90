@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification December 2015
+!     last modification January 2016
 !     
 !***********************************************************************
 
@@ -32,16 +32,30 @@
  integer, public, parameter :: incnpjet=100
  integer, public, save :: systype
  integer, public, save :: units
- integer, public, save :: ncutoff
  integer, public, save :: insertmode
  integer, public, save :: myseed=1
  integer, public, save :: naddtrack=0
  integer, public, save :: nremtrack=0
  integer, public, save :: typemass=0
  integer, public, save :: typedragvel=0
- logical, public, save :: ldragvel=.true.
+ integer, public, save :: nmulstep=0
+ integer, save, public :: nmulstepdone=0
+ integer, save, public :: nmultisteperror=0
+ logical, public, save :: ldragvel=.false.
  logical, public, save :: doallocate
  logical, public, save :: doreorder
+ logical, public, save :: lbreakup=.false.
+ logical, public, save :: lfieldtype=.false.
+ logical, public, save :: lfieldfreq=.false.
+ logical, public, save :: lneighlistdo=.true.
+ logical, public, save :: lmultisteperror=.false.
+ logical, public, save :: lmaxdispl=.false.
+ logical, public, save :: ltaoelectr=.false.
+ logical, public, save :: lreadrest=.false.
+ logical, public, save :: lfirstmass=.true.
+ logical, public, save :: lflorentz=.false.
+ logical, public, save :: lmagneticfield=.false.
+ double precision, public, save :: multisteperror=0.d0
  double precision, public, save :: q=0.d0
  double precision, public, save :: sqrq=0.d0
  double precision, public, save :: v=0.d0
@@ -53,17 +67,14 @@
  double precision, public, save :: Li=0.d0
  double precision, public, save :: Gr=0.d0
  double precision, public, save :: lengthscale
- double precision, public, save :: imassa!=2.25487812711407d-4 !grammi
- double precision, public, save :: imassadev=0.d0 !grammi^0.5 cm^1.5 sec^-1
+ double precision, public, save :: imassa!=2.25487812711407d-4 !g
  double precision, public, save :: lencorrmassa=0.0d0
- double precision, public, save :: icharge!=9.37212742146083d-4 !grammi^0.5 cm^1.5 sec^-1
- double precision, public, save :: ichargedev=0.d0 !grammi^0.5 cm^1.5 sec^-1
- double precision, public, save :: lencorrcharge=0.d0
- double precision, public, save :: mu!=12211.32d0 !grammi cm^-1 sec^-1
- double precision, public, save :: G!=122132.d0 ! grammi cm^-1 sec^-2
- double precision, public, save :: surfacet!=700.d0 ! grammi sec^-2
+ double precision, public, save :: icharge!=9.37212742146083d-4 !g^0.5 cm^1.5 sec^-1
+ double precision, public, save :: mu!=12211.32d0 !g cm^-1 sec^-1
+ double precision, public, save :: G!=122132.d0 ! g cm^-1 sec^-2
+ double precision, public, save :: surfacet!=700.d0 ! g sec^-2
  double precision, public, save :: icrossec!=1.5d-4 ! cm
- double precision, public, save :: V0!=30.69980124d0 ! cm^0.5 grammi^0.5 sec^-1
+ double precision, public, save :: V0!=30.69980124d0 ! cm^0.5 g^0.5 sec^-1
  double precision, public, save :: h!=2.d0 ! cm
  double precision, public, save :: ilength!=3.19d-3 ! cm
  double precision, public, save :: ivelocity!=0.d0 ! cm s^-1
@@ -83,8 +94,9 @@
  double precision, public, save :: aird=0.d0 
  double precision, public, save :: airv=0.d0 
  double precision, public, save :: velext=0.d0 ! cm s^-1
- double precision, public, save :: current=0.d0 !grammi^0.5 cm^1.5 sec^-2
+ double precision, public, save :: current=0.d0 !g^0.5 cm^1.5 sec^-2
  double precision, public, save :: timedeposition=0.d0 !sec
+ double precision, public, save :: ultimatestrength=0.d0
  double precision, public, save :: meancharge
  double precision, public, save :: meanmass
  double precision, public, save :: regq
@@ -93,6 +105,7 @@
  double precision, public, save :: chargescale
  double precision, public, save :: tstep=0.d0
  double precision, public, save :: xyzrescale=1.d0
+ double precision, public, save :: pdbrescale=1.d0
  double precision, public, save :: insvx=0.d0
  double precision, public, save :: insvy=0.d0
  double precision, public, save :: insvz=0.d0
@@ -106,9 +119,17 @@
  double precision, public, save :: lenprobmassa=0.d0
  double precision, public, save :: massratio=1.d0
  double precision, public, save :: lenthresholdbead=0.d0
+ double precision, public, save :: fieldfreq=0.d0
+ double precision, public, save :: maxdispl=0.d0
+ double precision, public, save :: taoelectr=0.d0
+ double precision, public, save, dimension(3) :: BLor=(/0.d0,0.d0,0.d0/)
+ double precision, public, save :: KLor=0.d0
+ double precision, public, save :: oldgaussn,corr,radcorr
  
  logical, allocatable, public, save :: jetbd(:)
+ logical, allocatable, public, save :: jetbr(:)
  logical, allocatable, public, save :: jetfr(:)
+ logical, allocatable, public, save :: jetfm(:)
  integer, allocatable, public, save :: jetlb(:)
  double precision, allocatable, public, save :: jetpt(:)
  double precision, allocatable, public, save :: jetxx(:)
@@ -118,8 +139,8 @@
  double precision, allocatable, public, save :: jetvx(:)
  double precision, allocatable, public, save :: jetvy(:)
  double precision, allocatable, public, save :: jetvz(:)
- double precision, allocatable, public, save :: jetms(:) !grammi
- double precision, allocatable, public, save :: jetch(:) !grammi^0.5 cm^1.5 sec^-1
+ double precision, allocatable, public, save :: jetms(:) !g
+ double precision, allocatable, public, save :: jetch(:) !g^0.5 cm^1.5 sec^-1
  double precision, allocatable, public, save :: jetcr(:) ! cm
  double precision, allocatable, public, save :: jetvl(:) ! cm^3
  
@@ -146,7 +167,8 @@
  logical, public, save :: lremove=.false.
  logical, public, save :: linserted=.true. 
  logical, public, save :: liniperturb=.false.
- logical, public, save :: lncutoff=.false.
+ logical, public, save :: lmultiplestep=.false.
+ logical, public, save :: ldcutoff=.false.
  logical, public, save :: lpfreq=.false.
  logical, public, save :: lpampl=.false.
  logical, public, save :: lairdrag=.false.
@@ -157,22 +179,22 @@
  logical, public, save :: llift=.false.
  logical, public, save :: lmyseed=.false.
  logical, public, save :: lHBfluid=.false.
+ logical, public, save :: lKVfluid=.false.
  logical, public, save :: lconsistency=.false.
  logical, public, save :: lfindex=.false.
  logical, public, save :: ltstep=.false.
  logical, public, save :: lgravity=.false.
  logical, public, save :: lmassavariable=.false.
- logical, public, save :: lchargevariable=.false.
- logical, public, save :: limassadev=.false.
  logical, public, save :: llencorrmassa=.false.
- logical, public, save :: llencorrcharge=.false.
- logical, public, save :: lichargedev=.false.
  logical, public, save :: lxyzrescale=.false.
+ logical, public, save :: lpdbrescale=.false.
+ logical, public, save :: lpdbtagbeads=.false.
  logical, public, save :: ltrackbeads=.false.
  logical, public, save :: lreordertrack=.false.
  logical, public, save :: luppot=.false.
  logical, public, save :: lmirror=.false.
  logical, public, save :: ltagbeads=.false.
+ logical, public, save :: lultimatestrength=.false.
  
  
  public :: set_resolution_length
@@ -233,13 +255,13 @@
     call warning(23,resolution)
   endif
   
-! set the cutoff for the Coulomb force if it was not set in input file
-  if(.not.lncutoff)then
-     dcutoff=h
-     ncutoff=ceiling(dcutoff/resolution)
-     call warning(30,dcutoff)
-  else
-    ncutoff=ceiling(dcutoff/resolution)
+! if it was not set in input file, set the cutoff of the primary shell 
+! for the Coulomb forces which are explicitly computed by direct sum
+  if(lmultiplestep)then
+    if(.not.ldcutoff)then
+       dcutoff=h
+       call warning(30,dcutoff)
+    endif
   endif
   
 ! the length step has to be grater than the cross section radius
@@ -253,7 +275,7 @@
   
  end subroutine set_resolution_length
  
- subroutine allocate_jet() 
+ subroutine allocate_jet(miomax) 
  
 !***********************************************************************
 !     
@@ -268,6 +290,10 @@
   
   implicit none
   
+  logical, intent(in), optional :: miomax
+  
+  
+  
   
   select case(systype)
     case(1:2)
@@ -278,10 +304,18 @@
       ndimension = 3
   end select
   
-  mxnpjet=incnpjet
+  if(present(miomax))then
+    if(.not. miomax)then
+      mxnpjet=incnpjet
+    endif
+  else
+    mxnpjet=incnpjet
+  endif
   mxnpjet=max(mxnpjet,npjet)
+  
   call set_mxchunk(mxnpjet)
   allocate(jetfr(0:mxnpjet))
+  if(lmultiplestep)allocate(jetfm(0:mxnpjet))
   allocate(jetpt(0:mxnpjet))
   allocate(jetxx(0:mxnpjet))
   allocate(jetyy(0:mxnpjet))
@@ -296,9 +330,9 @@
   allocate(jetvl(0:mxnpjet))
   if(ltrackbeads .and. idrank==0)allocate(jetlb(0:mxnpjet))
   if(typemass==3 .or. ltagbeads)allocate(jetbd(0:mxnpjet))
+  if(lbreakup)allocate(jetbr(0:mxnpjet))
   
   doallocate=.true.
-  
   
   return
   
@@ -320,6 +354,7 @@
   implicit none
   
   deallocate(jetfr)
+  if(lmultiplestep)deallocate(jetfm)
   deallocate(jetpt)
   deallocate(jetxx)
   deallocate(jetyy)
@@ -334,6 +369,7 @@
   deallocate(jetvl)
   if(ltrackbeads .and. idrank==0)deallocate(jetlb)
   if(typemass==3 .or. ltagbeads)deallocate(jetbd)
+  if(lbreakup)deallocate(jetbr)
   
   return
   
@@ -409,6 +445,11 @@
   endif
   jetfr(:)=.false.
   jetfr(newinit:newend)=lbuffservice(newinit:newend)
+  
+  if(doallocate .and. lmultiplestep)then
+    deallocate(jetfm)
+    allocate(jetfm(0:mxnpjet))
+  endif
   
   call allocate_array_buffservice(newend)
   
@@ -518,6 +559,16 @@
     jetbd(newinit:newend)=lbuffservice(newinit:newend)
   endif
   
+  if(lbreakup)then
+    lbuffservice(newinit:newend)=jetbr(oldinit:oldend)
+    if(doallocate)then
+      deallocate(jetbr)
+      allocate(jetbr(0:mxnpjet))
+    endif
+    jetbr(:)=.false.
+    jetbr(newinit:newend)=lbuffservice(newinit:newend)
+  endif
+  
   if(ltrackbeads .and. idrank==0)then
     call allocate_array_ibuffservice(newend)
     ibuffservice(newinit:newend)=jetlb(oldinit:oldend)
@@ -536,7 +587,7 @@
   
  end subroutine reallocate_jet
  
- subroutine set_initial_jet(tstep,initime,endtime,refinementthreshold, &
+ subroutine set_initial_jet(initime,endtime,refinementthreshold, &
   refbeadstartfit)
  
 !***********************************************************************
@@ -552,7 +603,7 @@
   
   implicit none
   
-  double precision, intent(inout) :: tstep,initime,endtime, &
+  double precision, intent(inout) :: initime,endtime, &
    refinementthreshold,refbeadstartfit
   integer :: i
   double precision :: di
@@ -588,7 +639,7 @@
   
   lengthscale=dsqrt((chargescale**2.d0)/(Pi*(icrossec**2.d0)*G))
   
-  call set_dimensionless_patameters(tstep,initime,endtime)
+  call set_dimensionless_patameters(initime,endtime)
   
   hresolution=resolution/2.d0
   thresolution=resolution/2.d0*3.d0
@@ -638,7 +689,11 @@
   if(typemass==3 .or. ltagbeads)then
     jetbd(:)=.false.
   endif
-    
+  
+  if(lbreakup)then
+    jetbr(:)=.false.
+  endif
+  
   if(ltrackbeads .and. idrank==0)then
     jetlb(:)=-1
     do i=0,npjet
@@ -664,7 +719,7 @@
     jetvl(i)=ivolume
   enddo
   
-  call conv_dimensionless_unit_jet(tstep,initime,endtime, &
+  call conv_dimensionless_unit_jet(initime,endtime, &
    refinementthreshold,refbeadstartfit)
   call add_initial_perturbation()
   
@@ -672,7 +727,7 @@
   
  end subroutine set_initial_jet
  
- subroutine set_dimensionless_patameters(tstep,initime,endtime)
+ subroutine set_dimensionless_patameters(initime,endtime)
  
 !***********************************************************************
 !     
@@ -687,7 +742,7 @@
   
   implicit none
   
-  double precision, intent(inout) :: tstep,initime,endtime
+  double precision, intent(inout) :: initime,endtime
   
   tao=(mu/G)
   
@@ -697,13 +752,17 @@
   fvere=Pi*(icrossec*mu)**2.d0/(massscale*G*lengthscale)
   Hg=h/lengthscale
   Lrg=resolution/lengthscale
+  if(lflorentz)then
+    KLor=(chargescale)/(dsqrt(massscale)*dsqrt(lengthscale)* &
+     29979245800.d0)
+  endif
   if(systype/=1)then
     ks=surfacet*(mu**2.d0)/(massscale*(G**2.d0))
     ksre=surfacet*Pi*(mu**2.d0)*(icrossec**2.d0)/(massscale*(G**2.d0)* &
      (lengthscale**2.d0))
   endif
   if(lairdrag)then
-    Li=aird*(lengthscale**2.d0)/massscale
+    Li=aird*(lengthscale**3.d0)/massscale
     Lire=aird*Pi*(icrossec**2.d0)/massscale
     att=tanfriction*tao*(lengthscale**0.905d0)* &
      ((lengthscale/tao)**0.19d0)/massscale
@@ -718,7 +777,7 @@
   
  end subroutine set_dimensionless_patameters
  
- subroutine conv_dimensionless_unit_jet(tstep,initime,endtime, &
+ subroutine conv_dimensionless_unit_jet(initime,endtime, &
   refinementthreshold,refbeadstartfit)
  
 !***********************************************************************
@@ -728,13 +787,13 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification May 2015
+!     last modification January 2016
 !     
 !***********************************************************************
   
   implicit none
   
-  double precision, intent(inout) :: tstep,initime,endtime
+  double precision, intent(inout) :: initime,endtime
   double precision, intent(inout) :: refinementthreshold, &
    refbeadstartfit
   
@@ -771,17 +830,16 @@
   meancharge=meancharge/chargescale
   imassa=imassa/massscale*(lengthscale**3.d0)
   icharge=icharge/chargescale*(lengthscale**3.d0)
+  BLor(1:3)=BLor(1:3)*dsqrt(lengthscale)*tao/dsqrt(massscale)
+  if(lultimatestrength)then
+    ultimatestrength=ultimatestrength/G
+  endif
   if(ltagbeads)then
     lenthresholdbead=lenthresholdbead/lengthscale
   endif
   if(lmassavariable)then
     lencorrmassa=lencorrmassa/lengthscale
-    imassadev=imassadev/massscale*(lengthscale**3.d0)
   endif
-  if(lchargevariable)then
-    lencorrcharge=lencorrcharge/lengthscale
-    ichargedev=ichargedev/chargescale*(lengthscale**3.d0)
-  endif  
   ivolume=ivolume/(lengthscale**3.d0)
   pampl=pampl/lengthscale
   if(liniperturb)then
@@ -795,10 +853,29 @@
   else
     xyzrescale=xyzrescale*lengthscale
   endif
+  if(.not.lpdbrescale)then
+    pdbrescale=1.d0
+  else
+    pdbrescale=pdbrescale*lengthscale
+  endif
   if(luppot)then
     kuppot=kuppot*(tao**2.d0)/(massscale)
   endif
-  
+  if(lfieldfreq)then
+    fieldfreq=fieldfreq*tao
+  endif
+  if(ltaoelectr)then
+    taoelectr=taoelectr/tao
+  endif
+  if(lmultiplestep)then
+    dcutoff=dcutoff/lengthscale
+    maxdispl=maxdispl/lengthscale
+  endif
+  if(typemass==3)then
+    lenprobmassa=lenprobmassa/lengthscale
+    massratio=massratio/massscale*(lengthscale**3.d0)
+  endif
+    
   return
   
  end subroutine conv_dimensionless_unit_jet
@@ -831,7 +908,7 @@
   
  end subroutine deconv_dimensionless_unit_jet
  
- subroutine add_jetbead(nstepsub,timesub,tstepsub,ladd)
+ subroutine add_jetbead(nstepsub,timesub,ladd)
  
 !***********************************************************************
 !     
@@ -846,13 +923,13 @@
   implicit none
   
   integer, intent(in) :: nstepsub
-  double precision, intent(in) :: timesub,tstepsub
+  double precision, intent(in) :: timesub
   logical, intent(inout) :: ladd
   
   double precision :: tempmod,tempmod0,actualimass,actualicharge
   
   if(.not.linserting)return
-  timedeposition=timedeposition+tstepsub
+  timedeposition=timedeposition+tstep
   if(.not.linserted)then
 !   if a new bead was inserted but blocked check if its time evolution
 !   should be started
@@ -926,6 +1003,7 @@
       jetch(npjet)=jetch(npjet-1)
       jetvl(npjet)=jetvl(npjet-1)
       if(typemass==3 .or. ltagbeads)jetbd(npjet)=jetbd(npjet-1)
+      if(lbreakup)jetbr(npjet)=jetbr(npjet-1)
       if(ltrackbeads .and. idrank==0)jetlb(npjet)=jetlb(npjet-1)
       jetfr(npjet-1)=.false.
       jetxx(npjet-1)=resolution
@@ -937,22 +1015,14 @@
       jetvz(npjet-1)=0.d0
       call tag_beads()
       call extract_actual_massdensity(actualimass,timesub)
-      call extract_actual_chargedensity(actualicharge)
       jetms(npjet-1)=actualimass*ivolume 
-      jetch(npjet-1)=actualicharge*ivolume
-      if(typemass==3)then
-        if(jetbd(npjet-1))then
-          jetvl(npjet-1)=ivolume*massratio
-        else
-          jetvl(npjet-1)=ivolume
-        endif
-      else
-        jetvl(npjet-1)=ivolume
-      endif
+      jetch(npjet-1)=icharge*ivolume
+      jetvl(npjet-1)=ivolume
       if(ltrackbeads .and. idrank==0)jetlb(npjet-1)=trackbeads_number()
       ladd=.true.
       naddtrack=naddtrack+1
       timedeposition=0.d0
+      if(lmultiplestep)lneighlistdo=.true.
 !     the new bead is blocked until a given condition is not satisfied
       linserted=.false.
       call compute_posnoinserted(jetxx,jetyy,jetzz)
@@ -1062,6 +1132,7 @@
       if(jetxx(ipoint)>=h)then
         newinpjet=ipoint
         lrem=.true.
+        if(lmultiplestep)lneighlistdo=.true.
       endif
     enddo
     
@@ -1242,7 +1313,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification December 2015
+!     last modification July 2016
 !     
 !***********************************************************************
  
@@ -1252,54 +1323,23 @@
   double precision, intent(in), optional :: timesub
   
   logical, save :: lfirst=.true.
-  double precision, save :: oldgaussn,corr,radcorr
-  double precision :: actualgaussn,newgaussn
+  
+  double precision :: actualgaussn,newgaussn,volumenp
   
   actualmass=0.d0
-  if(lfirst)then
+  if(lfirst .and. lfirstmass)then
     lfirst=.false.
+    lfirstmass=.false.
     if(lmassavariable .and. ldevelopers)then
-      if(lencorrmassa==0.d0)then
-        corr=0.d0
-        radcorr=1.d0
-      else
-!       we consider a spatial correlation
-        corr=dexp(-1.d0*resolution/lencorrmassa)
-        radcorr=dsqrt(1.d0-corr**2.d0)
-      endif
       if(idrank==0)then
-        if(typemass==1)then
-          call random_number(newgaussn)
-          oldgaussn=newgaussn
-          actualgaussn=newgaussn
-          if(actualgaussn<lenprobmassa)then
-            actualmass=imassa
-          else
-            actualmass=imassa*massratio
-          endif
-        elseif(typemass==2)then
-          oldgaussn=0.d0
-          if(oldgaussn<lencorrmassa)then
-            actualmass=imassa
-          else
-            actualmass=imassa*massratio
-          endif
-        elseif(typemass==3 .and. ltagbeads)then
-          oldgaussn=0.d0
+        if(ltagbeads)then
           if(jetbd(npjet-1))then
-            actualmass=imassa*massratio
+            volumenp=(4.d0/3.d0)*Pi*lenprobmassa**3.d0
+            actualmass=(imassa*(ivolume-volumenp)+massratio*volumenp)/ &
+             ivolume
           else
             actualmass=imassa
           endif
-        else
-          actualmass=0.d0
-!         negative mass are not permitted
-          do while(actualmass<=0.d0)
-            newgaussn=gauss()
-            actualgaussn=newgaussn
-            actualmass=imassa+imassadev*actualgaussn
-          enddo
-          oldgaussn=newgaussn
         endif
       endif
       call bcast_world_d(actualmass)
@@ -1309,38 +1349,14 @@
   else
     if(lmassavariable .and. ldevelopers)then
       if(idrank==0)then
-        if(typemass==1)then
-          call random_number(newgaussn)
-          actualgaussn=corr*oldgaussn+radcorr*newgaussn
-          oldgaussn=actualgaussn
-          if(actualgaussn<lenprobmassa)then
-            actualmass=imassa
-          else
-            actualmass=imassa*massratio
-          endif
-        elseif(typemass==2)then
-          oldgaussn=oldgaussn+resolution
-          if(oldgaussn<lencorrmassa)then
-            actualmass=imassa
-          else
-            actualmass=imassa*massratio
-            oldgaussn=0.d0
-          endif
-        elseif(typemass==3 .and. ltagbeads)then
+        if(ltagbeads)then
           if(jetbd(npjet-1))then
-            actualmass=imassa*massratio
+            volumenp=(4.d0/3.d0)*Pi*lenprobmassa**3.d0
+            actualmass=(imassa*(ivolume-volumenp)+massratio*volumenp)/ &
+             ivolume
           else
             actualmass=imassa
           endif
-        else
-          actualmass=0.d0
-!         negative mass are not permitted  
-          do while(actualmass<=0.d0)
-            newgaussn=gauss()
-            actualgaussn=corr*oldgaussn+radcorr*newgaussn
-            actualmass=imassa+imassadev*actualgaussn
-          enddo
-          oldgaussn=actualgaussn
         endif
       endif
       call bcast_world_d(actualmass)
@@ -1352,74 +1368,6 @@
   return
   
  end subroutine extract_actual_massdensity
- 
- subroutine extract_actual_chargedensity(actualcharge)
- 
-!***********************************************************************
-!     
-!     JETSPIN subroutine for extracting randomically the charge of 
-!     the last inserted bead at the nozzle
-!     
-!     licensed under Open Software License v. 3.0 (OSL-3.0)
-!     author: M. Lauricella
-!     last modification December 2015
-!     
-!***********************************************************************
- 
-  implicit none
-  
-  double precision, intent(out) :: actualcharge
-  
-  logical, save :: lfirst=.true.
-  double precision, save :: oldgaussn,corr,radcorr
-  double precision :: actualgaussn,newgaussn
-  
-  if(lfirst)then
-    lfirst=.false.
-    if(lchargevariable .and. ldevelopers)then
-      if(lencorrcharge==0.d0)then
-        corr=0.d0
-        radcorr=1.d0
-      else
-!       we consider a spatial correlation
-        corr=dexp(-1.d0*resolution/lencorrcharge)
-        radcorr=dsqrt(1.d0-corr**2.d0)
-      endif
-      if(idrank==0)then
-        actualcharge=0.d0
-!       negative charge are not permitted 
-        do while(actualcharge<=0.d0)
-          newgaussn=gauss()
-          actualgaussn=newgaussn
-          actualcharge=icharge+ichargedev*actualgaussn
-        enddo
-        oldgaussn=newgaussn
-      endif
-      call bcast_world_d(actualcharge)
-    else
-      actualcharge=icharge
-    endif
-  else
-    if(lchargevariable .and. ldevelopers)then
-      if(idrank==0)then
-        actualcharge=0.d0
-!       negative charge are not permitted        
-        do while(actualcharge<=0.d0)
-          newgaussn=gauss()
-          actualgaussn=corr*oldgaussn+radcorr*newgaussn
-          actualcharge=icharge+ichargedev*actualgaussn
-        enddo
-        oldgaussn=newgaussn
-      endif
-      call bcast_world_d(actualcharge)
-    else
-      actualcharge=icharge
-    endif
-  endif
-  
-  return
-  
- end subroutine extract_actual_chargedensity
  
  function trackbeads_number()
  

@@ -7,7 +7,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification December 2015
+!     last modification January 2016
 !     
 !***********************************************************************
  
@@ -17,21 +17,21 @@
  use utility_mod,           only : write_fmtnumb,pi
  use nanojet_mod,           only : airdragamp,doreorder,tao,aird,airv,&
                              chargescale,consistency,findex,g,h,&
-                             icharge,ichargedev,icrossec,ilength,&
-                             imassa,imassadev,inpjet,istress,ivelocity,&
-                             lencorrcharge,lencorrmassa,lengthscale,&
-                             massscale,mu,ncutoff,npjet,pampl,pfreq,&
+                             icharge,icrossec,ilength,&
+                             imassa,inpjet,istress,ivelocity,&
+                             lencorrmassa,lengthscale,&
+                             massscale,mu,jetbr,npjet,pampl,pfreq,&
                              resolution,surfacet,systype,tstep,units,&
                              V0,velext,yieldstress,dcutoff,lairdrag,&
-                             lairvel,lchargevariable,lchargevariable,&
+                             lairvel,&
                              lconsistency,lfindex,lgravity,lHBfluid,&
                              lilengt,liniperturb,linserting,listress,&
                              livelocity,lmassavariable,lmyseed,&
-                             lncutoff,lnpjet,lremove,lresolution,&
+                             ldcutoff,lnpjet,lremove,lresolution,&
                              lxyzrescale,lyieldstress,myseed,&
                              xyzrescale,laird,lairdragamp,lairv,lg,lh,&
-                             licharge,lichargedev,licrossec,limass,&
-                             limassadev,llencorrcharge,llencorrmassa,&
+                             licharge,licrossec,limass,&
+                             llencorrmassa,lKVfluid,&
                              lmu,lpampl,lpfreq,lsurfacet,lsystype,&
                              ltstep,lunits,lv0,att,fve,gr,hg,ks,li,lrg,&
                              q,v,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,&
@@ -39,16 +39,25 @@
                              lire,ltrackbeads,lreordertrack, &
                              naddtrack,nremtrack,linserted, &
                              allocate_jet,deallocate_jet,mxnpjet, &
-                             luppot,kuppot,lmirror,typemass, &
+                             luppot,kuppot,lmirror, &
                              lenprobmassa,massratio,ldragvel, &
                              typedragvel,jetbd,ltagbeads,ldevelopers, &
-                             lenthresholdbead
+                             lenthresholdbead,lbreakup,lfieldtype, &
+                             fieldfreq,lfieldfreq,ultimatestrength,& 
+                             lultimatestrength,lpdbrescale,pdbrescale, &
+                             nmulstep,lmultiplestep,lmultisteperror, &
+                             lmaxdispl,maxdispl,taoelectr,ltaoelectr, &
+                             lpdbtagbeads,nmulstepdone,nmultisteperror,&
+                             multisteperror,lreadrest,oldgaussn,corr, &
+                             radcorr,lfirstmass,lneighlistdo,jetfr, &
+                             jetfm,BLor,lflorentz,KLor,lmagneticfield
  use dynamic_refinement_mod, only : lrefinement,lrefinementthreshold,&
                              refinementthreshold,lrefinementevery, &
                              irefinementevery,lrefinementstart, &
                              irefinementstart,lrefbeadstart, &
-                             refbeadstartfit, &
-                             irefinementdone,refinementcons
+                             refbeadstartfit,irefinementdone, &
+                             llenthresholdbead
+ use electric_field_mod,    only : nfieldtype
  use integrator_mod,        only : integrator,endtime,lendtime,&
                              lintegrator
  use statistic_mod,         only : nmaxstatdata,reprinttime,statdata,&
@@ -78,8 +87,10 @@
  logical, public, save :: lprintlist2=.false.
  logical, public, save :: lprintxyz=.false.
  logical, public, save :: lprintxyzsing=.false.
+ logical, public, save :: lprintpdbsing=.false.
  logical, public, save :: lprintdat=.false.
  logical, public, save :: lprintstatdat=.false.
+ logical, save :: lnmulstep=.false.
  double precision, save :: printtime
  logical, public, save :: lprinttime=.false.
  logical, public, save :: lsprintdat=.false.
@@ -88,11 +99,13 @@
  integer, public, save :: eprinttime=0
  integer, public, save :: iprintxyz=0
  integer, public, save :: iprintxyzsing=0
+ integer, public, save :: iprintpdbsing=0
  integer, public, save :: iprintdat=0
  integer, public, save :: sprintdat=1
  integer, public, save :: maxnumxyz=100
  double precision, save :: printxyz
  double precision, save :: printxyzsing
+ double precision, save :: printpdbsing
  double precision, save :: printdat
  double precision, save :: refinementevery
  double precision, save :: refinementstart=0.d0
@@ -102,7 +115,6 @@
  character(len=20) , public, allocatable :: printarg(:)
  character(len=20) , public, allocatable :: printarg2(:)
  
- logical :: lreadrest=.false.
  logical :: lrestartreset=.false.
  logical :: ldragvelfound=.false.
  
@@ -124,9 +136,10 @@
  public :: write_xyz_frame
  public :: close_xyz_file
  public :: write_xyz_singlefile
+ public :: write_pdb_singlefile
  public :: write_restart_file
  public :: read_restart_file
-
+ 
  contains
  
  subroutine allocate_print()
@@ -186,7 +199,7 @@
   write(iu,of)"*         =========================================================           *"
   write(iu,of)"*                                                                             *"
   write(iu,of)"*                                                                             *"
-  write(iu,of)"*    Version 1.20 (December 2015)                                             *"
+  write(iu,of)"*    Version 1.21 (July 2016)                                                 *"
   if(ldevelopers) &
   write(iu,of)"*    Compiled in developer mode                                               *"
   write(iu,of)"*                                                                             *"
@@ -302,21 +315,23 @@
     " g cm^-1 s^",trim(adjustl(r_char))
   endif
   if(lmassavariable)then
-  write(iu,'(a,g20.10,a,g20.10,a)')"variable mass deviation    = ", &
-   imassadev," = ",imassadev*massscale/(lengthscale**3.d0)," g cm^-3"
-  write(iu,'(a,g20.10,a,g20.10,a)')"variable mass correlation  = ", &
+  write(iu,'(a,g20.10,a,g20.10,a)')"variable mass distance NP  = ", &
    lencorrmassa," = ",lencorrmassa*lengthscale," cm"
-  endif
-  if(lchargevariable)then
-  write(iu,'(a,g20.10,a,g20.10,a)')"variable charge deviation  = ", &
-   ichargedev," = ",ichargedev*chargescale/(lengthscale**3.d0), &
-    " statC cm^-3"
-  write(iu,'(a,g20.10,a,g20.10,a)')"variable charge correlation= ", &
-   lencorrcharge," = ",lencorrcharge*lengthscale," cm"
   endif
   if(lrefinementthreshold)then
   write(iu,'(a,g20.10,a,g20.10,a)')"dynamic refinement threshold= ", &
    refinementthreshold," = ",refinementthreshold*lengthscale," cm"
+  endif
+  if(lmagneticfield)then
+  write(iu,'(a,g20.10,a,g20.10,a)')"magnetic field along x    = ", &
+   BLor(1)," = ",BLor(1)*dsqrt(massscale)/(dsqrt(lengthscale)*tao), &
+   " cm^-0.5 g^0.5 s^-1"
+  write(iu,'(a,g20.10,a,g20.10,a)')"magnetic field along y    = ", &
+   BLor(2)," = ",BLor(2)*dsqrt(massscale)/(dsqrt(lengthscale)*tao), &
+   " cm^-0.5 g^0.5 s^-1"
+  write(iu,'(a,g20.10,a,g20.10,a)')"magnetic field along z    = ", &
+   BLor(3)," = ",BLor(3)*dsqrt(massscale)/(dsqrt(lengthscale)*tao), &
+   " cm^-0.5 g^0.5 s^-1"
   endif
   
   write(iu,*)
@@ -351,6 +366,9 @@
    " in Reneker model"
   write(iu,'(a,g20.10)')"H     = ",Hg
   write(iu,'(a,g20.10)')"Lstep = ",Lrg
+  if(lflorentz)then
+    write(iu,'(a,g20.10)')"KLor = ",KLor
+  endif
   if(lgravity)then
     write(iu,'(a,g20.10)')"Fg    = ",Gr
   endif
@@ -508,6 +526,16 @@
     legendobs='mlc  =  mutual length segment at the collector   '
   elseif(printcodsub(iarg)==40)then
     legendobs='angl =  instantaneus angular aperture            '
+  elseif(printcodsub(iarg)==41)then
+    legendobs='mxst =  maximum stress along the jet             '
+  elseif(printcodsub(iarg)==42)then
+    legendobs='mxsx =  x position of the jet maximum stress     '
+  elseif(printcodsub(iarg)==43)then
+    legendobs='nms  =  number of multiple step procedure done   '
+  elseif(printcodsub(iarg)==44)then
+    legendobs='erms =  maximum error of multiple step approach  '
+  elseif(printcodsub(iarg)==45)then
+    legendobs='v    =  value of the external electric potential '
   endif
   legendobs=adjustl(legendobs)
   
@@ -556,7 +584,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification December 2015
+!     last modification January 2016
 !     
 !***********************************************************************
  
@@ -576,6 +604,7 @@
   integrator=0   
   nprintlist=0
   nprintlist2=0
+  nfieldtype=0
   ilength=0.d-0
   istress=0.d0 
   ivelocity=0.d0 
@@ -591,7 +620,6 @@
   tstep=0.d0
   pfreq=0.d0
   pampl=0.d0
-  ncutoff=0
   myseed=1
   sprintdat=1
   aird=0.d0
@@ -600,9 +628,12 @@
   findex=1.d0
   consistency=1.d0 
   refinementthreshold=0.d0
-  xyzrescale=0.d0
+  xyzrescale=1.d0
+  pdbrescale=0.d0
   refinementstart=0.d0
   kuppot=0.d0
+  fieldfreq=0.d0
+  ultimatestrength=0.d0
   
   lsystype=.false.
   lintegrator=.false.
@@ -630,19 +661,23 @@
   liniperturb=.false.
   lpfreq=.false.
   lpampl=.false.
-  lncutoff=.false.
+  ldcutoff=.false.
   lairdrag=.false.
   lairdragamp=.false.
   lremove=.false.
   lmyseed=.false.
   lprintxyz=.false.
   lprintxyzsing=.false.
+  lprintpdbsing=.false.
   lxyzrescale=.false.
+  lpdbrescale=.false.
+  lpdbtagbeads=.false.
   lprintdat=.false.
   laird=.false.
   lairv=.false.
   lairvel=.false.
   lHBfluid=.false.
+  lKVfluid=.false.
   lgravity=.false.
   lprintstatdat=.false.
   
@@ -663,6 +698,17 @@
   ltagbeads=.false.
   
   ldragvelfound=.false.
+  
+  lbreakup=.false.
+  lfieldtype=.false.
+  lfieldfreq=.false.
+  lultimatestrength=.false.
+  lnmulstep=.false.
+  lmultisteperror=.false.
+  
+  llenthresholdbead=.false.
+  lflorentz=.false.
+  lmagneticfield=.false.
   
 ! note the parameters are read only by the zero node
   if(idrank==0)then
@@ -697,9 +743,25 @@
         cycle
       elseif(redstring(1:1)==' ')then
         cycle
-      elseif(findstring('cutoff',directive,inumchar,maxlen))then
-        lncutoff=.true.
-        dcutoff=dblstr(directive,maxlen,inumchar)
+      elseif(findstring('primary',directive,inumchar,maxlen))then
+        if(findstring('cutoff',directive,inumchar,maxlen))then
+          ldcutoff=.true.
+          dcutoff=dblstr(directive,maxlen,inumchar)
+        endif
+      elseif(findstring('maximum',directive,inumchar,maxlen))then
+        if(findstring('displ',directive,inumchar,maxlen))then
+          lmaxdispl=.true.
+          maxdispl=dblstr(directive,maxlen,inumchar)
+        endif
+      elseif(findstring('multiple',directive,inumchar,maxlen))then
+        if(findstring('step',directive,inumchar,maxlen))then
+          if(findstring('yes',directive,inumchar,maxlen))then
+            lmultiplestep=.true.
+          elseif(findstring('every',directive,inumchar,maxlen))then
+            lnmulstep=.true.
+            nmulstep=intstr(directive,maxlen,inumchar)
+          endif
+        endif
       elseif(findstring('system',directive,inumchar,maxlen))then
         systype=intstr(directive,maxlen,inumchar)
         lsystype=.true.
@@ -739,6 +801,24 @@
           lremove=.true.
         elseif(findstring('no',directive,inumchar,maxlen))then
           lremove=.false.
+        else
+          call warning(61,dble(iline),redstring)
+          ltestread=.true.
+        endif
+      elseif(findstring('lorentz',directive,inumchar,maxlen).and. &
+       ldevelopers)then
+        if(findstring('yes',directive,inumchar,maxlen))then
+          lflorentz=.true.
+        else
+          lflorentz=.false.
+        endif
+      elseif(findstring('magnetic',directive,inumchar,maxlen).and. &
+       ldevelopers)then
+        if(findstring('field',directive,inumchar,maxlen))then
+          lmagneticfield=.true.
+          BLor(1)=dblstr(directive,maxlen,inumchar)
+          BLor(2)=dblstr(directive,maxlen,inumchar)
+          BLor(3)=dblstr(directive,maxlen,inumchar)
         else
           call warning(61,dble(iline),redstring)
           ltestread=.true.
@@ -851,9 +931,20 @@
           ltestread=.true.
         endif
       elseif(findstring('external',directive,inumchar,maxlen))then
-        if(findstring('potential',directive,inumchar,maxlen))then
-          V0=dblstr(directive,maxlen,inumchar)
-          lV0=.true.
+        if(findstring('potential',directive,inumchar,maxlen))then  
+          if(findstring('type',directive,inumchar,maxlen))then
+            nfieldtype=intstr(directive,maxlen,inumchar)
+            lfieldtype=.true.
+          elseif(findstring('freq',directive,inumchar,maxlen))then
+            fieldfreq=dblstr(directive,maxlen,inumchar)
+            lfieldfreq=.true.
+          elseif(findstring('time',directive,inumchar,maxlen))then
+            taoelectr=dblstr(directive,maxlen,inumchar)
+            ltaoelectr=.true.
+          else
+            V0=dblstr(directive,maxlen,inumchar)
+            lV0=.true.
+          endif
         else
           call warning(61,dble(iline),redstring)
           ltestread=.true.
@@ -914,14 +1005,44 @@
           if(findstring('maxnum',directive,inumchar,maxlen))then
             maxnumxyz=intstr(directive,maxlen,inumchar)
           elseif(findstring('frame',directive,inumchar,maxlen))then
+            if(findstring('rescalexyz',directive,inumchar,maxlen))then
+              call warning(61,dble(iline),redstring)
+              ltestread=.true.
+            endif
             printxyzsing=dblstr(directive,maxlen,inumchar)
             lprintxyzsing=.true.
           elseif(findstring('rescalexyz',directive,inumchar,maxlen))then
+            if(findstring('frame',directive,inumchar,maxlen))then
+              call warning(61,dble(iline),redstring)
+              ltestread=.true.
+            endif
             lxyzrescale=.true.
             xyzrescale=dblstr(directive,maxlen,inumchar)
           else
             printxyz=dblstr(directive,maxlen,inumchar)
             lprintxyz=.true.
+          endif
+        elseif(findstring('pdb',directive,inumchar,maxlen))then
+          if(findstring('frame',directive,inumchar,maxlen))then
+            if(findstring('rescalepdb',directive,inumchar,maxlen))then
+              call warning(61,dble(iline),redstring)
+              ltestread=.true.
+            endif
+            printpdbsing=dblstr(directive,maxlen,inumchar)
+            lprintpdbsing=.true.
+          elseif(findstring('rescalepdb',directive,inumchar,maxlen))then
+            if(findstring('frame',directive,inumchar,maxlen))then
+              call warning(61,dble(iline),redstring)
+              ltestread=.true.
+            endif
+            lpdbrescale=.true.
+            pdbrescale=dblstr(directive,maxlen,inumchar)
+          elseif(findstring('tagbead',directive,inumchar,maxlen) .and. &
+           ldevelopers)then
+            lpdbtagbeads=.true.
+          else
+            call warning(61,dble(iline),redstring)
+            ltestread=.true.
           endif
         elseif(findstring('binary',directive,inumchar,maxlen))then
           if(findstring('removed',directive,inumchar,maxlen))then
@@ -975,45 +1096,33 @@
           call warning(61,dble(iline),redstring)
           ltestread=.true.
         endif
+      elseif(findstring('kvfluid',directive,inumchar,maxlen))then
+        if(findstring('yes',directive,inumchar,maxlen))then
+          lKVfluid=.true.
+        elseif(findstring('no',directive,inumchar,maxlen))then
+          lKVfluid=.false.
+        else
+          call warning(61,dble(iline),redstring)
+          ltestread=.true.
+        endif
       elseif(findstring('variable',directive,inumchar,maxlen) .and. &
        ldevelopers)then
         if(findstring('mass',directive,inumchar,maxlen))then
           if(findstring('yes',directive,inumchar,maxlen))then
             lmassavariable=.true.
-          elseif(findstring('deviation',directive,inumchar,maxlen))then
-            limassadev=.true.
-            imassadev=dblstr(directive,maxlen,inumchar)
-          elseif(findstring('correlation',directive,inumchar,maxlen) &
+            ltagbeads=.true.
+          elseif(findstring('npdist',directive,inumchar,maxlen) &
            )then
             llencorrmassa=.true.
             lencorrmassa=dblstr(directive,maxlen,inumchar)
           elseif(findstring('no',directive,inumchar,maxlen))then
             lmassavariable=.false.
-          elseif(findstring('typemass',directive,inumchar,maxlen))then
-            typemass=intstr(directive,maxlen,inumchar)
-          elseif(findstring('lenprobmassa',directive,inumchar,maxlen))then
+          elseif(findstring('npradius',directive,inumchar,maxlen))then
             lenprobmassa=dblstr(directive,maxlen,inumchar)
-          elseif(findstring('massratio',directive,inumchar,maxlen))then
+          elseif(findstring('npmass',directive,inumchar,maxlen))then
             massratio=dblstr(directive,maxlen,inumchar)
           else
             call warning(61,dble(iline),redstring)
-          endif
-        elseif(findstring('charge',directive,inumchar,maxlen) &
-         )then
-          if(findstring('yes',directive,inumchar,maxlen))then
-            lchargevariable=.true.
-          elseif(findstring('deviation',directive,inumchar,maxlen))then
-            lichargedev=.true.
-            ichargedev=dblstr(directive,maxlen,inumchar)
-          elseif(findstring('correlation',directive,inumchar,maxlen) &
-           )then
-            llencorrcharge=.true.
-            lencorrcharge=dblstr(directive,maxlen,inumchar)
-          elseif(findstring('no',directive,inumchar,maxlen))then
-            lmassavariable=.false.
-          else
-            call warning(61,dble(iline),redstring)
-            ltestread=.true.
           endif
         else
           call warning(61,dble(iline),redstring)
@@ -1024,15 +1133,14 @@
           if(findstring('yes',directive,inumchar,maxlen))then
             lrefinement=.true.
             ltagbeads=.true.
-            if(ldevelopers)then
-              refinementcons=intstr(directive,maxlen,inumchar)
-            endif
           elseif(findstring('threshold',directive,inumchar,maxlen))then
             lrefinementthreshold=.true.
             refinementthreshold=dblstr(directive,maxlen,inumchar)
             lrefbeadstart=.true.
             refbeadstartfit=refinementthreshold
-            lenthresholdbead=refbeadstartfit
+          elseif(findstring('anchor',directive,inumchar,maxlen))then
+            llenthresholdbead=.true.
+            lenthresholdbead=dblstr(directive,maxlen,inumchar)
           elseif(findstring('every',directive,inumchar,maxlen))then
             lrefinementevery=.true.
             refinementevery=dblstr(directive,maxlen,inumchar)
@@ -1076,6 +1184,20 @@
         if(findstring('yes',directive,inumchar,maxlen))then
           lmirror=.true.
         endif
+      elseif(findstring('breakup',directive,inumchar,maxlen) .and. &
+       ldevelopers)then
+        if(findstring('yes',directive,inumchar,maxlen))then
+          lbreakup=.true.
+        endif
+      elseif(findstring('ultimate',directive,inumchar,maxlen) .and. &
+       ldevelopers)then
+        if(findstring('strength',directive,inumchar,maxlen))then
+          lultimatestrength=.true.
+          ultimatestrength=dblstr(directive,maxlen,inumchar)
+        else
+          call warning(61,dble(iline),redstring)
+          ltestread=.true.
+        endif
       elseif(findstring('finish',directive,inumchar,maxlen))then
         lredo=.false.
       else
@@ -1083,13 +1205,13 @@
         call error(6)
       endif
     enddo
-  
+    
     close(inputunit)
     
   endif
   
 ! send the read parameters to all the nodes
-  call bcast_world_l(lncutoff)
+  call bcast_world_l(ldcutoff)
   call bcast_world_d(dcutoff)
   call bcast_world_i(systype)
   call bcast_world_l(lsystype)
@@ -1153,8 +1275,13 @@
   call bcast_world_i(maxnumxyz)
   call bcast_world_d(printxyz)
   call bcast_world_l(lprintxyz)
+  call bcast_world_l(lprintxyzsing)
   call bcast_world_d(xyzrescale)
   call bcast_world_l(lxyzrescale)
+  call bcast_world_l(lprintpdbsing)
+  call bcast_world_d(pdbrescale)
+  call bcast_world_l(lpdbrescale)
+  call bcast_world_l(lpdbtagbeads)
   call bcast_world_l(lprintdat)
   call bcast_world_d(printdat)
   call bcast_world_i(sprintdat)
@@ -1166,20 +1293,14 @@
   call bcast_world_d(airv)
   call bcast_world_d(velext)
   call bcast_world_l(lHBfluid)
+  call bcast_world_l(lKVfluid)
   call bcast_world_l(lconsistency)
   call bcast_world_l(lfindex)
   call bcast_world_d(consistency)
   call bcast_world_d(findex)
   call bcast_world_l(lmassavariable)
-  call bcast_world_d(imassadev)
   call bcast_world_d(lencorrmassa)
-  call bcast_world_l(lchargevariable)
-  call bcast_world_d(ichargedev)
-  call bcast_world_d(lencorrcharge)
-  call bcast_world_l(limassadev)
   call bcast_world_l(llencorrmassa)
-  call bcast_world_l(lichargedev)
-  call bcast_world_l(llencorrcharge)
   call bcast_world_l(lprintstatdat)
   call bcast_world_l(ltestread)
   call bcast_world_l(lrefinement)
@@ -1198,14 +1319,31 @@
   call bcast_world_l(luppot)
   call bcast_world_d(kuppot)
   call bcast_world_l(lmirror)
-  call bcast_world_i(typemass)
   call bcast_world_d(lenprobmassa)
   call bcast_world_d(massratio)
   call bcast_world_l(ldragvel)
   call bcast_world_i(typedragvel)
-  call bcast_world_i(refinementcons)
   call bcast_world_d(lenthresholdbead)
   call bcast_world_l(ldragvelfound)
+  call bcast_world_l(lbreakup)
+  call bcast_world_l(lfieldtype)
+  call bcast_world_l(lfieldfreq)
+  call bcast_world_i(nfieldtype)
+  call bcast_world_d(fieldfreq)
+  call bcast_world_l(lultimatestrength)
+  call bcast_world_d(ultimatestrength)
+  call bcast_world_l(lmultiplestep)
+  call bcast_world_i(nmulstep)
+  call bcast_world_l(lnmulstep)
+  call bcast_world_l(lmultisteperror)
+  call bcast_world_d(maxdispl)
+  call bcast_world_l(lmaxdispl)
+  call bcast_world_d(taoelectr)
+  call bcast_world_l(ltaoelectr)
+  call bcast_world_l(llenthresholdbead)
+  call bcast_world_l(lflorentz)
+  call bcast_world_l(lmagneticfield)
+  call bcast_world_darr(BLor,3)
   
   if(lprintlist)then
     if(idrank/=0)allocate(printlist(nprintlist))
@@ -1346,15 +1484,6 @@
   endif
   
   if(lmassavariable .and. ldevelopers)then
-    if(.not.limassadev)then
-      call warning(50)
-      ltest=.true.
-    else
-      if(imassadev<0.d0)then
-        call warning(54,imassadev)
-        ltest=.true.
-      endif
-    endif
     if(.not.llencorrmassa)then
       call warning(51)
       ltest=.true.
@@ -1366,28 +1495,8 @@
     endif
   endif
   
-  if(lchargevariable .and. ldevelopers)then
-    if(.not.lichargedev)then
-      call warning(52)
-      ltest=.true.
-    else
-      if(ichargedev<0.d0)then
-        call warning(56,ichargedev)
-        ltest=.true.
-      endif
-    endif
-    if(.not.llencorrcharge)then
-      call warning(53)
-      ltest=.true.
-    else
-      if(lencorrcharge<0.d0)then
-        call warning(57,lencorrcharge)
-        ltest=.true.
-      endif
-    endif
-  endif
   if(lsprintdat)then
-    if(sprintdat>6 .or. sprintdat<1)then
+    if(sprintdat>7 .or. sprintdat<1)then
       call warning(63,dble(sprintdat))
       ltest=.true.
     endif
@@ -1398,11 +1507,111 @@
         ltest=.true.
       endif
     endif
-  endif  
+  endif
+  
+  if(lrefinement)then
+    if(.not. lrefinementevery)then
+      call warning(82)
+      ltest=.true.
+    endif
+    if(.not. lrefinementthreshold)then
+      call warning(83)
+      ltest=.true.
+    endif
+  endif
+  
+  if(lKVfluid .and. lHBfluid)then
+    call warning(87)
+    ltest=.true.
+  endif
+  
+  if(lKVfluid)then
+    if(systype/=1 .and. systype/=3)then
+      call warning(89,dble(systype))
+      ltest=.true.
+    endif
+  endif
   
   if(ldevelopers)then
-    if(typemass==3 .and. (.not. ltagbeads))then
+    if(lmassavariable .and. lrefinement)then
+      if(llenthresholdbead)then
+        lenthresholdbead=lencorrmassa
+        call warning(84,lenthresholdbead)
+      endif
+    endif
+    if(lmassavariable .and. (.not. ltagbeads))then
       call warning(70)
+      ltest=.true.
+    endif
+  endif
+  
+  if(lfieldtype .and. nfieldtype/=0)then
+    if(.not. lfieldfreq)then
+      call warning(71)
+      ltest=.true.
+    endif
+  endif
+  
+  if(lfieldtype)then
+    if(nfieldtype<0 .or. nfieldtype>2)then
+      call warning(73,dble(nfieldtype))
+      ltest=.true.
+    endif
+    if(nfieldtype==2)then
+      if(.not. ltaoelectr)then
+        call warning(78)
+        ltest=.true.
+      endif
+    endif
+  endif
+  
+  if(lbreakup)then
+    if(.not. lultimatestrength)then
+      call warning(72)
+      ltest=.true.
+    endif
+  endif
+  
+  if(lmultiplestep)then
+    if(.not. ldcutoff)then
+      call warning(74)
+      ltest=.true.
+    else
+      if(nmulstep<=2)then
+        call warning(75,dble(nmulstep))
+        ltest=.true.
+      endif
+    endif
+    if(.not. lnmulstep)then
+      call warning(76)
+      ltest=.true.
+    endif
+  endif
+  
+  if(sprintdat==6)then
+    if(.not.(ltagbeads))then
+      call warning(77,dble(sprintdat))
+      ltest=.true.
+    endif
+  endif
+  
+  if(lpdbtagbeads)then
+    if(.not. ltagbeads)then
+      call warning(79)
+      ltest=.true.
+    endif
+  endif
+  
+  if(lflorentz)then
+    if(.not.lmagneticfield)then
+      call warning(80)
+      ltest=.true.
+    endif
+  endif
+  
+  if(lG)then
+    if(G<1.d-4)then
+      call warning(88,G) 
       ltest=.true.
     endif
   endif
@@ -1433,19 +1642,20 @@
   
   if(lprintxyz)iprintxyz=nint(printxyz/tstep)
   if(lprintxyzsing)iprintxyzsing=nint(printxyzsing/tstep)
+  if(lprintpdbsing)iprintpdbsing=nint(printpdbsing/tstep)
   if(lprintdat)iprintdat=nint(printdat/tstep)
-  if(lrefinementevery)then
-    irefinementevery=nint(refinementevery/tstep)
-  else
-    refinementevery=100.d0*tstep
-    irefinementevery=nint(refinementevery/tstep)
-    call warning(68,refinementevery)
+  if(lrefinement)then
+    if(lrefinementevery)then
+      irefinementevery=nint(refinementevery/tstep)
+    else
+      refinementevery=1.d4*tstep
+      irefinementevery=nint(refinementevery/tstep)
+      call warning(68,refinementevery)
+    endif
+    if(lrefinementstart)then
+      irefinementstart=nint(refinementstart/tstep)
+    endif
   endif
-  
-  if(lrefinementstart)then
-    irefinementstart=nint(refinementstart/tstep)
-  endif
-  
   iprinttime=nint(printtime/tstep)
   eprinttime=nint(endtime/tstep)
   reprinttime=nint(dble(eprinttime)/dble(iprinttime))
@@ -1499,8 +1709,18 @@
   elseif(findstring('curn',temps,inumchar,lenstring))then
     printcodsub(iarg)=13
     lfound=.true.
+  elseif(findstring('erms',temps,inumchar,lenstring))then
+    printcodsub(iarg)=44
+    lfound=.true.
+    lmultisteperror=.true.
   elseif(findstring('mass',temps,inumchar,lenstring))then
     printcodsub(iarg)=34
+    lfound=.true.
+  elseif(findstring('mxsx',temps,inumchar,lenstring))then
+    printcodsub(iarg)=42
+    lfound=.true.
+  elseif(findstring('mxst',temps,inumchar,lenstring))then
+    printcodsub(iarg)=41
     lfound=.true.
   elseif(findstring('nref',temps,inumchar,lenstring))then
     printcodsub(iarg)=39
@@ -1513,6 +1733,9 @@
     lfound=.true.
   elseif(findstring('mfn',temps,inumchar,lenstring))then
     printcodsub(iarg)=15
+    lfound=.true.
+  elseif(findstring('nms',temps,inumchar,lenstring))then
+    printcodsub(iarg)=43
     lfound=.true.
   elseif(findstring('rlp',temps,inumchar,lenstring))then
     printcodsub(iarg)=38
@@ -1591,6 +1814,9 @@
     lfound=.true.
   elseif(findstring('t',temps,inumchar,lenstring))then
     printcodsub(iarg)=1
+    lfound=.true.
+  elseif(findstring('v',temps,inumchar,lenstring))then
+    printcodsub(iarg)=45
     lfound=.true.
   elseif(findstring('x',temps,inumchar,lenstring))then
     printcodsub(iarg)=2
@@ -1714,6 +1940,16 @@
     printlisub(iarg)='rc (cm)'
   elseif(printcodsub(iarg)==21)then
     printlisub(iarg)='rrr'
+  elseif(printcodsub(iarg)==41)then
+    printlisub(iarg)='mxst (g cm^-1 s^-2)'
+  elseif(printcodsub(iarg)==42)then
+    printlisub(iarg)='mxsx (cm)'
+  elseif(printcodsub(iarg)==43)then
+    printlisub(iarg)='nms'
+  elseif(printcodsub(iarg)==44)then
+    printlisub(iarg)='erms (dyne)'
+  elseif(printcodsub(iarg)==45)then
+    printlisub(iarg)='v (statV)'
   endif
   printlisub(iarg)=adjustr(printlisub(iarg))
   enddo
@@ -1731,7 +1967,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification July 2015
+!     last modification January 2016
 !     
 !***********************************************************************
   
@@ -1789,9 +2025,20 @@
       labelsub='print a single xyz file for each frame every'
       write(6,form4)labelsub,ugualab,printxyzsing,' s'
       endif
+      if(lprintpdbsing)then
+      labelsub='print a single pdb file for each frame every'
+      write(6,form4)labelsub,ugualab,printpdbsing,' s'
+      endif
       if(lxyzrescale)then
       labelsub='print xyz file rescaled by'
       write(6,form4)labelsub,ugualab,xyzrescale,' factor'
+      endif
+      if(lpdbrescale)then
+      labelsub='print pdb file rescaled by'
+      write(6,form4)labelsub,ugualab,pdbrescale,' factor'
+      endif
+      if(lpdbtagbeads)then
+      write(6,form3)'print pdb with tagged beads yes'
       endif
       if(lprintdat)then
       labelsub='print binary file every'
@@ -1815,6 +2062,9 @@
       endif
       if(lHBfluid)then
       write(6,form3)"hbfluid yes - Herschel-Bulkley mode"
+      endif
+      if(lKVfluid)then
+      write(6,form3)"kvfluid yes - Kelvin–Voigt mode"
       endif
       if(lconsistency)then
       labelsub='consistency of Herschel-Bulkley jet = '
@@ -1843,6 +2093,18 @@
       write(6,form4)labelsub,ugualab,h,' cm'
       labelsub='external potential'
       write(6,form4)labelsub,ugualab,V0,' V'
+      if(lfieldtype)then
+      labelsub='external potential type'
+      write(6,form6)labelsub,ugualab,nfieldtype
+      endif
+      if(lfieldfreq)then
+      labelsub='external potential frequency'
+      write(6,form4)labelsub,ugualab,fieldfreq,' s^-1'
+      endif
+      if(ltaoelectr)then
+      labelsub='external potential time'
+      write(6,form4)labelsub,ugualab,taoelectr,' s'
+      endif
       labelsub='surface tension of the jet'
       write(6,form4)labelsub,ugualab,surfacet,' g s^-2'
       if(liniperturb)then
@@ -1851,9 +2113,18 @@
       labelsub='nozzle perturbation amplitude'
       write(6,form4)labelsub,ugualab,pampl,' cm'
       endif
-      if(lncutoff)then
-      labelsub='cutoff points'
+      if(lmultiplestep)then
+      write(6,form3)"multiple step yes"
+      labelsub='compute all the forces every'
+      write(6,form6)labelsub,ugualab,nmulstep
+      endif
+      if(lmultiplestep .and. ldcutoff)then
+      labelsub='cutoff of the primary shell'
       write(6,form4)labelsub,ugualab,dcutoff,' cm'
+      endif
+      if(lmultiplestep .and. lmaxdispl)then
+      labelsub='maximum displacement'
+      write(6,form4)labelsub,ugualab,maxdispl,' cm'
       endif
       if(lairdrag)then
       write(6,form3)"airdrag yes - stochastic mode"
@@ -1870,34 +2141,16 @@
       endif
       if(lmassavariable .and. ldevelopers)then
       write(6,form3)"variable mass yes"
-      labelsub='variable mass deviation of jet'
-      write(6,form4)labelsub,ugualab,imassadev,' g cm^-3'
-      labelsub='variable mass correlation of jet'
+      labelsub='variable mass distance between NPs'
       write(6,form4)labelsub,ugualab,lencorrmassa,' cm'
-      if(typemass/=0)then
-      labelsub='type of variable mass'
-      write(6,form7)labelsub,ugualab,typemass,' ONLY DEVELOPERS'
-      labelsub='lenprobmassa'
+      labelsub='npradius'
       write(6,form4)labelsub,ugualab,lenprobmassa,' ONLY DEVELOPERS'
-      labelsub='massratio'
+      labelsub='npmass'
       write(6,form4)labelsub,ugualab,massratio,' ONLY DEVELOPERS'
-      endif
-      endif
-      if(lchargevariable .and. ldevelopers)then
-      write(6,form3)"variable charge yes"
-      labelsub='variable charge deviation of jet'
-      write(6,form4)labelsub,ugualab,ichargedev,' C L^-1'
-      labelsub='variable charge correlation of jet'
-      write(6,form4)labelsub,ugualab,lencorrcharge,' cm'
       endif
       if(lrefinement)then
         write(6,form3) &
          "dynamic refinement yes"
-      if(refinementcons/=0 .and. ldevelopers)then
-        write(6,form2) &
-         "dynamic refinement with no conserved mass and charge", &
-         " -"," ONLY DEVELOPERS"
-      endif
       if(lrefinementstart)then
       labelsub='dynamic refinement start'
       write(6,form4)labelsub,ugualab,refinementstart,' s'
@@ -1905,6 +2158,11 @@
       if(lrefinementthreshold)then
       labelsub='dynamic refinement threshold'
       write(6,form4)labelsub,ugualab,refinementthreshold,' cm'
+      endif
+      if(llenthresholdbead)then
+      labelsub='dynamic refinement anchor bead distance'
+      write(6,form4)labelsub,ugualab,lenthresholdbead, &
+       ' cm'
       endif
       if(lrefinementevery)then
       labelsub='dynamic refinement every'
@@ -1927,6 +2185,13 @@
       if(lmirror)then
       write(6,form3)"mirror yes"
       endif
+      if(lbreakup)then
+      write(6,form3)"breakup yes"
+      endif
+      if(lultimatestrength)then
+      labelsub='ultimate strength of jet'
+      write(6,form4)labelsub,ugualab,ultimatestrength,' g cm^-1 s^-2'
+      endif
       if(ldragvelfound)then
         if(ldragvel)then
           write(6,form3)"velocity drag yes"
@@ -1937,12 +2202,22 @@
         write(6,form3)"velocity drag yes by default"
       endif
       if(typedragvel/=0 .and. ldevelopers)then
-      labelsub='type of velocity drag'
-      write(6,form7)labelsub,ugualab,typedragvel,' ONLY DEVELOPERS'
+        labelsub='type of velocity drag'
+        write(6,form6)labelsub,ugualab,typedragvel
+      endif
+      if(lflorentz)then
+        write(6,form3)"lorentz yes"
+        if(lmagneticfield)then
+          labelsub='magnetic field along x'
+          write(6,form4)labelsub,ugualab,BLor(1),' cm^-0.5 g^0.5 s^-1'
+          labelsub='magnetic field along y'
+          write(6,form4)labelsub,ugualab,BLor(2),' cm^-0.5 g^0.5 s^-1'
+          labelsub='magnetic field along z'
+          write(6,form4)labelsub,ugualab,BLor(3),' cm^-0.5 g^0.5 s^-1'
+        endif
       endif
     endif
     icharge=icharge/1000.d0*2997919999.93d0
-    ichargedev=ichargedev/1000.d0*2997919999.93d0
     V0=V0/299.792458d0 !statV=cm^0.5 g^0.5 s^-1
     consistency=consistency*mu
   case default
@@ -1972,9 +2247,20 @@
       labelsub='print a single xyz file for each frame every'
       write(6,form4)labelsub,ugualab,printxyzsing,' s'
       endif
+      if(lprintpdbsing)then
+      labelsub='print a single pdb file for each frame every'
+      write(6,form4)labelsub,ugualab,printpdbsing,' s'
+      endif
       if(lxyzrescale)then
       labelsub='print xyz file rescaled by'
       write(6,form4)labelsub,ugualab,xyzrescale,' factor'
+      endif
+      if(lpdbrescale)then
+      labelsub='print pdb file rescaled by'
+      write(6,form4)labelsub,ugualab,pdbrescale,' factor'
+      endif
+      if(lpdbtagbeads)then
+      write(6,form3)'print pdb with tagged beads yes'
       endif
       if(lprintdat)then
       labelsub='print binary file every'
@@ -1998,6 +2284,9 @@
       endif
       if(lHBfluid)then
       write(6,form3)"hbfluid yes - Herschel-Bulkley mode"
+      endif
+      if(lKVfluid)then
+      write(6,form3)"kvfluid yes - Kelvin–Voigt mode"
       endif
       if(lconsistency)then
       labelsub='consistency of Herschel-Bulkley jet = '
@@ -2026,6 +2315,18 @@
       write(6,form4)labelsub,ugualab,h,' cm'
       labelsub='external potential'
       write(6,form4)labelsub,ugualab,V0,' statV'
+      if(lfieldtype)then
+      labelsub='external potential type'
+      write(6,form6)labelsub,ugualab,nfieldtype
+      endif
+      if(lfieldfreq)then
+      labelsub='external potential frequency'
+      write(6,form4)labelsub,ugualab,fieldfreq,' s^-1'
+      endif
+      if(ltaoelectr)then
+      labelsub='external potential time'
+      write(6,form4)labelsub,ugualab,taoelectr,' s'
+      endif
       labelsub='surface tension of the jet'
       write(6,form4)labelsub,ugualab,surfacet,' g s^-2'
       if(liniperturb)then
@@ -2034,9 +2335,18 @@
       labelsub='nozzle perturbation amplitude'
       write(6,form4)labelsub,ugualab,pampl,' cm'
       endif
-      if(lncutoff)then
-      labelsub='cutoff points'
+      if(lmultiplestep)then
+      write(6,form3)"multiple step yes"
+      labelsub='compute all the forces every'
+      write(6,form6)labelsub,ugualab,nmulstep
+      endif
+      if(lmultiplestep .and. ldcutoff)then
+      labelsub='cutoff of the primary shell'
       write(6,form4)labelsub,ugualab,dcutoff,' cm'
+      endif
+      if(lmultiplestep .and. lmaxdispl)then
+      labelsub='maximum displacement'
+      write(6,form4)labelsub,ugualab,maxdispl,' cm'
       endif
       if(lairdrag)then
       write(6,form3)"airdrag yes - stochastic mode"
@@ -2053,34 +2363,16 @@
       endif
       if(lmassavariable .and. ldevelopers)then
       write(6,form3)"variable mass yes"
-      labelsub='variable mass deviation of jet'
-      write(6,form4)labelsub,ugualab,imassadev,' g cm^-3'
-      labelsub='variable mass correlation of jet'
+      labelsub='variable mass distance between NPs'
       write(6,form4)labelsub,ugualab,lencorrmassa,' cm'
-      if(typemass/=0)then
-      labelsub='type of variable mass'
-      write(6,form7)labelsub,ugualab,typemass,' ONLY DEVELOPERS'
-      labelsub='lenprobmassa'
+      labelsub='npradius'
       write(6,form4)labelsub,ugualab,lenprobmassa,' ONLY DEVELOPERS'
-      labelsub='massratio'
+      labelsub='npmass'
       write(6,form4)labelsub,ugualab,massratio,' ONLY DEVELOPERS'
-      endif
-      endif
-      if(lchargevariable .and. ldevelopers)then
-      write(6,form3)"variable charge yes"
-      labelsub='variable charge deviation of jet'
-      write(6,form4)labelsub,ugualab,ichargedev,' statC cm^-3'
-      labelsub='variable charge correlation of jet'
-      write(6,form4)labelsub,ugualab,lencorrcharge,' cm'
       endif
       if(lrefinement)then
         write(6,form3) &
          "dynamic refinement yes"
-      if(refinementcons/=0 .and. ldevelopers)then
-        write(6,form2) &
-         "dynamic refinement with no conserved mass and charge", &
-         " -"," ONLY DEVELOPERS"
-      endif
       if(lrefinementstart)then
       labelsub='dynamic refinement start'
       write(6,form4)labelsub,ugualab,refinementstart,' s'
@@ -2088,6 +2380,11 @@
       if(lrefinementthreshold)then
       labelsub='dynamic refinement threshold'
       write(6,form4)labelsub,ugualab,refinementthreshold,' cm'
+      endif
+      if(llenthresholdbead)then
+      labelsub='dynamic refinement anchor bead distance'
+      write(6,form4)labelsub,ugualab,lenthresholdbead, &
+       ' cm'
       endif
       if(lrefinementevery)then
       labelsub='dynamic refinement every'
@@ -2110,6 +2407,13 @@
       if(lmirror)then
       write(6,form3)"mirror yes"
       endif
+      if(lbreakup)then
+      write(6,form3)"breakup yes"
+      endif
+      if(lultimatestrength)then
+      labelsub='ultimate strength of jet'
+      write(6,form4)labelsub,ugualab,ultimatestrength,' g cm^-1 s^-2'
+      endif
       if(ldragvelfound)then
         if(ldragvel)then
           write(6,form3)"velocity drag yes"
@@ -2120,8 +2424,19 @@
         write(6,form3)"velocity drag yes by default"
       endif
       if(typedragvel/=0 .and. ldevelopers)then
-      labelsub='type of velocity drag'
-      write(6,form7)labelsub,ugualab,typedragvel,' ONLY DEVELOPERS'
+        labelsub='type of velocity drag'
+        write(6,form6)labelsub,ugualab,typedragvel
+      endif
+      if(lflorentz)then
+        write(6,form3)"lorentz yes"
+        if(lmagneticfield)then
+          labelsub='magnetic field along x'
+          write(6,form4)labelsub,ugualab,BLor(1),' cm^-0.5 g^0.5 s^-1'
+          labelsub='magnetic field along y'
+          write(6,form4)labelsub,ugualab,BLor(2),' cm^-0.5 g^0.5 s^-1'
+          labelsub='magnetic field along z'
+          write(6,form4)labelsub,ugualab,BLor(3),' cm^-0.5 g^0.5 s^-1'
+        endif
       endif
     endif
     consistency=consistency*mu
@@ -2180,7 +2495,7 @@
   if(mod(k,iprinttime)/=0)return
   
   tempint=dble(iprinttime)*tstep
-  call compute_statistic(tempint,timesub)
+  call compute_statistic(tempint,timesub,k)
   
   if(idrank/=0)return
   
@@ -2328,7 +2643,13 @@
   
   if(lfirst)then
     lfirst=.false.
-    open(unit=outp,file=soutp,status='replace',action='write')    
+    if(lreadrest)then
+      open(unit=outp,file=trim(soutp),form='formatted', &
+       status='old',action='write',position='append')
+    else
+      open(unit=outp,file=trim(soutp),form='formatted', &
+       status='replace',action='write')
+    endif  
     write(outp,'(a10)',advance="no")'#*********'
     do i=1,nprint1
       write(outp,'(a20)',advance="no")' *******************'
@@ -2382,8 +2703,13 @@
   if(idrank/=0)return
   if(.not.lprintdatsub)return
   
-  open(fileout,file=filename,form='unformatted',status='replace', &
-   action='write')
+  if(lreadrest)then
+    open(fileout,file=trim(filename),form='unformatted', &
+     status='old',action='write',position='append')
+  else
+    open(fileout,file=trim(filename),form='unformatted', &
+     status='replace',action='write')
+  endif
   
   return
   
@@ -2412,8 +2738,13 @@
   
   if(.not.lprintdatrem)return
   
-  open(fileout,file=filename,form='unformatted',status='replace', &
-   action='write')
+  if(lreadrest)then
+    open(fileout,file=trim(filename),form='unformatted', &
+     status='old',action='write',position='append')
+  else
+    open(fileout,file=trim(filename),form='unformatted', &
+     status='replace',action='write')
+  endif
   
   return
   
@@ -2438,6 +2769,8 @@
   character(len=*), intent(in) :: filename
   double precision, intent(in) :: timesub
   
+  integer :: mysprintdat
+  
   if(idrank/=0)return
   
   if(mod(k,ievery)/=0)return
@@ -2446,8 +2779,9 @@
    action='write')
    
   call write_dat_parameter(.true.,fileout,timesub)
+  call set_sprintdat(mysprintdat)
   call write_dat_frame(.true.,fileout,k,timesub,1, &
-  inpjet,npjet,5,systype,linserted)
+  inpjet,npjet,mysprintdat,systype,linserted)
   call close_dat_file(.true.,fileout)
   
   return
@@ -2493,11 +2827,10 @@
   k=nint(timesub/tstep)
   
   if(idrank==0)then
-    read(fileout)ltest
     close(fileout)
   endif
   
-  call warning(69,timesub)
+  call warning(69,timesub*tao)
   
   return
   
@@ -2527,8 +2860,9 @@
   integer :: sprintdatsub
   logical :: lstart
   
-  double precision :: dtemp(12)
-  integer :: itemp(12)
+  double precision :: dtemp(15)
+  integer :: itemp(15)
+  logical :: ltemp(15)
   
   if(idrank==0)then
     read(fileout)lstart
@@ -2540,7 +2874,7 @@
   
   
   if(idrank==0)then
-    read(fileout)ncutoff,systype,integrator,units
+    read(fileout)itemp(1),systype,integrator,units
     read(fileout)resolution,ilength, &
      imassa,icharge,icrossec, &
      istress,ivelocity
@@ -2607,22 +2941,16 @@
   airdragamp(3)=(airdragamp(3)/(lengthscale**2.d0)*(tao**3.d0))
   
   if(idrank==0)then
-    read(fileout)imassadev, &
+    read(fileout)dtemp(1), &
      lencorrmassa, &
-     ichargedev, &
-     lencorrcharge,velext
+     dtemp(2), &
+     dtemp(3),velext
   endif
   
-  call bcast_world_d(imassadev)
   call bcast_world_d(lencorrmassa)
-  call bcast_world_d(ichargedev)
-  call bcast_world_d(lencorrcharge)
   call bcast_world_d(velext)
-   
-  imassadev=(imassadev*(lengthscale**3.d0)/massscale)
+  
   lencorrmassa=(lencorrmassa/lengthscale)
-  ichargedev=(ichargedev*(lengthscale**3.d0)/chargescale)
-  lencorrcharge=(lencorrcharge/lengthscale)
   velext=(velext*tao/lengthscale)
   
   if(idrank==0)then
@@ -2680,6 +3008,21 @@
         read(fileout)(itemp(i),i=1,12)
       endif
     endif
+    if(mioind>=7)then
+      if(idrank==0)then
+        read(fileout)(ltemp(i),i=1,15)
+      endif
+    endif
+    if(mioind>=8)then
+      if(idrank==0)then
+        read(fileout)(itemp(i),i=1,12)
+      endif
+    endif
+    if(mioind>=9)then
+      if(idrank==0)then
+        read(fileout)(dtemp(i),i=1,12)
+      endif
+    endif
   
   else
   
@@ -2725,16 +3068,17 @@
     
     if(mioind>=5)then
       if(idrank==0)then
-        read(fileout)meanlpath,(dtemp(i),i=1,11)
+        read(fileout)meanlpath,multisteperror,(dtemp(i),i=1,10)
       endif
       call bcast_world_d(meanlpath)
+      call bcast_world_d(multisteperror)
     endif
     
     if(mioind>=6)then
       if(idrank==0)then
           read(fileout)ncounterevel,ncounterevelrel,ncountergeom, &
        reprinttime,ncounterivel,ncounterlpath,irefinementdone, &
-         (itemp(i),i=1,5)
+         nmulstep,nmulstepdone,nmultisteperror,mxnpjet,itemp(1)
       endif
       call bcast_world_i(ncounterevel)
       call bcast_world_i(ncounterevelrel)
@@ -2743,6 +3087,56 @@
       call bcast_world_i(ncounterivel)
       call bcast_world_i(ncounterlpath)
       call bcast_world_i(irefinementdone)
+      call bcast_world_i(nmulstep)
+      call bcast_world_i(nmulstepdone)
+      call bcast_world_i(nmultisteperror)
+      call bcast_world_i(mxnpjet)
+      if(nmulstep>0)lmultiplestep=.true.
+    endif
+    
+    if(mioind>=7)then
+      if(idrank==0)then
+        read(fileout)lrefinement,ltagbeads,lrefinementthreshold, &
+         lrefbeadstart,llenthresholdbead, &
+         lrefinementevery,lrefinementstart,lmassavariable,ltemp(1), &
+         llencorrmassa,lmassavariable,lfirstmass
+      endif
+      call bcast_world_l(lrefinement)
+      call bcast_world_l(ltagbeads)
+      call bcast_world_l(lrefinementthreshold)
+      call bcast_world_l(lrefbeadstart)
+      call bcast_world_l(llenthresholdbead)
+      call bcast_world_l(lrefinementevery)
+      call bcast_world_l(lrefinementstart)
+      call bcast_world_l(lmassavariable)
+      call bcast_world_l(llencorrmassa)
+      call bcast_world_l(lmassavariable)
+      call bcast_world_l(lfirstmass)
+    endif
+    
+    if(mioind>=8)then
+      if(idrank==0)then
+        read(fileout)itemp(11),itemp(12),(itemp(i),i=1,10)
+      endif
+    endif
+    
+    if(mioind>=9)then
+      if(idrank==0)then
+        read(fileout)refinementthreshold,refbeadstartfit,lencorrmassa, &
+         lenprobmassa,massratio,dtemp(1),oldgaussn,corr,radcorr, &
+         lenthresholdbead,refinementevery,refinementstart
+      endif
+      call bcast_world_d(refinementthreshold)
+      call bcast_world_d(refbeadstartfit)
+      call bcast_world_d(lencorrmassa)
+      call bcast_world_d(lenprobmassa)
+      call bcast_world_d(massratio)
+      call bcast_world_d(oldgaussn)
+      call bcast_world_d(corr)
+      call bcast_world_d(radcorr)
+      call bcast_world_d(lenthresholdbead)
+      call bcast_world_d(refinementevery)
+      call bcast_world_d(refinementstart)
     endif
     
   endif
@@ -2771,14 +3165,14 @@
   integer, intent(inout) ::k
   double precision, intent(inout) :: timesub
   
-  integer :: natms,i,j
+  integer :: natms,i,j,sprintdatsub,systypesub,ipoint
   logical :: lstart
   real(4) :: dtemp(10)
   
   
   if(idrank==0)then
     read(fileout)lstart
-    read(fileout)natms,j,i,timesub,linserted
+    read(fileout)natms,sprintdatsub,systypesub,timesub,linserted
   endif
   call bcast_world_d(timesub)
   call bcast_world_l(linserted)
@@ -2791,75 +3185,160 @@
   
   doreorder=.false.
   call deallocate_jet()
-  call allocate_jet() 
+  call allocate_jet(.true.) 
   lreordertrack=.false.
   naddtrack=0
   nremtrack=0
   if(idrank==0)then
-  select case(systype)
-  case (1:2)
-    jetxx(0:mxnpjet)=0.d0
-    jetst(0:mxnpjet)=0.d0
-    jetvx(0:mxnpjet)=0.d0
-    jetms(0:mxnpjet)=0.d0
-    jetch(0:mxnpjet)=0.d0
-    jetvl(0:mxnpjet)=0.d0
-    do i=inpjet,npjet
-      read(fileout)(dtemp(j),j=1,6)
-      jetxx(i)=dble(dtemp(1))
-      jetst(i)=dble(dtemp(2))
-      jetvx(i)=dble(dtemp(3))
-      jetms(i)=dble(dtemp(4))
-      jetch(i)=dble(dtemp(5))
-      jetvl(i)=dble(dtemp(6))
-    end do
-  case default
-    jetxx(0:mxnpjet)=0.d0
-    jetyy(0:mxnpjet)=0.d0
-    jetzz(0:mxnpjet)=0.d0
-    jetst(0:mxnpjet)=0.d0
-    jetvx(0:mxnpjet)=0.d0
-    jetvy(0:mxnpjet)=0.d0
-    jetvz(0:mxnpjet)=0.d0
-    jetms(0:mxnpjet)=0.d0
-    jetch(0:mxnpjet)=0.d0
-    jetvl(0:mxnpjet)=0.d0
-    do i=inpjet,npjet
-      read(fileout)(dtemp(j),j=1,10)
-      jetxx(i)=dble(dtemp(1))
-      jetyy(i)=dble(dtemp(2))
-      jetzz(i)=dble(dtemp(3))
-      jetst(i)=dble(dtemp(4))
-      jetvx(i)=dble(dtemp(5))
-      jetvy(i)=dble(dtemp(6))
-      jetvz(i)=dble(dtemp(7))
-      jetms(i)=dble(dtemp(8))
-      jetch(i)=dble(dtemp(9))
-      jetvl(i)=dble(dtemp(10))
-     end do
-  end select
+    if(sprintdat==5)then
+      select case(systype)
+      case (1:2)
+        jetxx(0:mxnpjet)=0.d0
+        jetst(0:mxnpjet)=0.d0
+        jetvx(0:mxnpjet)=0.d0
+        jetms(0:mxnpjet)=0.d0
+        jetch(0:mxnpjet)=0.d0
+        jetvl(0:mxnpjet)=0.d0
+        do i=inpjet,npjet
+          read(fileout)(dtemp(j),j=1,6)
+          jetxx(i)=dble(dtemp(1))
+          jetst(i)=dble(dtemp(2))
+          jetvx(i)=dble(dtemp(3))
+          jetms(i)=dble(dtemp(4))
+          jetch(i)=dble(dtemp(5))
+          jetvl(i)=dble(dtemp(6))
+        end do
+      case default
+        jetxx(0:mxnpjet)=0.d0
+        jetyy(0:mxnpjet)=0.d0
+        jetzz(0:mxnpjet)=0.d0
+        jetst(0:mxnpjet)=0.d0
+        jetvx(0:mxnpjet)=0.d0
+        jetvy(0:mxnpjet)=0.d0
+        jetvz(0:mxnpjet)=0.d0
+        jetms(0:mxnpjet)=0.d0
+        jetch(0:mxnpjet)=0.d0
+        jetvl(0:mxnpjet)=0.d0
+        do i=inpjet,npjet
+          read(fileout)(dtemp(j),j=1,10)
+          jetxx(i)=dble(dtemp(1))
+          jetyy(i)=dble(dtemp(2))
+          jetzz(i)=dble(dtemp(3))
+          jetst(i)=dble(dtemp(4))
+          jetvx(i)=dble(dtemp(5))
+          jetvy(i)=dble(dtemp(6))
+          jetvz(i)=dble(dtemp(7))
+          jetms(i)=dble(dtemp(8))
+          jetch(i)=dble(dtemp(9))
+          jetvl(i)=dble(dtemp(10))
+         end do
+      end select
+    elseif(sprintdat==6)then
+      select case(systype)
+      case (1:2)
+        jetxx(0:mxnpjet)=0.d0
+        jetst(0:mxnpjet)=0.d0
+        jetvx(0:mxnpjet)=0.d0
+        jetms(0:mxnpjet)=0.d0
+        jetch(0:mxnpjet)=0.d0
+        jetvl(0:mxnpjet)=0.d0
+        do i=inpjet,npjet
+          read(fileout)(dtemp(j),j=1,6),jetbd(i)
+          jetxx(i)=dble(dtemp(1))
+          jetst(i)=dble(dtemp(2))
+          jetvx(i)=dble(dtemp(3))
+          jetms(i)=dble(dtemp(4))
+          jetch(i)=dble(dtemp(5))
+          jetvl(i)=dble(dtemp(6))
+        end do
+      case default
+        jetxx(0:mxnpjet)=0.d0
+        jetyy(0:mxnpjet)=0.d0
+        jetzz(0:mxnpjet)=0.d0
+        jetst(0:mxnpjet)=0.d0
+        jetvx(0:mxnpjet)=0.d0
+        jetvy(0:mxnpjet)=0.d0
+        jetvz(0:mxnpjet)=0.d0
+        jetms(0:mxnpjet)=0.d0
+        jetch(0:mxnpjet)=0.d0
+        jetvl(0:mxnpjet)=0.d0
+        do i=inpjet,npjet
+          read(fileout)(dtemp(j),j=1,10),jetbd(i)
+          jetxx(i)=dble(dtemp(1))
+          jetyy(i)=dble(dtemp(2))
+          jetzz(i)=dble(dtemp(3))
+          jetst(i)=dble(dtemp(4))
+          jetvx(i)=dble(dtemp(5))
+          jetvy(i)=dble(dtemp(6))
+          jetvz(i)=dble(dtemp(7))
+          jetms(i)=dble(dtemp(8))
+          jetch(i)=dble(dtemp(9))
+          jetvl(i)=dble(dtemp(10))
+         end do
+      end select
+    endif
   endif
   
-  select case(systype)
-  case (1:2)
-    call bcast_world_darr(jetxx,mxnpjet+1)
-    call bcast_world_darr(jetst,mxnpjet+1)
-    call bcast_world_darr(jetvx,mxnpjet+1)
-    call bcast_world_darr(jetms,mxnpjet+1)
-    call bcast_world_darr(jetch,mxnpjet+1)
-    call bcast_world_darr(jetvl,mxnpjet+1)
-  case default
-    call bcast_world_darr(jetxx,mxnpjet+1)
-    call bcast_world_darr(jetyy,mxnpjet+1)
-    call bcast_world_darr(jetzz,mxnpjet+1)
-    call bcast_world_darr(jetst,mxnpjet+1)
-    call bcast_world_darr(jetvx,mxnpjet+1)
-    call bcast_world_darr(jetvy,mxnpjet+1)
-    call bcast_world_darr(jetvz,mxnpjet+1)
-    call bcast_world_darr(jetms,mxnpjet+1)
-    call bcast_world_darr(jetch,mxnpjet+1)
-    call bcast_world_darr(jetvl,mxnpjet+1)
-  end select
+  if(sprintdat==5)then
+    select case(systype)
+    case (1:2)
+      call bcast_world_darr(jetxx,mxnpjet+1)
+      call bcast_world_darr(jetst,mxnpjet+1)
+      call bcast_world_darr(jetvx,mxnpjet+1)
+      call bcast_world_darr(jetms,mxnpjet+1)
+      call bcast_world_darr(jetch,mxnpjet+1)
+      call bcast_world_darr(jetvl,mxnpjet+1)
+    case default
+      call bcast_world_darr(jetxx,mxnpjet+1)
+      call bcast_world_darr(jetyy,mxnpjet+1)
+      call bcast_world_darr(jetzz,mxnpjet+1)
+      call bcast_world_darr(jetst,mxnpjet+1)
+      call bcast_world_darr(jetvx,mxnpjet+1)
+      call bcast_world_darr(jetvy,mxnpjet+1)
+      call bcast_world_darr(jetvz,mxnpjet+1)
+      call bcast_world_darr(jetms,mxnpjet+1)
+      call bcast_world_darr(jetch,mxnpjet+1)
+      call bcast_world_darr(jetvl,mxnpjet+1)
+    end select
+  elseif(sprintdat==6)then
+    select case(systype)
+    case (1:2)
+      call bcast_world_darr(jetxx,mxnpjet+1)
+      call bcast_world_darr(jetst,mxnpjet+1)
+      call bcast_world_darr(jetvx,mxnpjet+1)
+      call bcast_world_darr(jetms,mxnpjet+1)
+      call bcast_world_darr(jetch,mxnpjet+1)
+      call bcast_world_darr(jetvl,mxnpjet+1)
+      call bcast_world_larr(jetbd,mxnpjet+1)
+    case default
+      call bcast_world_darr(jetxx,mxnpjet+1)
+      call bcast_world_darr(jetyy,mxnpjet+1)
+      call bcast_world_darr(jetzz,mxnpjet+1)
+      call bcast_world_darr(jetst,mxnpjet+1)
+      call bcast_world_darr(jetvx,mxnpjet+1)
+      call bcast_world_darr(jetvy,mxnpjet+1)
+      call bcast_world_darr(jetvz,mxnpjet+1)
+      call bcast_world_darr(jetms,mxnpjet+1)
+      call bcast_world_darr(jetch,mxnpjet+1)
+      call bcast_world_darr(jetvl,mxnpjet+1)
+      call bcast_world_larr(jetbd,mxnpjet+1)
+    end select
+  endif
+  
+  jetfr(:)=.false.
+  do ipoint=inpjet,npjet
+    if(jetxx(ipoint)>=h)then
+      jetfr(ipoint)=.true.
+      jetxx(ipoint)=h
+    endif
+  enddo
+  jetxx(npjet)=0.d0
+  
+  if(lmultiplestep)then
+    jetfm(:)=.false.
+    lneighlistdo=.true.
+  endif
+  
   
   return
     
@@ -2889,10 +3368,11 @@
   integer, parameter :: sprintdatsub=0
   logical, parameter :: lstart=.true.
   
-  integer, parameter :: mioind=6
+  integer, parameter :: mioind=9
   
-  double precision :: dtemp(11)
-  integer :: itemp(5)
+  double precision :: dtemp(15)
+  integer :: itemp(15)
+  logical :: ltemp(15)
   
   if(idrank/=0)return
   if(.not.lprintdatsub)return
@@ -2902,9 +3382,11 @@
   write(fileout)lstart
   write(fileout)natms,sprintdatsub,systype,(timesub*tao),lstart
   
-  write(fileout)ncutoff,systype,integrator,units
+  itemp(:)=0
+  write(fileout)itemp(1),systype,integrator,units
   write(fileout)(resolution*lengthscale),(ilength*lengthscale), &
-   imassa*(massscale),(icharge*chargescale),(icrossec*lengthscale), &
+   imassa*(massscale)/(lengthscale**3.d0), &
+   icharge*(chargescale)/(lengthscale**3.d0),(icrossec*lengthscale), &
    (istress*G),(ivelocity*lengthscale/tao)
   write(fileout)(pfreq/tao),(pampl*lengthscale), &
    (airdragamp(1)*(lengthscale**2.d0)/(tao**3.d0)), &
@@ -2913,10 +3395,10 @@
   write(fileout)mu,G,(yieldstress*G),(h*lengthscale),V0,surfacet, &
    (tstep*tao),(consistency*(mu*((tao)**(findex-1.d0)))),findex
   write(fileout)massscale,chargescale,lengthscale,tao
-  write(fileout)(imassadev*massscale/(lengthscale**3.d0)), &
+  write(fileout)dtemp(1), &
    (lencorrmassa*lengthscale), &
-   (ichargedev*chargescale/(lengthscale**3.d0)), &
-   (lencorrcharge*lengthscale),(velext*lengthscale/tao)
+   dtemp(2), &
+   dtemp(3),(velext*lengthscale/tao)
   
   write(fileout)mioind
   write(fileout)q,v,fve,fvere,Hg,Lrg,Gr,ks,ksre,att,Li,lire
@@ -2928,12 +3410,31 @@
   counterelen,counterecross,meanelen,meanecross,meancputime, &
   counterivel,meanivel,counterlpath
   dtemp(:)=0.d0
-  write(fileout)meanlpath,(dtemp(i),i=1,11)
+  write(fileout)meanlpath,multisteperror,(dtemp(i),i=1,10)
   itemp(:)=0
-  write(fileout)ncounterevel,ncounterevelrel,ncountergeom,reprinttime, &
-   ncounterivel,ncounterlpath,irefinementdone,(itemp(i),i=1,5)
- 
+  if(lmultiplestep)then
+    write(fileout)ncounterevel,ncounterevelrel,ncountergeom, &
+     reprinttime,ncounterivel,ncounterlpath,irefinementdone,nmulstep, &
+     nmulstepdone,nmultisteperror,mxnpjet,itemp(1)
+  else
+    write(fileout)ncounterevel,ncounterevelrel,ncountergeom, &
+     reprinttime,ncounterivel,ncounterlpath,irefinementdone, &
+     (itemp(i),i=1,3),mxnpjet,itemp(4)
+  endif
   
+  ltemp(:)=.false.
+  write(fileout)lrefinement,ltagbeads,lrefinementthreshold, &
+         lrefbeadstart,llenthresholdbead, &
+         lrefinementevery,lrefinementstart,lmassavariable,lstart, &
+         llencorrmassa,lmassavariable,lfirstmass
+     
+  write(fileout)itemp(11),itemp(12),(itemp(i),i=1,10)
+     
+  write(fileout)refinementthreshold,refbeadstartfit,lencorrmassa, &
+         lenprobmassa,massratio,dtemp(1),oldgaussn,corr,radcorr, &
+         lenthresholdbead,refinementevery,refinementstart
+  
+      
   call flush(fileout)
   
   return
@@ -3085,6 +3586,29 @@
          real(jetms(i),4),real(jetch(i),4),real(jetvl(i),4),jetbd(i)
       end do
     end select
+  elseif(sprintdat==7)then
+    write(fileout)doreorder,inpjet,npjet
+    lreordertrack=.false.
+    naddtrack=0
+    nremtrack=0
+    select case(systype)
+    case (1:2)
+      do i=inpjet,npjet
+        write(fileout)real(jetxx(i),4),real(jetst(i),4), &
+        real(jetvx(i),4), &
+        real(jetms(i),4),real(jetch(i),4),real(jetvl(i),4),jetbd(i), &
+        jetbr(i)
+      end do
+    case default
+      do i=inpjet,npjet
+        write(fileout)real(jetxx(i),4),real(jetyy(i),4), &
+         real(jetzz(i),4), &
+         real(jetst(i),4),real(jetvx(i),4),real(jetvy(i),4), &
+         real(jetvz(i),4), &
+         real(jetms(i),4),real(jetch(i),4),real(jetvl(i),4),jetbd(i), &
+         jetbr(i)
+      end do
+    end select
   else
     call error(9)
   endif
@@ -3137,7 +3661,7 @@
       endif
       tempcr=dsqrt((jetvl(i))/(Pi*tempmod0))
       write(fileout)lstart
-      if(typemass==3)then
+      if(ltagbeads)then
         write(fileout)real(timesub,4),real(jetxx(i),4), &
          real(jetyy(i),4),real(jetzz(i),4), &
          real(jetst(i),4),real(jetvx(i),4),real(jetvy(i),4), &
@@ -3179,11 +3703,10 @@
   logical, intent(in) :: lprintdatsub
   integer, intent(in) :: fileout
   
-  logical, parameter :: lend=.false.
   
   if(idrank/=0)return
   if(.not.lprintdatsub)return
-  write(fileout)lend
+  
   close(fileout)
   
   return
@@ -3208,12 +3731,11 @@
   logical, intent(in) :: lprintdatsub
   integer, intent(in) :: fileout
   
-  logical, parameter :: lend=.false.
   
   if(idrank/=0)return
   
   if(.not.lprintdatrem)return
-  write(fileout)lend
+  
   close(fileout)
   
   return
@@ -3241,7 +3763,13 @@
   if(idrank/=0)return
   if(.not.lprintxyz)return
   
-  open(fileout,file=filename,status='replace',action='write')
+  if(lreadrest)then
+    open(fileout,file=trim(filename),form='formatted', &
+     status='old',action='write',position='append')
+  else
+    open(fileout,file=trim(filename),form='formatted', &
+     status='replace',action='write')
+  endif
   
   return
   
@@ -3284,7 +3812,7 @@
     natms=npjet-inpjet+1
     select case(systype)
       case (1:2)
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet
           j=j+1
@@ -3297,7 +3825,7 @@
           write(fileout,"(a8,3f10.5)") atname,0.d0,0.d0,0.d0
         end do
       case default
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet-1
           j=j+1
@@ -3323,7 +3851,7 @@
     natms=npjet-inpjet
     select case(systype)
       case (1:2)
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet-2
           j=j+1
@@ -3341,7 +3869,7 @@
           write(fileout,"(a8,3f10.5)") atname,0.d0,0.d0,0.d0
         end do
       case default
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet-2
           j=j+1
@@ -3399,7 +3927,8 @@
  end subroutine close_xyz_file
  
  subroutine write_xyz_singlefile(filename,lprintxyzsingsub,fileout,k, &
-  timesub,iprintxyz,inpjet,npjet,rescale,systype,linserted,lprintnpjet)
+  timesub,iprintxyzsub,inpjet,npjet,rescale,systype,linserted, &
+  lprintnpjet)
   
 !***********************************************************************
 !     
@@ -3416,7 +3945,7 @@
   
   character(len=*), intent(in) :: filename
   logical, intent(in) :: lprintxyzsingsub,linserted
-  integer, intent(in) :: fileout,k,iprintxyz,inpjet,npjet,systype
+  integer, intent(in) :: fileout,k,iprintxyzsub,inpjet,npjet,systype
   double precision, intent(in) :: timesub,rescale
   logical, intent(in) :: lprintnpjet
   
@@ -3425,16 +3954,17 @@
   character(len=8),parameter :: atname='C       '
   
   character(len=150) :: nomefile
-  integer, save :: l=0
-  double precision :: mytime
+  integer :: l
+  double precision :: mytime,myrescale
   
   if(idrank/=0)return
   if(.not.lprintxyzsingsub)return
-  if(mod(k,iprintxyz)/=0)return
+  if(mod(k,iprintxyzsub)/=0)return
   
   mytime=timesub*tao
+  myrescale=rescale*lengthscale
   
-  l=l+1
+  l=k/iprintxyzsub
   nomefile=trim(filename)//write_fmtnumb(l)//'.xyz'
   
   open(fileout,file=trim(nomefile),status='replace',action='write')
@@ -3443,53 +3973,53 @@
     totnatms=npjet-inpjet+1
     select case(systype)
       case (1:2)
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet
-          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*rescale, &
+          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*myrescale, &
            0.d0,0.d0
         end do
       case default
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet-1
-          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*rescale, &
-           jetyy(i)*rescale,jetzz(i)*rescale
+          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*myrescale, &
+           jetyy(i)*myrescale,jetzz(i)*myrescale
         end do
         if(.not.lprintnpjet)then
           write(fileout,"(a8,3f10.5)") atname,0.d0,0.d0,0.d0
         else
           i=npjet
-          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*rescale, &
-            jetyy(i)*rescale,jetzz(i)*rescale
+          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*myrescale, &
+            jetyy(i)*myrescale,jetzz(i)*myrescale
         endif
     end select
   else
     totnatms=npjet-inpjet
     select case(systype)
       case (1:2)
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet-2
-          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*rescale, &
+          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*myrescale, &
            0.d0,0.d0
         end do
         i=npjet
-        write(fileout,"(a8,3f10.5)") atname,jetxx(i)*rescale, &
+        write(fileout,"(a8,3f10.5)") atname,jetxx(i)*myrescale, &
          0.d0,0.d0
       case default
-        write(fileout,*) totnatms
+        write(fileout,'(i10)') totnatms
         write(fileout,'(a,g20.10,i10)')'frame at time',mytime,k
         do i=inpjet,npjet-2
-          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*rescale, &
-           jetyy(i)*rescale,jetzz(i)*rescale
+          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*myrescale, &
+           jetyy(i)*myrescale,jetzz(i)*myrescale
         end do
         if(.not.lprintnpjet)then
           write(fileout,"(a8,3f10.5)") atname,0.d0,0.d0,0.d0
         else
           i=npjet
-          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*rescale, &
-            jetyy(i)*rescale,jetzz(i)*rescale
+          write(fileout,"(a8,3f10.5)") atname,jetxx(i)*myrescale, &
+            jetyy(i)*myrescale,jetzz(i)*myrescale
         endif
     end select
   endif
@@ -3500,6 +4030,381 @@
   return
     
  end subroutine write_xyz_singlefile
+ 
+ subroutine write_pdb_singlefile(filename,lprintpdbsingsub,fileout,k, &
+  timesub,iprintpdbsub,inpjet,npjet,rescale,systype,linserted, &
+  lprintnpjet)
+  
+!***********************************************************************
+!     
+!     JETSPIN subroutine for printing the data on the PDB 
+!     formatted output file in a single file for frame
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification January 2016
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  character(len=*), intent(in) :: filename
+  logical, intent(in) :: lprintpdbsingsub,linserted
+  integer, intent(in) :: fileout,k,iprintpdbsub,inpjet,npjet,systype
+  double precision, intent(in) :: timesub,rescale
+  logical, intent(in) :: lprintnpjet
+  
+  
+  integer :: i,j,totnatms
+  character(len=8),parameter :: atname='C       '
+  
+  character(len=150) :: nomefile
+  integer :: l
+  double precision :: mytime,myrescale
+  
+  if(idrank/=0)return
+  if(.not.lprintpdbsingsub)return
+  if(mod(k,iprintpdbsub)/=0)return
+  
+  mytime=timesub*tao
+  myrescale=rescale*lengthscale
+  
+  l=k/iprintpdbsub
+  nomefile=trim(filename)//write_fmtnumb(l)//'.pdb'
+  
+  open(fileout,file=trim(nomefile),status='replace',action='write')
+  
+  if(lpdbtagbeads)then
+    if(linserted)then
+      totnatms=npjet-inpjet+1
+      select case(systype)
+        case (1:2)
+          j=0
+          do i=inpjet,npjet
+            j=j+1
+            if(jetbd(i))then
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'N  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+            else
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+            endif
+          end do
+        case default
+          j=0
+          do i=inpjet,npjet-1
+            j=j+1
+            if(jetbd(i))then
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'N  ','ALA',j,jetxx(i)*myrescale, &
+               jetyy(i)*myrescale,jetzz(i)*myrescale
+            else
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+               jetyy(i)*myrescale,jetzz(i)*myrescale
+            endif
+          end do
+          if(.not.lprintnpjet)then
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,0.d0,0.d0,0.d0
+          else
+            i=npjet
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+             jetyy(i)*myrescale,jetzz(i)*myrescale
+          endif
+      end select
+    else
+      totnatms=npjet-inpjet
+      select case(systype)
+        case (1:2)
+          j=0
+          do i=inpjet,npjet-2
+            j=j+1
+            if(jetbd(i))then
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'N  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+            else
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+            endif
+          end do
+          i=npjet
+          j=j+1
+          write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+           'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+        case default
+          j=0
+          do i=inpjet,npjet-2
+            j=j+1
+            if(jetbd(i))then
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'N  ','ALA',j,jetxx(i)*myrescale, &
+               jetyy(i)*myrescale,jetzz(i)*myrescale
+            else
+              write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+               'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+               jetyy(i)*myrescale,jetzz(i)*myrescale
+            endif
+          end do
+          if(.not.lprintnpjet)then
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,0.d0,0.d0,0.d0
+          else
+            i=npjet
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+             jetyy(i)*myrescale,jetzz(i)*myrescale
+          endif
+      end select
+    endif
+  else
+    if(linserted)then
+      totnatms=npjet-inpjet+1
+      select case(systype)
+        case (1:2)
+          j=0
+          do i=inpjet,npjet
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+          end do
+        case default
+          j=0
+          do i=inpjet,npjet-1
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+             jetyy(i)*myrescale,jetzz(i)*myrescale
+          end do
+          if(.not.lprintnpjet)then
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,0.d0,0.d0,0.d0
+          else
+            i=npjet
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+             jetyy(i)*myrescale,jetzz(i)*myrescale
+          endif
+      end select
+    else
+      totnatms=npjet-inpjet
+      select case(systype)
+        case (1:2)
+          j=0
+          do i=inpjet,npjet-2
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+          end do
+          i=npjet
+          j=j+1
+          write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+           'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale,0.d0,0.d0
+        case default
+          j=0
+          do i=inpjet,npjet-2
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+             jetyy(i)*myrescale,jetzz(i)*myrescale
+          end do
+          if(.not.lprintnpjet)then
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,0.d0,0.d0,0.d0
+          else
+            i=npjet
+            j=j+1
+            write(fileout,'(a4,2x,i5,2x,a3,1x,a3,1x,i5,4x,3f8.2)') &
+             'ATOM',j,'C  ','ALA',j,jetxx(i)*myrescale, &
+             jetyy(i)*myrescale,jetzz(i)*myrescale
+          endif
+      end select
+    endif
+  endif 
+  close(fileout)
+  
+  call write_psf_singlefile(fileout,filename,l,totnatms)
+  
+  return
+    
+ end subroutine write_pdb_singlefile
+ 
+ subroutine write_psf_singlefile(psfunit,psfname,k,numpoints)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for printing a PSF formatted output file
+!     for frame containing all the bonds for any consecutive pair
+!     of jet beads
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification January 2016
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: psfunit,k
+  character(len=*), intent(in) :: psfname
+  integer,intent(in) :: numpoints
+  
+  character(len=150) :: nomefile
+  integer :: i,j,ismax,l,m,p,ipoint
+  character*1, allocatable, dimension(:) :: sstring
+  character(len=10) :: r_char,r2_char
+  character(len=46) :: fstringout
+  logical :: ladvance
+  
+  nomefile=trim(psfname)//write_fmtnumb(k)//'.psf'
+  
+  open(unit=psfunit,file=trim(nomefile),status='replace',action='write')
+  
+  write(psfunit,'(a,/)')'PSF'
+  write(psfunit,'(i8,1x,a,/,/)')1,'!TITLE'
+  write(psfunit,'(i8,1x,a)')numpoints,'!NATOM'
+  
+  if(lpdbtagbeads)then
+    l=0
+    ipoint=inpjet
+    do i=1,numpoints
+      if(i>=100000)then
+        write (r_char,'(i10)')i
+        allocate(sstring(6))
+        r2_char=adjustl(r_char)
+        do j=1,6
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=5
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      elseif(i>=10000)then
+        write (r_char,'(i10)')i
+        allocate(sstring(5))
+        r2_char=adjustl(r_char)
+        do j=1,5
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=5
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      elseif(i>=1000)then
+        write (r_char,'(i10)')i
+        allocate(sstring(4))
+        r2_char=adjustl(r_char)
+        do j=1,4
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=4
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      else
+        write (r_char,'(i10)')i
+        allocate(sstring(3))
+        r2_char=adjustl(r_char)
+        do j=1,3
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=3
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      endif
+      if(jetbd(ipoint))then
+        write(psfunit,fstringout) &
+         i,'PROT',(sstring(j),j=1,ismax),'ALA  N    N',0.0,14.007,0
+      else
+        write(psfunit,fstringout) &
+         i,'PROT',(sstring(j),j=1,ismax),'ALA  C    C',0.0,12.011,0
+      endif
+      deallocate(sstring)
+      l=l+1
+      ipoint=ipoint+1
+    enddo
+  else
+    l=0
+    do i=1,numpoints
+      if(i>=100000)then
+        write (r_char,'(i10)')i
+        allocate(sstring(6))
+        r2_char=adjustl(r_char)
+        do j=1,6
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=5
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      elseif(i>=10000)then
+        write (r_char,'(i10)')i
+        allocate(sstring(5))
+        r2_char=adjustl(r_char)
+        do j=1,5
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=5
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      elseif(i>=1000)then
+        write (r_char,'(i10)')i
+        allocate(sstring(4))
+        r2_char=adjustl(r_char)
+        do j=1,4
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=4
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      else
+        write (r_char,'(i10)')i
+        allocate(sstring(3))
+        r2_char=adjustl(r_char)
+        do j=1,3
+          sstring(j)=r2_char(j:j)
+        enddo
+        ismax=3
+        write(fstringout,'(a,i2,a)')'(i8,1x,a4,1x,',ismax, &
+         'a1,2x,a,6x,f8.6,8x,f7.4,2x,i10)'
+      endif
+      write(psfunit,fstringout) &
+       i,'PROT',(sstring(j),j=1,ismax),'ALA  C    C',0.0,12.011,0
+      deallocate(sstring)
+      l=l+1
+    enddo
+  endif
+  write(psfunit,*)
+  write(psfunit,'(i8,1x,a)')l-1,'!NBOND'
+  m=1
+  p=1
+  ladvance=.true.
+  do while(m<=l)
+    if(p==8)then
+      write(psfunit,'(i8)')m
+      p=1
+    else
+      write(psfunit,'(i8)',advance="no")m
+      p=p+1
+    endif
+    if(ladvance)then
+      m=m+1
+      ladvance=.false.
+    else
+      if(m==l)exit
+      ladvance=.true.
+    endif
+  enddo
+  
+  close(psfunit)
+  
+  return
+  
+ end subroutine write_psf_singlefile
  
  subroutine write_stat_dat(lprintstatdat,fileout,filename,k)
  
@@ -3530,8 +4435,13 @@
   
   if(lfirst)then
     lfirst=.false.
-    open(fileout,file=filename,form='unformatted',status='replace', &
-     action='write')
+    if(lreadrest)then
+      open(fileout,file=trim(filename),form='unformatted', &
+       status='old',action='write',position='append')
+    else
+      open(fileout,file=trim(filename),form='unformatted', &
+       status='replace',action='write')
+    endif
   endif
   
   do i=1,nmaxstatdata
@@ -3543,7 +4453,33 @@
   return
   
  end subroutine write_stat_dat
-
+ 
+ subroutine set_sprintdat(myoutdata)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for setting the sprintdat variable
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification March 2016
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(out) :: myoutdata
+  
+  if(ltagbeads)then
+    myoutdata=6
+  else
+    myoutdata=5
+  endif
+  
+  return
+  
+ end subroutine set_sprintdat
+ 
  end module io_mod
 
 

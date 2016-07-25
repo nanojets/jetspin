@@ -14,7 +14,8 @@
  
  use error_mod,   only : error
  use version_mod ,only : idrank,mxrank,sum_world_darr,mystart,myend
- use nanojet_mod, only : mxnpjet,npjet,inpjet,typemass,ltagbeads
+ use nanojet_mod, only : mxnpjet,npjet,inpjet,typemass,ltagbeads, &
+                          lbreakup
   
  
  implicit none
@@ -22,18 +23,19 @@
  private
  
  logical, allocatable, dimension(:), save, public :: jetbdc
+ logical, allocatable, dimension(:), save, public :: jetbrc
  
  double precision, allocatable, dimension(:), save, public :: jetptc
- double precision, allocatable, dimension(:), save :: jetxxc
- double precision, allocatable, dimension(:), save :: jetyyc
- double precision, allocatable, dimension(:), save :: jetzzc
- double precision, allocatable, dimension(:), save :: jetvxc
- double precision, allocatable, dimension(:), save :: jetvyc
- double precision, allocatable, dimension(:), save :: jetvzc
- double precision, allocatable, dimension(:), save :: jetstc
- double precision, allocatable, dimension(:), save :: jetmsc
- double precision, allocatable, dimension(:), save :: jetchc
- double precision, allocatable, dimension(:), save :: jetcrc
+ double precision, allocatable, dimension(:), save, public :: jetxxc
+ double precision, allocatable, dimension(:), save, public :: jetyyc
+ double precision, allocatable, dimension(:), save, public :: jetzzc
+ double precision, allocatable, dimension(:), save, public :: jetvxc
+ double precision, allocatable, dimension(:), save, public :: jetvyc
+ double precision, allocatable, dimension(:), save, public :: jetvzc
+ double precision, allocatable, dimension(:), save, public :: jetstc
+ double precision, allocatable, dimension(:), save, public :: jetmsc
+ double precision, allocatable, dimension(:), save, public :: jetchc
+ double precision, allocatable, dimension(:), save, public :: jetcrc
  double precision, allocatable, dimension(:), save :: jetak1
  double precision, allocatable, dimension(:), save :: jetak2
  double precision, allocatable, dimension(:), save :: jetak3
@@ -65,6 +67,7 @@
  public :: cubic_interpolation
  public :: fit_akima
  public :: allocate_arrayakima
+ public :: findcurve4
  
  contains
  
@@ -141,6 +144,11 @@
         deallocate(jetbdc)
         allocate(jetbdc(0:narrayjetptc),stat=ierr)
         jetbdc(0:narrayjetptc)=.false.
+        if(lbreakup)then
+          deallocate(jetbrc)
+          allocate(jetbrc(0:narrayjetptc),stat=ierr)
+          jetbrc(0:narrayjetptc)=.false.
+        endif
       endif
     endif
   else
@@ -150,6 +158,10 @@
     if(typemass==3  .or. ltagbeads)then
       allocate(jetbdc(0:narrayjetptc),stat=ierr)
       jetbdc(0:narrayjetptc)=.false.
+      if(lbreakup)then
+        allocate(jetbrc(0:narrayjetptc),stat=ierr)
+        jetbrc(0:narrayjetptc)=.false.
+      endif
     endif
   endif
   

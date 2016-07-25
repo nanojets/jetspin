@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification May 2015
+!     last modification January 2016
 !     
 !***********************************************************************
  
@@ -31,7 +31,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification December 2015
 !     
 !***********************************************************************
   
@@ -86,6 +86,9 @@
       case (16)
         write(outp,outf2)'ERROR - dynamic refinement threshold too small!', &
          ' Please increase the dynamic refinement threshold.'
+      case (17)
+        write(outp,outf2)'ERROR - multiple step error', &
+         ' Please check the input file.'
       case default
         write(outp,'(a,i18)')'unknown ERROR! code = ',kode
     end select
@@ -104,7 +107,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification July 2015
+!     last modification January 2016
 !     
 !***********************************************************************
   
@@ -329,6 +332,16 @@
       "WARNING - * nref                 * number of performed dynamic refinements    *"
       write(outp,'(a)') &
       "WARNING - * angl                 * instantaneus angular aperture              *"
+      write(outp,'(a)') &
+      "WARNING - * mxst                 * maximum stress along the jet               *"
+      write(outp,'(a)') &
+      "WARNING - * mxsx                 * x position of the jet maximum stress       *"
+      write(outp,'(a)') &
+      "WARNING - * nms                  * number of multiple step procedure done     *"
+      write(outp,'(a)') &
+      "WARNING - * erms                 * maximum error of multiple step approach    *"
+      write(outp,'(a)') &
+      "WARNING - * v                    * value of the external electric potential   *"
       write(outp,'(a,/)') &
       "WARNING - *********************************************************************"
     case (61)
@@ -355,11 +368,92 @@
       write(outp,'(/,a,g20.10,a,/)') &
       "WARNING - 'dynamic refinement every' value automatically set equal to ",ddata, ' s'
     case (69)
-      write(outp,'(/,2a,g20.10,a,/)')"WARNING - JETSPIN is restarting from 'restart.dat' file", &
+      write(outp,'(/,a,/,a,g20.10,a,/)')"WARNING - JETSPIN is restarting from 'restart.dat' file", &
       "WARNING - The simulation restarts at the simulation time ",ddata, ' s'
     case (70)
       write(outp,'(/,a,/)') &
        "WARNING - 'variable mass typemass 3' is availabe only in refinement mode activated"
+    case (71)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'external potential freq' not specified in input file"
+    case (72)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'ultimate strength' not specified in input file"
+    case (73)
+      write (r_char,'(i10)')nint(ddata)
+      write(outp,'(/,a)') &
+       "WARNING - wrong selection of 'external potential type' in input file"
+      write(outp,'(2a,/)')"WARNING - the actual selection is : ",trim(adjustl(r_char))
+    case (74)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'primary cutoff' not specified in input file"
+    case (75)
+      write (r_char,'(i10)')nint(ddata)
+      write(outp,'(/,a)') &
+       "WARNING - 'multiple step every' should be greater than 2 in input file"
+      write(outp,'(2a,/)')"WARNING - the actual value is : ",trim(adjustl(r_char))
+    case (76)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'multiple step every' not specified in input file"
+    case (77)
+      write (r_char,'(i10)')nint(ddata)
+      write(outp,'(/,a)') &
+       "WARNING - wrong 'print binary style' specified in input file"
+      write(outp,'(2a,/)')"WARNING - the actual value is : ",trim(adjustl(r_char))
+    case (78)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'external potential time' not specified in input file"
+    case (79)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'pdb tagbeads' have to be used with dynamic refinement yes"
+    case (80)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'magnetic field' not specified in input file"
+    case (81)
+      write(outp,'(/,a,g20.10,a,/)') &
+       "WARNING - anchor bead for dynamic refinement automatically set every ",ddata, ' cm'
+    case (82)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'dynam refin every' not specified in input file"
+    case (83)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'dynam refin threshold' not specified in input file"
+    case (84)
+      write(outp,'(/,a)') &
+       "WARNING - anchor bead distance need to be changed in order to be"
+      write(outp,'(a)') &
+       "WARNING - consistent with mass variable input values!"
+      write(outp,'(a,g20.10,a,/)') &
+       "WARNING - anchor bead for dynamic refinement automatically set every ",ddata, ' cm'
+    case (85)
+      write(outp,'(/,a)') &
+       "WARNING - wrong 'dynam refin anchor' specified in input file!"
+      write(outp,'(a)') &
+       "WARNING - The actual value is too small!"
+      write(outp,'(a,g20.10,a,/)')"WARNING - the value is automatically changed : ",ddata,' cm'
+    case (86)
+      write(outp,'(/,a,g20.10,a,/)') &
+       "WARNING - wrong 'dynam refin threshold' specified in input file!"
+       write(outp,'(a)') &
+       "WARNING - the actual value is too small!"
+      write(outp,'(a,g20.10,a,/)')"WARNING - the value is automatically changed : ",ddata,' cm'
+    case (87)
+      write(outp,'(/,a)') &
+       "WARNING - 'hbfluid' and 'kvfluid' activated in input file"
+      write(outp,'(a,/)') &
+       "WARNING - 'hbfluid' and 'kvfluid' cannot be activated at the same time"
+    case (88)
+      write(outp,'(/,a)') &
+       "WARNING - wrong 'elastic modulus' specified in input file!"
+      write(outp,'(a)') &
+       "WARNING - The value is too small and should be grater than 1.d-4"
+      write(outp,'(a,g20.10,a,/)') &
+       "WARNING - acual value equal to : ",ddata, ' g cm^-1 s^-2'
+    case (89)
+      write (r_char,'(i10)')nint(ddata)
+      write(outp,'(/,a)') &
+       "WARNING - 'system' should be 1 or 3 in input file if 'kvfluid' is activated"
+      write(outp,'(2a,/)')"WARNING - the actual value is : ",trim(adjustl(r_char))
     case default
       write(outp,'(/,a,i8,/)')"unknown WARNING! code = ",kode
   end select

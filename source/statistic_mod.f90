@@ -17,15 +17,17 @@
                              insvx,insvy,insvz,jetxx,jetyy,jetzz,jetvx,&
                              jetvy,jetvz,jetst,jetms,jetch,npjet,g,h,&
                              chargescale,jetcr,lengthscale,massscale,&
-                             tao,jetpt,jetvl
+                             tao,jetpt,jetvl,nmulstepdone, &
+                             multisteperror,nmultisteperror,V0
  use dynamic_refinement_mod,only : irefinementdone
  use support_functions_mod, only : compute_crosssec,compute_length_path
+ use electric_field_mod,    only : actual_form_electric_field
  
  implicit none
  
  private
  
- integer, public, parameter :: nmaxstatdata=40
+ integer, public, parameter :: nmaxstatdata=45
  
  double precision, public, save, dimension(nmaxstatdata) :: statdata
  
@@ -57,6 +59,9 @@
  double precision, public, save :: counterecross=0.d0
  double precision, public, save :: meanelen=0.d0
  double precision, public, save :: meanecross=0.d0
+ 
+ double precision, public, save :: maxstress=0.d0
+ double precision, public, save :: maxstressposx=0.d0
  
  double precision, public, save :: meancputime=0.d0
  
@@ -114,11 +119,13 @@
   call store_vel_init()
   call store_length_path()
   
+  call store_maxstress()
+  
   return
   
  end subroutine statistic_driver
  
- subroutine compute_statistic(tempint,timesub)
+ subroutine compute_statistic(tempint,timesub,nstepsub)
  
 !***********************************************************************
 !     
@@ -134,10 +141,15 @@
   implicit none
   
   double precision, intent(in) :: tempint,timesub
+  integer, intent(in) :: nstepsub
   
   integer, save :: icount=0
   integer :: ipoint
   
+  integer, save :: nstepsubold=0
+  integer, save :: nmulstepdoneold=0
+  
+  double precision, dimension(3) :: vext
   
 ! compute all the observables
   call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
@@ -215,9 +227,32 @@
   else
     statdata(40)=0.d0
   endif
+  statdata(41)=maxstress*G
+  statdata(42)=maxstressposx*lengthscale
+  if(nmulstepdone==0)then
+    statdata(43)=0
+  else
+    statdata(43)=dble(nstepsub-nstepsubold)/ &
+     dble(nmulstepdone-nmulstepdoneold)
+  endif
+  if(nmultisteperror/=0)then
+    statdata(44)=(multisteperror/dble(nmultisteperror))* &
+     chargescale**2.d0/(lengthscale**2.d0)
+  else
+    statdata(44)=0.d0
+  endif
+  call actual_form_electric_field(timesub,vext)
+  statdata(45)=vext(1)*V0
   
 ! update the counter
   icount=icount+1
+  
+  maxstress=0.d0
+  maxstressposx=0.d0
+  multisteperror=0.d0
+  nmultisteperror=0
+  nstepsubold=nstepsub
+  nmulstepdoneold=nmulstepdone
   
   return
   
@@ -920,6 +955,32 @@
   return
   
  end subroutine compute_elapsed_cpu_time
+ 
+ subroutine store_maxstress()
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for storing the maximum stress and
+!     its x position along the nanofiber
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification January 2016
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer :: ipoint
+  
+  do ipoint=inpjet,npjet
+    maxstress=max(jetst(ipoint),maxstress)
+    if(maxstress==jetst(ipoint))maxstressposx=jetxx(ipoint)
+  enddo
+  
+  return
+  
+ end subroutine store_maxstress
   
  end module statistic_mod
 

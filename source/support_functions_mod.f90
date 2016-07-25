@@ -8,16 +8,18 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification May 2015
+!     last modification January 2016
 !     
 !***********************************************************************
  
  use version_mod, only : mystart,myend,sum_world_darr,memyend, &
-                   set_chunk,set_mxchunk
+                   set_chunk,set_mxchunk,or_world_larr
  use utility_mod, only : Pi,modulvec,cross,dot
  use nanojet_mod, only : systype,icrossec,inpjet,npjet,resolution, &
                    velext,linserted,airdragamp,jetms,mxnpjet, &
-                   linserting,luppot,kuppot,jetms
+                   linserting,luppot,kuppot,jetch,jetxx,jetyy,jetzz, &
+                   jetpt,jetvl,jetcr,KLor,BLor,lflorentz
+
  
  implicit none
  
@@ -25,6 +27,7 @@
  
  public :: compute_geometry_1d
  public :: compute_geometry_1d_init
+ public :: compute_geometry_1d_KV
  public :: beadlength1d
  public :: beadvel1d
  public :: compute_geometry
@@ -32,12 +35,14 @@
  public :: beadlength
  public :: compute_tangetversor
  public :: project_beadveltangetversor
+ public :: project_beadacctangetversor
  public :: compute_curvcenter
  public :: compute_curvature
  public :: project_veltangetversor
  public :: compute_stocforce_3d
  public :: compute_crosssec
  public :: compute_length_path
+ public :: compute_lorentz_acc
  public :: upwall
  
  contains
@@ -111,6 +116,43 @@
   return
   
  end subroutine compute_geometry_1d_init
+ 
+ subroutine compute_geometry_1d_KV(ipoint,yxx,yst,yvx,yax, &
+  beadlenupsub,beadvelupsub,beadaccupsub)
+  
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing geometrical properties 
+!     velocity difference and acceleration difference between the first 
+!     bead and its upper bead in the one dimensional model
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2016
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: ipoint
+  
+  double precision, allocatable, dimension (:), intent(in) ::  yxx
+  double precision, allocatable, dimension (:), intent(in) ::  yst
+  double precision, allocatable, dimension (:), intent(in) ::  yvx
+  double precision, allocatable, dimension (:), intent(in) ::  yax
+  
+  double precision, intent(out) :: beadlenupsub
+  double precision, intent(out) :: beadvelupsub
+  double precision, intent(out) :: beadaccupsub
+  
+  
+  beadlenupsub=beadlength1d(ipoint,yxx)
+  beadvelupsub=beadvel1d(ipoint,yvx)
+  beadaccupsub=beadacc1d(ipoint,yax)
+  
+  return
+  
+ end subroutine compute_geometry_1d_KV
  
  function beadlength1d(ipoint,yxx)
  
@@ -191,6 +233,46 @@
   return
   
  end function beadvel1d
+ 
+ function beadacc1d(ipoint,yax)
+ 
+!***********************************************************************
+!     
+!     JETSPIN function for computing the acceleration difference
+!     between the i-th bead and its upper
+!     bead in the one dimensional model
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2016
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: ipoint
+  
+  double precision, allocatable, dimension (:), intent(in) ::  yax
+  
+  double precision :: beadacc1d
+  
+  if(ipoint==npjet-2)then
+    if(ipoint>=0)then
+      if(.not.linserted)then
+        beadacc1d = yax(ipoint)-yax(npjet)
+      else
+        beadacc1d = yax(ipoint)-yax(ipoint+1)
+      endif
+    else
+      beadacc1d = 0.d0
+    endif
+  else
+    beadacc1d = yax(ipoint)-yax(ipoint+1)
+  endif
+     
+  return
+  
+ end function beadacc1d
  
  subroutine compute_geometry(ipoint,yxx,yyy,yzz, &
   beadlendownsub,beadlenupsub)
@@ -414,6 +496,67 @@
   return
   
  end subroutine project_beadveltangetversor
+ 
+ subroutine project_beadacctangetversor(ipoint,yvx,yvy,yvz, &
+  beadveltang,utang)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the module acceleration 
+!     difference between the i-th bead and its upper
+!     bead in the three dimensional model
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification July 2016
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(in) ::  ipoint
+  double precision, allocatable, dimension (:), intent(in) ::  yvx
+  double precision, allocatable, dimension (:), intent(in) ::  yvy
+  double precision, allocatable, dimension (:), intent(in) ::  yvz
+  double precision, intent(out) :: beadveltang
+  double precision, intent(in), dimension(3) :: utang
+  
+  double precision, dimension(3) :: vtang,uvtang
+  double precision :: normvtang,dotp
+  
+  
+  if(ipoint==npjet-2)then
+    if(ipoint>=0)then
+      if(.not.linserted)then
+        vtang(1)=yvx(ipoint)-yvx(npjet)
+        vtang(2)=yvy(ipoint)-yvy(npjet)
+        vtang(3)=yvz(ipoint)-yvz(npjet)
+      else
+        vtang(1)=yvx(ipoint)-yvx(ipoint+1)
+        vtang(2)=yvy(ipoint)-yvy(ipoint+1)
+        vtang(3)=yvz(ipoint)-yvz(ipoint+1)
+      endif
+    else
+      vtang(1:3)=0.d0
+    endif
+  else
+    vtang(1)=yvx(ipoint)-yvx(ipoint+1)
+    vtang(2)=yvy(ipoint)-yvy(ipoint+1)
+    vtang(3)=yvz(ipoint)-yvz(ipoint+1)
+  endif
+  
+  normvtang=dsqrt(vtang(1)**2.d0+vtang(2)**2.d0+vtang(3)**2.d0)
+  if(normvtang>0.d0)then
+    uvtang(:)=vtang(:)/normvtang
+    dotp=dot_product(uvtang,utang)
+    beadveltang=normvtang*dotp
+  else
+    beadveltang=0.d0
+  endif
+  
+  return
+  
+ end subroutine project_beadacctangetversor
  
  subroutine compute_curvcenter(ipoint,yxx,yyy,yzz,curvcentersub, &
   lstraightsub)
@@ -818,6 +961,45 @@
   return
   
  end subroutine compute_length_path
+ 
+ 
+ 
+ subroutine compute_lorentz_acc(k,vx,vy,vz,aLorx,aLory,aLorz)
+
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the acceleration given by lorentz
+!     force
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella, F. Cipolletta
+!     last modification April 2016
+!     
+!***********************************************************************
+
+  implicit none
+  integer, intent(in) :: k
+  double precision, allocatable, dimension(:), intent(in) :: vx,vy,vz
+  double precision, intent(out) :: aLorx,aLory,aLorz                                                             
+  
+  double precision :: KLorsub
+  
+  if(.not. lflorentz)then
+    aLorx=0.d0
+    aLory=0.d0
+    aLorz=0.d0
+    return
+  endif
+  
+  KLorsub=KLor*jetch(k)/(dsqrt(jetms(k)))
+  
+  aLorx = KLorsub *(( vy(k)*BLor(3) )-( vz(k)*BLor(2) ))
+  aLory = KLorsub *(( vz(k)*BLor(1) )-( vx(k)*BLor(3) ))
+  aLorz = KLorsub *(( vx(k)*BLor(2) )-( vy(k)*BLor(1) ))                                       
+    
+  return
+    
+ end subroutine compute_lorentz_acc
  
  function upwall(ipoint,yxx)
  

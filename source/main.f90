@@ -34,9 +34,9 @@
 !
 ! contributors: I. Coluzza,G. Pontrelli, D. Pisignano, S. Succi
 !
-!                        JETSPIN VERSION 1.20
+!                        JETSPIN VERSION 1.21
 !
-! (December 2015)
+! (March 2016)
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
@@ -46,7 +46,9 @@
   use nanojet_mod,    only : inpjet,npjet,linserted,myseed,systype, &
                        tstep,xyzrescale,set_resolution_length, &
                        allocate_jet,set_initial_jet,add_jetbead, &
-                       remove_jetbead,erase_jetbead,lengthscale
+                       remove_jetbead,erase_jetbead,lengthscale, &
+                       pdbrescale,lreadrest
+  use breaking_mod,   only : ckeck_breakup
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
                                refbeadstartfit
@@ -65,7 +67,9 @@
                        write_xyz_singlefile,lprintxyzsing, &
                        iprintxyzsing,open_datrem_file, &
                        write_datrem_frame,close_datrem_file, &
-                       write_restart_file,read_restart_file
+                       write_restart_file,read_restart_file, &
+                       write_pdb_singlefile,lprintpdbsing, &
+                       iprintpdbsing
   
   implicit none
   
@@ -110,7 +114,7 @@
   call allocate_jet()
   
 ! set the nanofiber quantities
-  call set_initial_jet(tstep,initime,endtime,refinementthreshold, &
+  call set_initial_jet(initime,endtime,refinementthreshold, &
    refbeadstartfit)
   
 ! print the internal scaling units
@@ -157,7 +161,7 @@
   call open_dat_file(lprintdat,130,'traj.dat')
   
 ! write the input parameters on the binary file (only for developers) 
-  call write_dat_parameter(lprintdat,130,mytime)
+  if(.not. lreadrest)call write_dat_parameter(lprintdat,130,mytime)
   
 !***********************************************************************
 !     start the time integration
@@ -171,10 +175,13 @@
     call driver_integrator(mytime,tstep,nstep,ldorefinment)
     
 !   check if a new bead should be added and/or removed
-    call add_jetbead(nstep,mytime,tstep,ladd)
+    call add_jetbead(nstep,mytime,ladd)
     call remove_jetbead(nstep,nremoved,mytime,lrem,lremdat)
     
-!   compete statistical quanities
+!   check if the filament is breaking up between two beads
+    call ckeck_breakup(mytime)
+    
+!   compute statistical quanities
     call statistic_driver(mytime,tstep,nstep,nremoved,ladd,lrem)
     
 !   print on the binary file the jet bead which have hit the collector 
@@ -195,6 +202,10 @@
 !   print the jet geometry on the XYZ formatted output file
     call write_xyz_singlefile('frame',lprintxyzsing,125,nstep,mytime, &
      iprintxyzsing,inpjet,npjet,xyzrescale,systype,linserted,.false.)
+     
+!   print the jet geometry on the PDB formatted output file
+    call write_pdb_singlefile('frame',lprintpdbsing,126,nstep,mytime, &
+     iprintpdbsing,inpjet,npjet,pdbrescale,systype,linserted,.false.)
      
 !   print the jet geometry on the binary file (only for developers)
     call write_dat_frame(lprintdat,130,nstep,mytime,iprintdat, &

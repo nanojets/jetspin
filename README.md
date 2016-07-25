@@ -1,5 +1,5 @@
 The JETSPIN README File                                                 
-Version 1.20 (December 2015)                                               
+Version 1.21 (July 2016)                                                
                                                                         
 JETSPIN is a specific-purpose open-source software for electrospinning  
 simulations of nanofibers. The code was originally written by           
@@ -37,8 +37,8 @@ directives the reader is referred to the article:
                                                                         
 Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,    
 Sauro Succi, JETSPIN: A specific-purpose open-source software for       
-electrospinning simulations of nanofibers, Submitted to Computer        
-Physics Communications, 2015.                                           
+electrospinning simulations of nanofibers, Computer Physics             
+Communications, 197 (2015), pp. 227-238.                                
                                                                         
 Compiling JETSPIN                                                       
                                                                         
@@ -51,18 +51,18 @@ source sub-directory, where the code is compiled and linked. Finally,
 the binary executable file can be run in the execute sub-directory,     
 which isintended to be the 'working' directory from which jobs are      
 submitted for execution and the data files manipulated. A list of       
-targets for several common workstations and parallel computers can be    
+targets for several common workstations and parallel computers can be   
 used by the command "make target", where target is one of the           
 following options:                                                      
 gfortran      ---> compile in serial mode using the GFortran compiler.  
 gfortran-mpi  ---> compile in serial mode using the GFortran compiler   
-                   under the command-line interface Cygwin for Windows.  
+                   under the command-line interface Cygwin for Windows. 
 cygwin        ---> compile in serial mode using the GFortran compiler   
-                   under the command-line interface Cygwin for Windows.  
-cygwin-mpi    ---> compile in parallel mode using the GFortran compiler  
+                   under the command-line interface Cygwin for Windows. 
+cygwin-mpi    ---> compile in parallel mode using the GFortran compiler 
                    and the Open Mpi library under the command-line      
                    interface Cygwin for Windows (note a precompiled     
-                   package of the Open Mpi library is already available  
+                   package of the Open Mpi library is already available 
                    on Cygwin).                                          
 intel         ---> compile in serial mode using the Intel compiler.     
 intel-mpi     ---> compile in parallel mode using the Intel compiler    
@@ -71,7 +71,7 @@ intel-openmpi ---> compile in parallel mode using the Intel compiler
                    and the Open Mpi library.                            
 help          ---> return the list of possible target choices.          
 On Windows system we advice the user to compile JETSPIN under the       
-command-line interface Cygwin. Note that a Message Passing Interface     
+command-line interface Cygwin. Note that a Message Passing Interface    
 Implementation is necessary to compile and run JETSPIN in parallel      
 mode.                                                                   
                                                                         
@@ -93,4 +93,21 @@ Example command to run JETSPIN in parallel mode on 4 CPUs:
                                                                         
 mpirun -np 4 ./main.x                                                   
                                                                         
+                                                                        
+New features in JETSPIN Version 1.21                                    
+                                                                        
+  - The dynamic refinement method was implemented.                      
+                                                                        
+  - It was implemented a multiple step algorithm for the long-range     
+    Coulomb forces.                                                     
+                                                                        
+  - The rheological Kelvin–Voigt model was added.                       
+                                                                        
+  - Example 6 was added modelling a Kelvin–Voigt fluid.                 
+                                                                        
+  - JETSPIN can write PDB formatted file with a PSF file containing the 
+    structure of the jet (defining a bond for each pair of consecutive  
+    jet beads).                                                         
+                                                                        
+  - The manual was updated.                                             
                                                                         

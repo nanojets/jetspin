@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification December 2015
+!     last modification January 2016
 !     
 !*********************************************************************** 
  
@@ -21,14 +21,18 @@
                   jetzz,jetvx,jetvy,jetvz,jetst,jetms,jetch,jetvl, &
                   jetcr,linserted,linserting,systype,lengthpath, &
                   doallocate,doreorder,mxnpjet,incnpjet,lengthscale, &
-                  ivolume,jetbd,typemass,massratio,imassa,jetfr,h, &
-                  lenthresholdbead,ltagbeads
+                  ivolume,jetbd,massratio,imassa,jetfr,h, &
+                  lenthresholdbead,ltagbeads,lbreakup,jetbr, &
+                  lmultiplestep,lneighlistdo,jetfm,lmassavariable, &
+                  lenprobmassa,icharge
  use fit_mod,     only : jetptc,allocate_arrayspline,create_spline, &
                    allocate_array_jetptc,driver_fit_spline, &
                    looking_indexes_2,looking_indexes_4, &
                    cubic_interpolation,fit_akima,allocate_arrayakima, &
-                   jetbdc
- use support_functions_mod, only : compute_length_path,compute_crosssec
+                   jetbdc,jetbrc
+ use support_functions_mod, only : compute_length_path, &
+                   compute_crosssec
+ use breaking_mod, only : clean_breakup
  
  implicit none
  
@@ -47,6 +51,7 @@
  logical, public, save :: lrefinementthreshold=.false.
  logical, public, save :: lrefinementevery=.false.
  logical, public, save :: lrefinementstart=.false.
+ logical, public, save :: llenthresholdbead=.false.
  
  logical, public, save :: lrefbeadstart=.false.
  
@@ -54,8 +59,6 @@
  integer, public, save :: irefinementstart=0
  integer, public, save :: irefinementevery=0
  integer, public, save :: irefinementdone=0
- 
- integer, public, save :: refinementcons=0
  
  double precision, public, save :: refinementthreshold=0.d0
  
@@ -135,16 +138,31 @@ implicit none
  
   implicit none
   
+  
   if(lrefinement)then
     if(.not.lrefinementthreshold)then
       refinementthreshold=10.d0*resolution
       refbeadstartfit=10.d0*resolution
-      lenthresholdbead=refinementthreshold
       lrefbeadstart=.true.
       lrefinementthreshold=.true.
       call warning(66,refinementthreshold)
     else
       if(refinementthreshold<(2.d0*resolution))call error(16)
+      if(refinementthreshold<5.d0*resolution)then
+        refinementthreshold=5.d0*resolution
+        refbeadstartfit=refinementthreshold
+        call warning(86,refinementthreshold)
+      endif
+    endif
+    if(.not. llenthresholdbead)then
+      llenthresholdbead=.true.
+      lenthresholdbead=5.d0*resolution
+      call warning(81,lenthresholdbead)
+    else
+      if(lenthresholdbead<resolution)then
+        lenthresholdbead=5.d0*resolution
+        call warning(85,lenthresholdbead)
+      endif
     endif
   endif
   
@@ -251,9 +269,6 @@ implicit none
   integer, allocatable :: massbd(:,:),massbdpoint(:)
   double precision, allocatable :: massbddist(:),massbdgap(:)
   double precision :: tempmod0,tempmod1,tempmod2,voltot,newvoltot
-  double precision :: mastot,newmastot
-  double precision :: chrtot,newchrtot
-  
   
   integer, save :: icounter=0
   
@@ -320,12 +335,8 @@ implicit none
   call convert_to_density(jetms,jetch,jetvl)
   
   voltot=0.d0
-  mastot=0.d0
-  chrtot=0.d0
   do i=inpjet,irefbeadstart
     voltot=voltot+jetvl(i)
-    mastot=mastot+jetms(i)
-    chrtot=chrtot+jetch(i)
   enddo
   call allocate_array_keepvol(npjet-irefbeadstart)
   i=0
@@ -343,14 +354,18 @@ implicit none
   jptend=jptinit+nfitspline
   
   jetbdc(:)=.false.
+  if(lbreakup)jetbrc(:)=.false.
   
   j=jptinit
   jetptc(j)=0.d0
-  if(jetbd(inpjet))jetbdc(j)=.true.
+  jetbdc(j)=jetbd(inpjet)
+  if(lbreakup)jetbrc(j)=jetbr(inpjet)
+  
   do ipoint=inpjet+1,irefbeadstop
     j=j+1
     jetptc(j)=jetpt(ipoint)
-    if(jetbd(ipoint))jetbdc(j)=.true.
+    jetbdc(j)=jetbd(ipoint)
+    if(lbreakup)jetbrc(j)=jetbr(ipoint)
   enddo
   do i=0,nmassbd
     tempmod0=massbdgap(i)
@@ -361,8 +376,10 @@ implicit none
         if(i/=nmassbd)then
           jetbdc(j)=.true.
           jetptc(j)=jetpt(massbd(i,2))
+          if(lbreakup)jetbrc(j)=jetbr(massbd(i,2))
         else
           jetptc(j)=jetpt(irefbeadstart)
+          if(lbreakup)jetbrc(j)=jetbr(irefbeadstart)
         endif         
       endif
     enddo
@@ -371,9 +388,8 @@ implicit none
   do ipoint=irefbeadstart+1,npjet
     j=j+1
     jetptc(j) = jetpt(ipoint)
-    if(jetbd(ipoint))then
-      jetbdc(j)=.true.     
-    endif
+    jetbdc(j)=jetbd(ipoint)
+    if(lbreakup)jetbrc(j)=jetbr(ipoint) 
   enddo
   totjptend=j
     
@@ -387,12 +403,21 @@ implicit none
     jetbd(ipoint)=jetbdc(ipoint)
   enddo
   
+  if(lbreakup)then
+    if(mydoallocate)then
+      deallocate(jetbr)
+      allocate(jetbr(0:mxnpjet))
+    endif
+    jetbr(0:mxnpjet)=.false.
+    do ipoint=jptinit,totjptend
+      jetbr(ipoint)=jetbrc(ipoint)
+    enddo
+  endif
+  
   deallocate(massbd,massbdpoint)
   deallocate(massbddist,massbdgap)
   
-   
   call fit_jet_akima(jptinit,totjptend)
-  
     
   do i=jptinit,jptend
     tempmod0=lengthpath*(jetptc(i+1)-jetptc(i))
@@ -412,21 +437,11 @@ implicit none
   
   jetvl(jptinit:jptend)=jetvl(jptinit:jptend)*voltot/newvoltot
   
-  newmastot=0.d0
-  newchrtot=0.d0
-  do i=jptinit,jptend
-    newmastot=newmastot+jetms(i)
-    newchrtot=newchrtot+jetch(i)
-  enddo
-  
-  if(refinementcons==0)then
-    jetms(jptinit:jptend)=jetms(jptinit:jptend)*mastot/newmastot
-    jetch(jptinit:jptend)=jetch(jptinit:jptend)*chrtot/newchrtot
-  endif
-  
   call convert_from_density(jetms,jetch,jetvl)
   
   doallocate=(doallocate .or. mydoallocate)
+  if(lmultiplestep)lneighlistdo=.true.
+  if(lbreakup)call clean_breakup(jptinit,jptend,totjptend)
   
   return
   
@@ -743,6 +758,10 @@ implicit none
   if(mydoallocate)then
     deallocate(jetfr)
     allocate(jetfr(0:mxnpjet))
+    if(lmultiplestep)then
+      deallocate(jetfm)
+      allocate(jetfm(0:mxnpjet))
+    endif
   endif
   jetfr(:)=.false.
   do ipoint=inpjet,npjet
@@ -781,22 +800,22 @@ implicit none
   double precision :: extramass,extravol
   
   
-  if(typemass==3  .or. ltagbeads)then
-    extramass=imassa*(massratio-1.d0)*ivolume
-    extravol=(massratio-1.d0)*ivolume
+  if(lmassavariable)then
+    extravol=(4.d0/3.d0)*Pi*lenprobmassa**3.d0
+    extramass=massratio*extravol
     do ipoint=inpjet,npjet
       if(jetbd(ipoint))then
         jvl(ipoint)=jvl(ipoint)-extravol
-        jms(ipoint)=(jms(ipoint)-extramass)/jvl(ipoint)
-        jch(ipoint)=jch(ipoint)/jvl(ipoint)
+        jms(ipoint)=imassa
+        jch(ipoint)=icharge
       else
-        jms(ipoint)=jms(ipoint)/jvl(ipoint)
-        jch(ipoint)=jch(ipoint)/jvl(ipoint)
+        jms(ipoint)=imassa
+        jch(ipoint)=icharge
       endif
     enddo
   else
-    jms(:)=jms(:)/jvl(:)
-    jch(:)=jch(:)/jvl(:)
+    jms(:)=imassa
+    jch(:)=icharge
   endif
   
   
@@ -825,17 +844,17 @@ implicit none
   integer :: ipoint
   double precision :: extramass,extravol
   
-  if(typemass==3  .or. ltagbeads)then
-    extramass=imassa*(massratio-1.d0)*ivolume
-    extravol=(massratio-1.d0)*ivolume
+  if(lmassavariable)then
+    extravol=(4.d0/3.d0)*Pi*lenprobmassa**3.d0
+    extramass=massratio*extravol
     do ipoint=inpjet,npjet
       if(jetbd(ipoint))then
-        jms(ipoint)=jms(ipoint)*jvl(ipoint)+extramass
-        jch(ipoint)=jch(ipoint)*jvl(ipoint)
+        jms(ipoint)=imassa*jvl(ipoint)+extramass
+        jch(ipoint)=icharge*jvl(ipoint)
         jvl(ipoint)=jvl(ipoint)+extravol
       else
-        jms(ipoint)=jms(ipoint)*jvl(ipoint)
-        jch(ipoint)=jch(ipoint)*jvl(ipoint)
+        jms(ipoint)=imassa*jvl(ipoint)
+        jch(ipoint)=icharge*jvl(ipoint)
       endif
     enddo
   else

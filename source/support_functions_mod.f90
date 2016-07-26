@@ -616,6 +616,12 @@
   l1=modulvec(v1)
   l2=modulvec(v2)
   
+  if(l1==0.d0 .or. l2==0.d0)then
+    lstraightsub=.true.
+    curvcentersub(:) = 0.d0
+    return
+  endif
+  
   v1n=v1/l1
   v2n=v2/l2
 
@@ -626,11 +632,24 @@
   v2nb(:)=v2n(:)-dotp*v1nb(:)
 
   l2nb=modulvec(v2nb)
+  
+  if(l2nb==0.d0)then
+    lstraightsub=.true.
+    curvcentersub(:) = 0.d0
+    return
+  endif
+  
   v2nb(:)=v2nb(:)/l2nb
   
 
   p3_2d(1) = dot_product(v2,v1nb)
   p3_2d(2) = dot_product(v2,v2nb)
+  
+  if(p3_2d(2)==0.d0)then
+    lstraightsub=.true.
+    curvcentersub(:) = 0.d0
+    return
+  endif
   
 
 ! compute the curvature center in this 2-D space

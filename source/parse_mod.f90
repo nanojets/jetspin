@@ -548,9 +548,10 @@
   
   implicit none
   
+  integer, intent(in) :: len1,len2
   character(len=len1), intent(out) :: stringout
   character(len=*), intent(in) :: string
-  integer, intent(in) :: len1,len2
+  
   
   character*1, dimension(len1) :: wrdseq
   character*1, dimension(len2) :: word
@@ -619,10 +620,10 @@
   
   implicit none
   
+  integer, intent(in) :: lenstring
   character(len=*), intent(in) :: string
   integer, intent(out) :: nwords
   character(len=lenstring) ,allocatable, intent(inout) :: outwords(:)
-  integer, intent(in) :: lenstring
   
   character(len=lenstring) :: temps,temps2
   character*1, allocatable, dimension(:,:) :: tempswords,foundwords

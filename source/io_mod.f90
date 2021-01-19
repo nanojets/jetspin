@@ -1680,8 +1680,8 @@
   implicit none
   
   integer ,intent(in) :: iarg
-  character(len=lenstring) ,allocatable, intent(in) :: arg(:)
   integer, intent(in) :: lenstring
+  character(len=lenstring) ,allocatable, intent(in) :: arg(:)
   logical, intent(out) :: lfound
   integer, allocatable, intent(inout) :: printcodsub(:)
   

@@ -468,8 +468,8 @@
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h,k)
+         jetvl,coulforce,f2xx(j),fyy,fzz,f2st(j), &
+         f2vx(j),fvy,fvz,timesub+h,k)
          j=j+1
       enddo
       j=0
@@ -786,8 +786,8 @@
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h/2.d0,k)
+         jetvl,coulforce,f2xx(j),fyy,fzz,f2st(j), &
+         f2vx(j),fvy,fvz,timesub+h/2.d0,k)
          j=j+1
       enddo
       j=0
@@ -811,8 +811,8 @@
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f3xx(j),f3yy(j),f3zz(j),f3st(j), &
-         f3vx(j),f3vy(j),f3vz(j),timesub+h/2.d0,k)
+         jetvl,coulforce,f3xx(j),fyy,fzz,f3st(j), &
+         f3vx(j),fvy,fvz,timesub+h/2.d0,k)
          j=j+1
       enddo
       j=0
@@ -836,8 +836,8 @@
       j=0
       do ipoint=mystart,myend
         call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f4xx(j),f4yy(j),f4zz(j),f4st(j), &
-         f4vx(j),f4vy(j),f4vz(j),timesub+h,k)
+         jetvl,coulforce,f4xx(j),fyy,fzz,f4st(j), &
+         f4vx(j),fvy,fvz,timesub+h,k)
          j=j+1
       enddo
       j=0
@@ -4178,4 +4178,3 @@
  end subroutine platen_ev
  
  end module integrator_mod
-

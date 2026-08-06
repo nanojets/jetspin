@@ -22,8 +22,14 @@ permissions:
 
 jobs:
   smoke:
+    strategy:
+      matrix:
+        mode: [serial, debug, mpi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run all example smoke tests
-        run: tests/smoke/run.sh
+      - name: Install MPI
+        if: matrix.mode == 'mpi'
+        run: sudo apt-get update && sudo apt-get install -y openmpi-bin libopenmpi-dev
+      - name: Run smoke tests
+        run: tests/smoke/run.sh "${{ matrix.mode }}"

@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification May 2017
 !     
 !***********************************************************************
 
@@ -47,18 +47,30 @@
  logical, public, save :: lbreakup=.false.
  logical, public, save :: lfieldtype=.false.
  logical, public, save :: lfieldfreq=.false.
+ logical, public, save :: lfieldphase=.false.
  logical, public, save :: lneighlistdo=.true.
  logical, public, save :: lmultisteperror=.false.
  logical, public, save :: lmaxdispl=.false.
  logical, public, save :: ltaoelectr=.false.
+ logical, public, save :: lfieldvector=.false.
  logical, public, save :: lreadrest=.false.
  logical, public, save :: lfirstmass=.true.
  logical, public, save :: lflorentz=.false.
  logical, public, save :: lmagneticfield=.false.
+ logical, public, save :: levaporation=.false.
+ logical, public, save :: lcp0=.false.
+ logical, public, save :: levairv=.false.
+ logical, public, save :: levtemp=.false.
+ logical, public, save :: levumidity=.false.
+ logical, public, save :: lBev=.false.
+ logical, public, save :: lmev=.false.
+ logical, public, save :: ltev=.false.
  double precision, public, save :: multisteperror=0.d0
  double precision, public, save :: q=0.d0
  double precision, public, save :: sqrq=0.d0
  double precision, public, save :: v=0.d0
+ double precision, public, save :: vy=0.d0
+ double precision, public, save :: vz=0.d0
  double precision, public, save :: fve=0.d0
  double precision, public, save :: Hg=0.d0
  double precision, public, save :: Lrg=0.d0
@@ -94,6 +106,9 @@
  double precision, public, save :: aird=0.d0 
  double precision, public, save :: airv=0.d0 
  double precision, public, save :: velext=0.d0 ! cm s^-1
+ double precision, public, save :: noisevar=1.d0 ! cm^2 s^-2
+ double precision, public, save :: noisediff=0.d0 ! cm^2 s^-3
+ double precision, public, save :: noisefric=0.d0 ! s^-1
  double precision, public, save :: current=0.d0 !g^0.5 cm^1.5 sec^-2
  double precision, public, save :: timedeposition=0.d0 !sec
  double precision, public, save :: ultimatestrength=0.d0
@@ -121,10 +136,25 @@
  double precision, public, save :: lenthresholdbead=0.d0
  double precision, public, save :: fieldfreq=0.d0
  double precision, public, save :: maxdispl=0.d0
+ double precision, public, save :: fieldphase=0.d0
  double precision, public, save :: taoelectr=0.d0
+ double precision, public, save, dimension(3) :: fieldvector=(/0.d0,0.d0,0.d0/)
  double precision, public, save, dimension(3) :: BLor=(/0.d0,0.d0,0.d0/)
  double precision, public, save :: KLor=0.d0
  double precision, public, save :: oldgaussn,corr,radcorr
+ double precision, public, save :: cp0=0.d0
+ double precision, public, save :: csinf=0.d0
+ double precision, public, save :: cstemp=0.d0
+ double precision, public, save :: evtemp=0.d0
+ double precision, public, save :: evairv=0.d0 
+ double precision, public, save :: evmasscoeff=0.d0 
+ double precision, public, save :: evcsvapour=0.d0
+ double precision, public, save :: evumidity=0.d0 
+ double precision, public, save :: sqrevsc=0.d0
+ double precision, public, save :: Bev=0.d0
+ double precision, public, save :: mev=0.d0
+ double precision, public, save :: tev=1.d0
+ double precision, public, parameter :: evlim=0.1d0
  
  logical, allocatable, public, save :: jetbd(:)
  logical, allocatable, public, save :: jetbr(:)
@@ -142,7 +172,9 @@
  double precision, allocatable, public, save :: jetms(:) !g
  double precision, allocatable, public, save :: jetch(:) !g^0.5 cm^1.5 sec^-1
  double precision, allocatable, public, save :: jetcr(:) ! cm
+ double precision, allocatable, public, save :: jetce(:) ! cm
  double precision, allocatable, public, save :: jetvl(:) ! cm^3
+ double precision, allocatable, public, save :: jetve(:) ! cm^3
  
  logical, private, parameter :: listresscompensate=.false.
  logical, public, parameter :: ldevelopers=.false.
@@ -176,6 +208,9 @@
  logical, public, save :: laird=.false.
  logical, public, save :: lairv=.false.
  logical, public, save :: lairvel=.false.
+ logical, public, save :: lnoise=.false.
+ logical, public, save :: lnoisevar=.false.
+ logical, public, save :: lnoisediff=.false.
  logical, public, save :: llift=.false.
  logical, public, save :: lmyseed=.false.
  logical, public, save :: lHBfluid=.false.
@@ -195,6 +230,8 @@
  logical, public, save :: lmirror=.false.
  logical, public, save :: ltagbeads=.false.
  logical, public, save :: lultimatestrength=.false.
+ logical, public, save :: levmasscoeff=.false.
+ logical, public, save :: levcsvapour=.false.
  
  
  public :: set_resolution_length
@@ -284,7 +321,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -328,6 +365,10 @@
   allocate(jetch(0:mxnpjet))
   allocate(jetcr(0:mxnpjet))
   allocate(jetvl(0:mxnpjet))
+  if(levaporation)then
+    allocate(jetce(0:mxnpjet))
+    allocate(jetve(0:mxnpjet))
+  endif
   if(ltrackbeads .and. idrank==0)allocate(jetlb(0:mxnpjet))
   if(typemass==3 .or. ltagbeads)allocate(jetbd(0:mxnpjet))
   if(lbreakup)allocate(jetbr(0:mxnpjet))
@@ -347,7 +388,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -367,6 +408,10 @@
   deallocate(jetch)
   deallocate(jetcr)
   deallocate(jetvl)
+  if(levaporation)then
+    deallocate(jetce)
+    deallocate(jetve)
+  endif
   if(ltrackbeads .and. idrank==0)deallocate(jetlb)
   if(typemass==3 .or. ltagbeads)deallocate(jetbd)
   if(lbreakup)deallocate(jetbr)
@@ -384,7 +429,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -549,6 +594,25 @@
   jetvl(:)=0.d0
   jetvl(newinit:newend)=buffservice(newinit:newend)
   
+  if(levaporation)then
+    
+    buffservice(newinit:newend)=jetce(oldinit:oldend)
+    if(doallocate)then
+      deallocate(jetce)
+      allocate(jetce(0:mxnpjet))
+    endif
+    jetce(:)=0.d0
+    jetce(newinit:newend)=buffservice(newinit:newend)
+    
+    buffservice(newinit:newend)=jetve(oldinit:oldend)
+    if(doallocate)then
+      deallocate(jetve)
+      allocate(jetve(0:mxnpjet))
+    endif
+    jetve(:)=0.d0
+    jetve(newinit:newend)=buffservice(newinit:newend)
+  endif
+  
   if(typemass==3 .or. ltagbeads)then
     lbuffservice(newinit:newend)=jetbd(oldinit:oldend)
     if(doallocate)then
@@ -597,7 +661,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -606,7 +670,7 @@
   double precision, intent(inout) :: initime,endtime, &
    refinementthreshold,refbeadstartfit
   integer :: i
-  double precision :: di
+  double precision :: di,mytemp
   
   ivolume=Pi*(icrossec**2.d0)*resolution
   meanmass=imassa*ivolume
@@ -614,9 +678,9 @@
   
   meancharge=icharge*ivolume 
   chargescale=meancharge
-  regq=0.d0 !  icrossec  !0.d0 !meancharge/1.d10
+  regq=0.d0
   
-  if(.not.lV0)then
+  if(.not.lV0 .and. (.not. lfieldvector))then
     call warning(17)
     V0=0.d0
     call warning(65,V0)
@@ -635,6 +699,31 @@
   else
     tanfriction=0.d0
     airdragamp(1:3)=0.d0
+  endif
+  
+  if(levaporation)then
+    !M. Seaver, A. Galloway, and T. J. Manuccia, Rev. Sci. Instrum.,
+    ! 60, 3452 (1989).
+    mytemp=evtemp-273.15d0
+    if(.not. levcsvapour)then
+      evcsvapour=(1.d0/1013.25d0)*(6.107799961d0+mytemp* &
+       (4.436518521d-1+mytemp*(1.428945805d-2+mytemp*(2.650648731d-4+ &
+       mytemp*(3.031240396d-6+mytemp*(2.034080948d-8+ &
+       mytemp*6.136820929d-11)))))) !dimensionless ratio (mbar/mbar)
+      call warning(102,evcsvapour)
+    endif
+    if(.not. levmasscoeff)then
+      evmasscoeff=0.211d0*((evtemp/273.15d0)**1.94d0)*(1.d0/evcsvapour) !cm^2/s
+      call warning(105,evmasscoeff)
+    endif
+    evumidity=evumidity*evcsvapour
+  endif
+  
+  if(lnoise)then
+    noisefric=noisediff/noisevar
+  else
+    noisefric=0.d0
+    noisediff=0.d0
   endif
   
   lengthscale=dsqrt((chargescale**2.d0)/(Pi*(icrossec**2.d0)*G))
@@ -719,6 +808,13 @@
     jetvl(i)=ivolume
   enddo
   
+  if(levaporation)then
+    jetve(:)=0.d0
+    do i=0,npjet
+      jetve(i)=ivolume
+    enddo
+  endif
+  
   call conv_dimensionless_unit_jet(initime,endtime, &
    refinementthreshold,refbeadstartfit)
   call add_initial_perturbation()
@@ -736,7 +832,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification January 2017
 !     
 !***********************************************************************
   
@@ -747,7 +843,16 @@
   tao=(mu/G)
   
   q=(chargescale*mu)**2.d0/((lengthscale**3.d0)*massscale*(G**2.d0))
-  v=(chargescale*V0*(mu**2.d0))/(h*lengthscale*massscale*(G**2.d0))
+  if(lfieldvector)then
+    v=(chargescale*fieldvector(1)*(mu**2.d0))/ &
+     (h*lengthscale*massscale*(G**2.d0))
+    vy=(chargescale*fieldvector(2)*(mu**2.d0))/ &
+     (h*lengthscale*massscale*(G**2.d0))
+    vz=(chargescale*fieldvector(3)*(mu**2.d0))/ &
+     (h*lengthscale*massscale*(G**2.d0))
+  else
+    v=(chargescale*V0*(mu**2.d0))/(h*lengthscale*massscale*(G**2.d0))
+  endif
   fve=lengthscale*(mu**2.d0)/(massscale*G)
   fvere=Pi*(icrossec*mu)**2.d0/(massscale*G*lengthscale)
   Hg=h/lengthscale
@@ -787,7 +892,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -811,6 +916,7 @@
   jetms(:)=jetms(:)/massscale
   jetch(:)=jetch(:)/chargescale
   jetvl(:)=jetvl(:)/(lengthscale**3.d0)
+  if(levaporation)jetve(:)=jetve(:)/(lengthscale**3.d0)
   regq=regq/lengthscale
   resolution=resolution/lengthscale
   hresolution=hresolution/lengthscale
@@ -831,6 +937,15 @@
   imassa=imassa/massscale*(lengthscale**3.d0)
   icharge=icharge/chargescale*(lengthscale**3.d0)
   BLor(1:3)=BLor(1:3)*dsqrt(lengthscale)*tao/dsqrt(massscale)
+  if(levaporation)then
+    evairv=evairv*(tao/(lengthscale**2.d0))
+    evmasscoeff=evmasscoeff*(tao/(lengthscale**2.d0))
+    if(evmasscoeff==0.d0)then
+      sqrevsc=0.d0
+    else
+      sqrevsc=dsqrt(evairv/evmasscoeff)
+    endif
+  endif
   if(lultimatestrength)then
     ultimatestrength=ultimatestrength/G
   endif
@@ -847,6 +962,11 @@
   endif
   if(lairdrag)then
     airdragamp(1:3)=airdragamp(1:3)*(tao**3.d0)/(lengthscale**2.d0)
+  endif
+  if(lnoise)then
+    noisediff=noisediff*(tao**3.d0)/(lengthscale**2.d0)
+    noisefric=noisefric*tao
+    noisevar=noisevar*(tao**2.d0)/(lengthscale**2.d0)
   endif
   if(.not.lxyzrescale)then
     xyzrescale=1.d0
@@ -916,7 +1036,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -1002,6 +1122,7 @@
       jetms(npjet)=jetms(npjet-1)
       jetch(npjet)=jetch(npjet-1)
       jetvl(npjet)=jetvl(npjet-1)
+      if(levaporation)jetve(npjet)=jetve(npjet-1)
       if(typemass==3 .or. ltagbeads)jetbd(npjet)=jetbd(npjet-1)
       if(lbreakup)jetbr(npjet)=jetbr(npjet-1)
       if(ltrackbeads .and. idrank==0)jetlb(npjet)=jetlb(npjet-1)
@@ -1018,6 +1139,7 @@
       jetms(npjet-1)=actualimass*ivolume 
       jetch(npjet-1)=icharge*ivolume
       jetvl(npjet-1)=ivolume
+      if(levaporation)jetve(npjet-1)=ivolume
       if(ltrackbeads .and. idrank==0)jetlb(npjet-1)=trackbeads_number()
       ladd=.true.
       naddtrack=naddtrack+1
@@ -1188,7 +1310,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -1203,6 +1325,7 @@
   if(lrem)then
     do ipoint=inpjet-nremovedsub,inpjet-1
       jetvl(ipoint)=0.d0
+      if(levaporation)jetve(ipoint)=0.d0
       jetch(ipoint)=0.d0
       jetms(ipoint)=0.d0
       jetst(ipoint)=0.d0

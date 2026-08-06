@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification December 2016
 !     
 !***********************************************************************
  
@@ -40,6 +40,7 @@
  public :: cross
  public :: sig
  public :: write_fmtnumb
+ public :: get_prntime
  
  contains
  
@@ -490,6 +491,43 @@
   return
 
  end function write_fmtnumb
+ 
+ subroutine get_prntime(hms,timelp,prntim)
+  
+!***********************************************************************
+!     
+!     JETSPIN subroutine for casting cpu elapsed time into days, hours,
+!     minutes and seconds for printing (input timelp in seconds)
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification December 2016
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  character(len=1), intent(out) :: hms
+  double precision, intent(in) :: timelp
+  double precision, intent(out) :: prntim
+  
+  if(timelp.ge.8.64d4)then
+    hms='d'
+    prntim=timelp/8.64d4
+  elseif(timelp.ge.3.6d3)then
+    hms='h'
+    prntim=timelp/3.6d3
+  elseif(timelp.ge.6.0d1)then
+    hms='m'
+    prntim=timelp/6.0d1
+  else
+    hms='s'
+    prntim=timelp
+  endif
+  
+  return
+  
+ end subroutine get_prntime
  
  end module utility_mod
 

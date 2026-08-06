@@ -8,7 +8,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification May 2017
 !     
 !*********************************************************************** 
  
@@ -19,12 +19,12 @@
  use utility_mod, only : Pi,buffservice,allocate_array_buffservice
  use nanojet_mod, only : resolution,inpjet,npjet,jetpt,jetxx,jetyy, &
                   jetzz,jetvx,jetvy,jetvz,jetst,jetms,jetch,jetvl, &
-                  jetcr,linserted,linserting,systype,lengthpath, &
+                  jetcr,jetve,linserted,linserting,systype,lengthpath, &
                   doallocate,doreorder,mxnpjet,incnpjet,lengthscale, &
                   ivolume,jetbd,massratio,imassa,jetfr,h, &
                   lenthresholdbead,ltagbeads,lbreakup,jetbr, &
                   lmultiplestep,lneighlistdo,jetfm,lmassavariable, &
-                  lenprobmassa,icharge
+                  lenprobmassa,icharge,jetce,levaporation
  use fit_mod,     only : jetptc,allocate_arrayspline,create_spline, &
                    allocate_array_jetptc,driver_fit_spline, &
                    looking_indexes_2,looking_indexes_4, &
@@ -74,6 +74,7 @@
  
  integer, save :: nkeepvol=0
  double precision, dimension(:), allocatable, save :: keepvol
+ double precision, dimension(:), allocatable, save :: keepvolev
  
  integer, save :: inpjetbackup,npjetbackup
  integer, save :: nbackup=0
@@ -82,7 +83,7 @@
  logical, dimension(:), allocatable, save :: jetlthr
  double precision, dimension(:), allocatable, save :: jetxxbak, &
   jetyybak,jetzzbak,jetvxbak,jetvybak,jetvzbak,jetstbak,jetmsbak, &
-  jetchbak,jetvlbak
+  jetchbak,jetvlbak,jetvebak
  
  
  public :: driver_dynamic_refinement
@@ -254,7 +255,7 @@ implicit none
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification December 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -269,6 +270,7 @@ implicit none
   integer, allocatable :: massbd(:,:),massbdpoint(:)
   double precision, allocatable :: massbddist(:),massbdgap(:)
   double precision :: tempmod0,tempmod1,tempmod2,voltot,newvoltot
+  double precision :: voltotev,newvoltotev
   
   integer, save :: icounter=0
   
@@ -346,6 +348,23 @@ implicit none
   enddo
   
   call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
+  
+  if(levaporation)then
+  
+    voltotev=0.d0
+    do i=inpjet,irefbeadstart
+      voltotev=voltotev+jetve(i)
+    enddo
+    
+    i=0
+    do ipoint=irefbeadstart+1,npjet
+      i=i+1
+      keepvolev(i)=jetve(ipoint)
+    enddo
+  
+    call compute_crosssec(jetxx,jetyy,jetzz,jetve,jetce)
+  
+  endif
   
   call define_akima_bounds()
   call allocate_array_jetptc()
@@ -438,6 +457,28 @@ implicit none
   jetvl(jptinit:jptend)=jetvl(jptinit:jptend)*voltot/newvoltot
   
   call convert_from_density(jetms,jetch,jetvl)
+  
+  if(levaporation)then
+    
+    do i=jptinit,jptend
+      tempmod0=lengthpath*(jetptc(i+1)-jetptc(i))
+      jetve(i)=tempmod0*Pi*(jetce(i))**2.d0
+    enddo
+  
+    i=0
+    do ipoint=jptend+1,totjptend
+      i=i+1
+      jetve(ipoint) = keepvolev(i)
+    enddo
+  
+    newvoltotev=0.d0
+    do i=jptinit,jptend
+      newvoltotev=newvoltotev+jetve(i)
+    enddo
+    
+    jetve(jptinit:jptend)=jetve(jptinit:jptend)*voltotev/newvoltotev
+    
+  endif
   
   doallocate=(doallocate .or. mydoallocate)
   if(lmultiplestep)lneighlistdo=.true.
@@ -579,7 +620,7 @@ implicit none
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification July 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -735,11 +776,35 @@ implicit none
   jetcr(newlowerbound:newupperbound)= &
    dabs(buffservice(newlowerbound:newupperbound))
   
+  if(levaporation)then
+    buffservice(:)=0.d0
+    if(idrank==0)then
+      buffservice(newlowerbound:newlowerbuff)= &
+       jetce(oldlowerbound:oldlowerbuff)
+    endif
+    call fit_akima(jptinit,jptend,jetpt,jetce,jetptc,buffservice)
+    if(mydoallocate)then
+      deallocate(jetce)
+      allocate(jetce(0:mxnpjet))
+    endif
+    jetce(:)=0.d0
+    jetce(newlowerbound:newupperbound)= &
+     dabs(buffservice(newlowerbound:newupperbound))
+  endif
+  
   if(mydoallocate)then
     deallocate(jetvl)
     allocate(jetvl(0:mxnpjet))
   endif
   jetvl(:)=0.d0
+  
+  if(levaporation)then
+    if(mydoallocate)then
+      deallocate(jetve)
+      allocate(jetve(0:mxnpjet))
+    endif
+    jetve(:)=0.d0
+  endif
   
   if(mydoallocate)then
     deallocate(jetpt)
@@ -928,6 +993,7 @@ implicit none
   jetmsbak(0:npjet)=jetms(0:npjet)
   jetchbak(0:npjet)=jetch(0:npjet)
   jetvlbak(0:npjet)=jetvl(0:npjet)
+  if(levaporation)jetvebak(0:npjet)=jetve(0:npjet)
   
   endif
   
@@ -944,7 +1010,7 @@ implicit none
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification July 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -968,6 +1034,7 @@ implicit none
   jetms(0:npjet)=jetmsbak(0:npjet)
   jetch(0:npjet)=jetchbak(0:npjet)
   jetvl(0:npjet)=jetvlbak(0:npjet)
+  if(levaporation)jetve(0:npjet)=jetvebak(0:npjet)
   
   
   endif
@@ -982,6 +1049,7 @@ implicit none
   call bcast_world_darr(jetms,npjet+1)
   call bcast_world_darr(jetch,npjet+1)
   call bcast_world_darr(jetvl,npjet+1)
+  if(levaporation)call bcast_world_darr(jetve,npjet+1)
   
   return
   
@@ -996,7 +1064,7 @@ implicit none
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification July 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -1014,6 +1082,7 @@ implicit none
         deallocate(jetvxbak,jetvybak,jetvzbak)
         deallocate(jetstbak,jetmsbak,jetchbak)
         deallocate(jetvlbak)
+        if(levaporation)deallocate(jetvebak)
       endif
       allocate(jetxxbak(0:mxnpjet),jetyybak(0:mxnpjet), &
        jetzzbak(0:mxnpjet))
@@ -1022,6 +1091,7 @@ implicit none
       allocate(jetstbak(0:mxnpjet),jetmsbak(0:mxnpjet), &
        jetchbak(0:mxnpjet))
       allocate(jetvlbak(0:mxnpjet))
+      if(levaporation)allocate(jetvebak(0:mxnpjet))
     endif
   endif
   
@@ -1103,7 +1173,7 @@ implicit none
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification July 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -1114,12 +1184,15 @@ implicit none
   if(nkeepvol/=0)then
     if(jmiomax>nkeepvol)then
       deallocate(keepvol)
+      if(levaporation)deallocate(keepvolev)
       nkeepvol=jmiomax+10
       allocate(keepvol(nkeepvol))
+      if(levaporation)allocate(keepvolev(nkeepvol))
     endif
   else
     nkeepvol=jmiomax+10
     allocate(keepvol(nkeepvol))
+    if(levaporation)allocate(keepvolev(nkeepvol))
   endif
   
   return

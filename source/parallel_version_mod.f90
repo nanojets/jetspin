@@ -9,7 +9,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification May 2015
+!     last modification January 2017
 !     
 !***********************************************************************
  
@@ -491,7 +491,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification January 2017
 !     
 !***********************************************************************
  
@@ -500,8 +500,9 @@
   include 'mpif.h'
   
   double precision, intent(out) :: timecpu
- 
-  timecpu = MPI_WTIME()
+  
+  if(idrank==0)call cpu_time(timecpu)
+  call bcast_world_d(timecpu)
   
   return
   

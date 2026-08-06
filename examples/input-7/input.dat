@@ -1,0 +1,79 @@
+ 
+ !Example JETSPIN input file 4 for simulation with gas couterflow
+
+ system 3
+ integrator 3
+ 
+ timestep 1.d-8
+ 
+ print time 5.d-4
+ final time 3.d0
+ seed 317
+ 
+ print binary 5.d-4 style 5
+ print binary removed
+ #print xyz 1.d-2
+ #print xyz maxnumber 400 
+ #print xyz frame 1.d-2
+ #print xyz rescalexyz 10.d0
+ print pdb frame 1.d-3
+ print pdb rescalepdb 10.d0
+ 
+ multiple step no
+ multiple step every 100
+ primary cutoff 1.d0
+ maximum displ 0.1d0
+ 
+ dynamic refinement no 
+ dynamic refinement every 1.d-3
+ dynamic refinement threshold 0.4d0
+ 
+ airdrag yes
+ airdrag airdensity     0.00121d0
+ airdrag airviscosity   0.1511d0
+ airdrag airvelocity    0.d0
+ 
+ 
+ print list t x yz volr n rc evrc visc gc
+ printstat list t x vn yz n curn curc evrc visc gc
+ 
+ inserting yes
+ removing yes
+ gravity yes
+
+ points 1
+ initial length 0.02                         !cm
+ nozzle velocity 0.282942121d0               !cm/s
+ nozzle stress 0.d0                          !g cm-1 s-2
+ yield stress   0.d0                         !g cm-1 s-2
+ nozzle cross 0.005d0                        !cm 
+ density mass 0.839253525d0                  !g cm-3
+ density charge 44000.0d0                    !g1/2 cm-3/2 s-1
+ viscosity    20.d0                          !g cm-1 s-1
+ elastic modulus   50000.d0                  !g cm-1 s-2
+ collector distance 16.d0                    !cm
+ surface tension 21.133d0                    !g s-2
+ perturbation yes
+ perturbation frequency  1.d+4               !s^1  
+ perturbation amplitude  1.d-3               ! cm
+
+ external potential vector 30.d0 150.d0 150.d0 !g1/2 cm1/2 s-1
+ external potential phase 0.d0
+ external potential type 3
+ external potential freq 2.5d4
+ 
+ evaporation yes
+ evaporation polymer frac 0.025d0
+ evaporation airviscosity 0.1511d0
+ evaporation temperature 298.15d0
+ evaporation umidity 0.165d0
+ evaporation bconstant 7.d0
+ evaporation mconstant 0.1d0
+ evaporation tconstant 1.d0
+ evaporation diffusivity 0.25d0
+ 
+ 
+ 
+ 
+ Finish
+

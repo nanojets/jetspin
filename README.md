@@ -1,10 +1,17 @@
 The JETSPIN README File                                                 
-Version 1.21 (July 2016)                                                
+Version 1.22 (May 2017)                                                 
                                                                         
 JETSPIN is a specific-purpose open-source software for electrospinning  
 simulations of nanofibers. The code was originally written by           
-Marco Lauricella at Applicazioni del Calcolo "Mauro Picone" -           
-Consiglio Nazionale delle Ricerche with contributions from:             
+                                                                        
+Marco Lauricella         IAC-CNR, Rome                     Italy        
+                                                                        
+at Applicazioni del Calcolo "Mauro Picone" -                            
+Consiglio Nazionale delle Ricerche                                      
+                                                                        
+with contributions from:                                                
+                                                                        
+Federico Cipolletta      IAC-CNR, Rome                     Italy        
 Ivan Coluzza             University of Vienna              Austria      
 Dario Pisignano          University of Salento             Italy        
 Giuseppe Pontrelli       IAC-CNR, Rome                     Italy        
@@ -93,6 +100,19 @@ Example command to run JETSPIN in parallel mode on 4 CPUs:
                                                                         
 mpirun -np 4 ./main.x                                                   
                                                                         
+                                                                        
+New features in JETSPIN Version 1.22                                    
+                                                                        
+  - Oscillating electric fields added                                   
+                                                                        
+  - Evaporation effect added                                            
+                                                                        
+  - The job close directive was added to ensure a controlled close down 
+    procedure when a job runs out of time.                              
+                                                                        
+  - Random noise added                                                  
+                                                                        
+  - The manual was updated.                                             
                                                                         
 New features in JETSPIN Version 1.21                                    
                                                                         

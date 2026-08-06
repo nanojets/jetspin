@@ -7,12 +7,14 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification May 2017
 !     
 !***********************************************************************
  
  use utility_mod,           only : Pi
- use nanojet_mod,           only : jetms,jetch,v,fieldfreq,taoelectr
+ use nanojet_mod,           only : jetms,jetch,v,vy,vz,fieldfreq, &
+                             taoelectr,fieldphase
+                             
  
  implicit none
  
@@ -25,7 +27,7 @@
  
  contains
  
- subroutine driver_electric_field(ipoint,timesub,yxx,yyy,yzz,vout)
+ subroutine driver_electric_field(ipoint,timesub,yxx,yyy,yzz,vout,cmass)
 
 !***********************************************************************
 !     
@@ -34,7 +36,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -46,22 +48,55 @@
   double precision, allocatable, dimension (:), intent(in) ::  yyy
   double precision, allocatable, dimension (:), intent(in) ::  yzz
   double precision, intent(out), dimension(3) :: vout
+  double precision, intent(in), optional ::  cmass
   
   double precision :: swave
+  logical :: lcmass
   
-  select case(nfieldtype)
-  case(1)
-    call electric_field_rectangular_wave(timesub,swave)
-    vout(1)=swave*(jetch(ipoint)/jetms(ipoint))*V
-    vout(2:3)=0.d0
-  case(2)
-    call electric_field_rectangular_wave_tao(timesub,swave)
-    vout(1)=swave*(jetch(ipoint)/jetms(ipoint))*V
-    vout(2:3)=0.d0
-  case default
-    vout(1)=(jetch(ipoint)/jetms(ipoint))*V
-    vout(2:3)=0.d0
-  end select
+  lcmass=.false.
+  if(present(cmass))lcmass=.true.
+  
+  if(lcmass)then
+    select case(nfieldtype)
+    case(1)
+      call electric_field_rectangular_wave(timesub,swave)
+      vout(1)=swave*(jetch(ipoint)/(jetms(ipoint)*cmass))*V
+      vout(2:3)=0.d0
+    case(2)
+      call electric_field_rectangular_wave_tao(timesub,swave)
+      vout(1)=swave*(jetch(ipoint)/(jetms(ipoint)*cmass))*V
+      vout(2:3)=0.d0
+    case(3)
+      vout(1)=(jetch(ipoint)/(jetms(ipoint)*cmass))*V
+      vout(2)=(jetch(ipoint)/(jetms(ipoint)*cmass))*Vy* &
+       dcos(2.d0*Pi*fieldfreq*timesub+fieldphase)
+      vout(3)=(jetch(ipoint)/(jetms(ipoint)*cmass))*Vz* &
+       dsin(2.d0*Pi*fieldfreq*timesub+fieldphase)
+    case default
+      vout(1)=(jetch(ipoint)/(jetms(ipoint)*cmass))*V
+      vout(2:3)=0.d0
+    end select
+  else
+    select case(nfieldtype)
+    case(1)
+      call electric_field_rectangular_wave(timesub,swave)
+      vout(1)=swave*(jetch(ipoint)/jetms(ipoint))*V
+      vout(2:3)=0.d0
+    case(2)
+      call electric_field_rectangular_wave_tao(timesub,swave)
+      vout(1)=swave*(jetch(ipoint)/jetms(ipoint))*V
+      vout(2:3)=0.d0
+    case(3)
+      vout(1)=(jetch(ipoint)/jetms(ipoint))*V
+      vout(2)=(jetch(ipoint)/jetms(ipoint))*Vy* &
+       dcos(2.d0*Pi*fieldfreq*timesub+fieldphase)
+      vout(3)=(jetch(ipoint)/jetms(ipoint))*Vz* &
+       dsin(2.d0*Pi*fieldfreq*timesub+fieldphase)
+    case default
+      vout(1)=(jetch(ipoint)/jetms(ipoint))*V
+      vout(2:3)=0.d0
+    end select
+  endif
   
   return
   

@@ -34,9 +34,9 @@
 !
 ! contributors: I. Coluzza,G. Pontrelli, D. Pisignano, S. Succi
 !
-!                        JETSPIN VERSION 1.21
+!                        JETSPIN VERSION 1.22
 !
-! (March 2016)
+! (May 2017)
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
@@ -69,7 +69,7 @@
                        write_datrem_frame,close_datrem_file, &
                        write_restart_file,read_restart_file, &
                        write_pdb_singlefile,lprintpdbsing, &
-                       iprintpdbsing
+                       iprintpdbsing,timcls,timjob,nrestartdump
   
   implicit none
   
@@ -77,9 +77,9 @@
   integer :: nremoved
   
   double precision :: mytime
-  double precision :: itime,ftime
+  double precision :: itime,ctime,ftime
   
-  logical :: ladd,lrem,lremdat,ldorefinment
+  logical :: ladd,lrem,lremdat,ldorefinment,lrecycle
   
   integer :: i,j,k,atype
 
@@ -163,13 +163,19 @@
 ! write the input parameters on the binary file (only for developers) 
   if(.not. lreadrest)call write_dat_parameter(lprintdat,130,mytime)
   
+! initialize lrecycle 
+  lrecycle=.true.
+  
 !***********************************************************************
 !     start the time integration
 !***********************************************************************
-  do while ((dble(nstep)*tstep)<endtime)
+  do while (lrecycle)
   
 !   update the counter
     nstep=nstep+1
+    
+!   check recycle loop
+    lrecycle=((dble(nstep)*tstep)<endtime)
     
 !   integrate the system
     call driver_integrator(mytime,tstep,nstep,ldorefinment)
@@ -212,7 +218,13 @@
      inpjet,npjet,sprintdat,systype,linserted)
      
 !   print restart file
-    call write_restart_file(1000,135,'save.dat',nstep,mytime)
+    call write_restart_file(nrestartdump,135,'save.dat',nstep,mytime)
+    
+!   cycle time check
+    call time_world(ctime)
+    
+!   check recycle loop
+    lrecycle=(lrecycle .and. timjob-ctime>timcls)
     
   enddo
 !***********************************************************************
@@ -236,7 +248,6 @@
     
 ! close the binary file (only for developers) 
   call close_dat_file(lprintdat,130)
-  
   
 ! close the communications
   call finalize_world()

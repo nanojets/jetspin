@@ -1,0 +1,29 @@
+name: Smoke tests
+
+on:
+  push:
+    paths:
+      - "build/**"
+      - "examples/**"
+      - "source/**"
+      - "tests/smoke/**"
+      - ".github/workflows/smoke-tests.yml"
+  pull_request:
+    paths:
+      - "build/**"
+      - "examples/**"
+      - "source/**"
+      - "tests/smoke/**"
+      - ".github/workflows/smoke-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run all example smoke tests
+        run: tests/smoke/run.sh

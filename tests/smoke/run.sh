@@ -14,11 +14,11 @@ mode=${1:-serial}
 case "$mode" in
     serial)
         build_target=gfortran
-        last_case=7
+        last_case=8
         ;;
     debug)
         build_target=gfortran-debugger
-        last_case=7
+        last_case=8
         ;;
     mpi)
         build_target=gfortran-mpi
@@ -116,6 +116,14 @@ while [ "$case_number" -le "$last_case" ]; do
         7)
             grep -q 'external potential type.*3' "$case_dir/run.log"
             grep -q 'evaporation yes' "$case_dir/run.log"
+            ;;
+        8)
+            grep -q 'evaporation yes' "$case_dir/run.log"
+            python3 "$repo_root/tests/evaporation/check_yarin2001.py" \
+                --input "$repo_root/examples/input-8/input.dat" \
+                --run-log "$case_dir/run.log" \
+                --nanojet-source "$repo_root/source/nanojet_mod.f90" \
+                --eom-source "$repo_root/source/eom_ev_mod.f90"
             ;;
     esac
 

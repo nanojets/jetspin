@@ -1074,7 +1074,7 @@
  end subroutine eom3_KV_pos_v_ev
  
  subroutine eom3_KV_st_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
-       yax,yay,yaz,fst,timesub,k) 
+       yax,yay,yaz,fevlocal,fst,timesub,k) 
   
 !***********************************************************************
 !     

@@ -3,7 +3,7 @@
  !Aqueous PEO, 6 wt%, based on Yarin, Koombhongse and Reneker,
  !J. Appl. Phys. 89, 3018-3026 (2001).
  !All dimensional input quantities are in the JETSPIN cgs convention.
- !This is a parameter-fidelity regression case, not a bitwise reproduction
+ !This is a order-of-magnitude reference/regression case, not a bitwise reproduction
  !of the original 2001 discretization or of Fig. 2 in that paper.
 
  system 3

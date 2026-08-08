@@ -147,6 +147,71 @@ constitutive equation is
 \end{equation}
 which is Eq.~(39) of Yarin et al. written in the JETSPIN scaling.
 
+\subsection{Kelvin--Voigt extension with concentration-dependent properties}
+
+The concentration laws in Eqs.~\ref{eq:evap-viscosity} and
+\ref{eq:evap-elastic} describe material properties and can also be
+combined with the Kelvin--Voigt constitutive model available in JETSPIN.
+This combination is an extension of the Yarin concentration-dependent
+rheology; it should not be attributed to Ref.~\cite{yarin2001bending},
+which used a Maxwell fluid.
+
+In dimensionless variables define
+\begin{equation}
+ r_\mu=\frac{\mu_i}{\mu_0},\qquad
+ r_G=\frac{G_i}{G_0}=\frac{r_\mu}
+ {(c_{p,i}/c_{p,0})^{t_{\mathrm{ev}}}}.
+\end{equation}
+The Kelvin--Voigt constitutive identity is written as
+\begin{equation}
+ \bar\sigma_i=r_G\,\varepsilon_i+r_\mu\,\dot\varepsilon_i,
+ \label{eq:evap-kv-identity}
+\end{equation}
+where the overdot denotes differentiation with respect to dimensionless
+time.  Differentiating Eq.~\ref{eq:evap-kv-identity} gives
+\begin{equation}
+ \dot{\bar\sigma}_i=
+ r_G\dot\varepsilon_i+r_\mu\ddot\varepsilon_i+
+ \dot r_G\varepsilon_i+\dot r_\mu\dot\varepsilon_i.
+ \label{eq:evap-kv-product}
+\end{equation}
+Thus a time-dependent concentration requires the two product-rule terms
+that are absent when $G$ and $\mu$ are constant.
+
+No additional material parameters are introduced.  From polymer-mass
+conservation,
+\begin{equation}
+ \dot c_{p,i}=-c_{p,i}\frac{\dot V_i}{V_i},
+ \label{eq:evap-kv-cpdot}
+\end{equation}
+and therefore
+\begin{equation}
+ \dot r_\mu=r_\mu\ln(10)Bm c_{p,i}^{m-1}\dot c_{p,i},
+ \label{eq:evap-kv-mudot}
+\end{equation}
+\begin{equation}
+ \dot r_G=r_G\left[\ln(10)Bm c_{p,i}^{m-1}
+ -\frac{t_{\mathrm{ev}}}{c_{p,i}}\right]\dot c_{p,i}.
+ \label{eq:evap-kv-gdot}
+\end{equation}
+JETSPIN reconstructs the instantaneous elastic strain from the current
+stress state,
+\begin{equation}
+ \varepsilon_i=\frac{\bar\sigma_i-r_\mu\dot\varepsilon_i}{r_G},
+ \label{eq:evap-kv-strain}
+\end{equation}
+so that no extra per-bead state variable is required.
+
+The extension retains the historical JETSPIN Kelvin--Voigt kinematics:
+$\dot\varepsilon_i=(1/l_i)dl_i/d\bar t$, while the acceleration term
+used for $\ddot\varepsilon_i$ is the existing
+$(1/l_i)d v_{\parallel,i}/d\bar t$ approximation.  Consequently, when
+$\dot c_p=0$, Eq.~\ref{eq:evap-kv-product} reduces exactly to the
+pre-existing JETSPIN Kelvin--Voigt differential equation.  At the Yarin
+solidification cutoff, $\dot V_i=\dot c_{p,i}=0$, so $r_\mu$ and $r_G$
+remain frozen.  Euler, Heun (RK2) and classical RK4 integrations are
+supported for the coupled Kelvin--Voigt/evaporation model.
+
 Evaporation also reduces the mass represented by a material element.
 JETSPIN therefore uses
 \begin{equation}
@@ -237,7 +302,7 @@ specified in the dimensional parameter list of Ref.~\cite{yarin2001bending}.
 The initial bead spacing is similarly chosen for compatibility with the
 JETSPIN injection algorithm: the test uses $l_{step}=0.0325\,\mathrm{cm}$,
 the electrostatic cutoff length estimated in the same paper.  Therefore
-Test Case 8 is intended as a parameter-fidelity and regression test of
+Test Case 8 is intended as a order-of-magnitude reference and regression test of
 the evaporation/rheology implementation, rather than as a pointwise
 reproduction of the original discretized trajectory.
 
@@ -257,3 +322,4 @@ reference ratios are
 \end{equation}
 These values provide simple numerical targets for future regression
 checks of the evaporation cutoff and concentration-dependent rheology.
+

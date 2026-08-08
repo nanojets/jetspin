@@ -131,4 +131,42 @@ while [ "$case_number" -le "$last_case" ]; do
     case_number=$((case_number + 1))
 done
 
+if [ "$mode" != mpi ]; then
+    echo "Running Kelvin-Voigt evaporation regression"
+    python3 "$repo_root/tests/evaporation/check_kv_evaporation.py" \
+        --eom-source "$repo_root/source/eom_ev_mod.f90" \
+        --integrator-source "$repo_root/source/integrator_kv_ev_mod.f90"
+
+    kv_integrator=1
+    while [ "$kv_integrator" -le 3 ]; do
+        kv_dir="$work_dir/kv-evap-$kv_integrator"
+        mkdir -p "$kv_dir"
+        cp "$work_dir/execute/main.x" "$kv_dir/main.x"
+        cp "$repo_root/examples/input-8/input.dat" "$kv_dir/input.dat"
+        sed -i 's/\r$//' "$kv_dir/input.dat"
+        sed -i \
+            -e "s/^[[:space:]]*integrator[[:space:]].*/ integrator $kv_integrator/" \
+            -e 's/^[[:space:]]*timestep[[:space:]].*/ timestep 1.d-8/' \
+            -e 's/^[[:space:]]*final time[[:space:]].*/ final time 1.d-6/' \
+            -e 's/^[[:space:]]*print time[[:space:]].*/ print time 2.d-7/' \
+            "$kv_dir/input.dat"
+        sed -i '/^[[:space:]]*Finish/i\ kvfluid yes' "$kv_dir/input.dat"
+
+        echo "Running Kelvin-Voigt evaporation with integrator $kv_integrator"
+        (
+            cd "$kv_dir"
+            timeout "${JETSPIN_SMOKE_TIMEOUT:-30}" ./main.x > run.log 2>&1
+        )
+        grep -q 'Program closed correctly' "$kv_dir/run.log"
+        grep -q 'Kelvin-Voigt evaporation integrator active' "$kv_dir/run.log"
+        if grep -Eiq '(^|[^[:alpha:]])(error|nan|[-+]?inf(inity)?)([^[:alpha:]]|$)' \
+            "$kv_dir/run.log" "$kv_dir/statout.dat"; then
+            echo "Kelvin-Voigt evaporation integrator $kv_integrator failed" >&2
+            tail -60 "$kv_dir/run.log" >&2
+            exit 1
+        fi
+        kv_integrator=$((kv_integrator + 1))
+    done
+fi
+
 echo "Smoke mode $mode passed ($last_case case(s))"

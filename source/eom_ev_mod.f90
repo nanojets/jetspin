@@ -19,7 +19,7 @@
                              liniperturb,linserted,pfreq,att,fve, &
                              gr,ks,li,lrg,v,jetfr,noisefric,cp0,Bev, &
                              mev,evairv,evmasscoeff,sqrevsc,evumidity, &
-                             evcsvapour,tev,lengthscale,tao,lairdrag
+                             evcsvapour,tev,lengthscale,tao,lairdrag,evlim
  use support_functions_mod, only : compute_geometry, &
                              compute_tangetversor, &
                              project_beadveltangetversor, &
@@ -338,7 +338,7 @@
  end subroutine eom1_KV_pos_v_ev
  
  subroutine eom1_KV_st_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve, &
-       ycf,yax,yay,yaz,fst,timesub,k) 
+       ycf,yax,yay,yaz,fevlocal,fst,timesub,k) 
   
 !***********************************************************************
 !     
@@ -368,6 +368,7 @@
   double precision, allocatable, dimension (:), intent(in) ::  yax
   double precision, allocatable, dimension (:), intent(in) ::  yay
   double precision, allocatable, dimension (:), intent(in) ::  yaz
+  double precision, intent(in) :: fevlocal
   double precision, intent(inout) ::  fst
   double precision, intent(in) :: timesub
   integer, intent(in) :: k
@@ -400,7 +401,9 @@
   if(ipoint==inpjet)then
     call compute_geometry_1d_KV(ipoint,yxx,yst,yvx,yax,beadlenup, &
      beadvelup,beadaccup)
-    fst = ratg*(beadvelup/beadlenup)+ratmu*(beadaccup/beadlenup)
+    call kv_ev_stress_rate(cp,ratmu,ratg,yve(ipoint),yvl(ipoint), &
+     fevlocal,yst(ipoint),beadvelup/beadlenup, &
+     beadaccup/beadlenup,fst)
     return
   endif
   
@@ -409,7 +412,9 @@
       if(linserted)then
         call compute_geometry_1d_KV(ipoint,yxx,yst,yvx,yax, &
          beadlenup,beadvelup,beadaccup)
-        fst = ratg*(beadvelup/beadlenup)+ratmu*(beadaccup/beadlenup)
+        call kv_ev_stress_rate(cp,ratmu,ratg,yve(ipoint),yvl(ipoint), &
+     fevlocal,yst(ipoint),beadvelup/beadlenup, &
+     beadaccup/beadlenup,fst)
       else
         fst=0.d0
       endif
@@ -425,7 +430,9 @@
 ! ordinary case
   call compute_geometry_1d_KV(ipoint,yxx,yst,yvx,yax,beadlenup, &
    beadvelup,beadaccup)
-  fst = ratg*(beadvelup/beadlenup)+ratmu*(beadaccup/beadlenup)
+  call kv_ev_stress_rate(cp,ratmu,ratg,yve(ipoint),yvl(ipoint), &
+     fevlocal,yst(ipoint),beadvelup/beadlenup, &
+     beadaccup/beadlenup,fst)
 
   return
   
@@ -1096,6 +1103,7 @@
   double precision, allocatable, dimension (:), intent(in) ::  yax
   double precision, allocatable, dimension (:), intent(in) ::  yay
   double precision, allocatable, dimension (:), intent(in) ::  yaz
+  double precision, intent(in) :: fevlocal
   double precision, intent(inout) ::  fst
   double precision, intent(in) :: timesub
   integer, intent(in) :: k
@@ -1144,7 +1152,9 @@
       call project_beadacctangetversor(ipoint,yax,yay,yaz,beadaccup, &
        tangentversorup)
       
-      fst = ratg*(beadvelup/beadlenup)+ratmu*(beadaccup/beadlenup)
+      call kv_ev_stress_rate(cp,ratmu,ratg,yve(ipoint),yvl(ipoint), &
+     fevlocal,yst(ipoint),beadvelup/beadlenup, &
+     beadaccup/beadlenup,fst)
       
     else
       call compute_geometry_init(ipoint,yxx,yyy,yzz,beadlenup)
@@ -1155,7 +1165,9 @@
       call project_beadacctangetversor(ipoint,yax,yay,yaz,beadaccup, &
        tangentversorup)
       
-      fst = ratg*(beadvelup/beadlenup)+ratmu*(beadaccup/beadlenup)
+      call kv_ev_stress_rate(cp,ratmu,ratg,yve(ipoint),yvl(ipoint), &
+     fevlocal,yst(ipoint),beadvelup/beadlenup, &
+     beadaccup/beadlenup,fst)
         
     endif
     return
@@ -1172,7 +1184,9 @@
         call project_beadacctangetversor(ipoint,yax,yay,yaz,beadaccup, &
          tangentversorup)
         
-        fst = ratg*(beadvelup/beadlenup)+ratmu*(beadaccup/beadlenup)
+        call kv_ev_stress_rate(cp,ratmu,ratg,yve(ipoint),yvl(ipoint), &
+     fevlocal,yst(ipoint),beadvelup/beadlenup, &
+     beadaccup/beadlenup,fst)
         
       else
         fst=0.d0
@@ -1199,7 +1213,9 @@
   call project_beadacctangetversor(ipoint,yax,yay,yaz,beadaccup, &
    tangentversorup)
   
-  fst = ratg*(beadvelup/beadlenup)+ratmu*(beadaccup/beadlenup)
+  call kv_ev_stress_rate(cp,ratmu,ratg,yve(ipoint),yvl(ipoint), &
+     fevlocal,yst(ipoint),beadvelup/beadlenup, &
+     beadaccup/beadlenup,fst)
   
   
   return
@@ -1869,6 +1885,40 @@
   return
   
  end subroutine eom4_stress_ev
+
+
+ subroutine kv_ev_stress_rate(cp,ratmu,ratg,yve,yvl,fevlocal,stress, &
+                              strainrate,strainacc,fst)
+
+!***********************************************************************
+! Product-rule Kelvin-Voigt stress rate with concentration-dependent
+! viscosity and elastic modulus.  All quantities are in the standard
+! JETSPIN nondimensionalization.  The historical JETSPIN Kelvin-Voigt
+! kinematics is retained: strainrate=(1/l) dl/dt and the acceleration
+! contribution is represented by strainacc=(1/l) dv_parallel/dt.
+!***********************************************************************
+
+  implicit none
+  double precision, intent(in) :: cp,ratmu,ratg,yve,yvl,fevlocal
+  double precision, intent(in) :: stress,strainrate,strainacc
+  double precision, intent(out) :: fst
+  double precision :: dcpdt,dratmu,dratg,strain
+
+  dcpdt=0.d0
+  if(yve>0.d0 .and. yvl>0.d0)then
+    if((yve/yvl)>evlim*(1.d0+1.d-12))then
+      dcpdt=-cp*fevlocal/yve
+    endif
+  endif
+
+  dratmu=ratmu*dlog(10.d0)*Bev*mev*(cp**(mev-1.d0))*dcpdt
+  dratg=ratg*(dlog(10.d0)*Bev*mev*(cp**(mev-1.d0))-tev/cp)*dcpdt
+
+  strain=(stress-ratmu*strainrate)/ratg
+  fst=ratg*strainrate+ratmu*strainacc+dratg*strain+dratmu*strainrate
+
+  return
+ end subroutine kv_ev_stress_rate
 
  end module eom_ev_mod
 

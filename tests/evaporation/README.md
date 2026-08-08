@@ -33,3 +33,14 @@ tests/smoke/run.sh debug
 The MPI smoke suite remains intentionally short and currently runs only Test Case 1.  The GitHub Actions `Smoke tests` workflow is triggered by changes under `tests/evaporation/` as well as by source and example changes.
 
 The checker is deliberately a regression guard, not an independent reimplementation of the full Yarin trajectory.  Test Case 8 itself exercises the coupled JETSPIN equations, while the fixed values above provide stable diagnostics for the evaporation cutoff and concentration-dependent rheology.
+
+
+## Kelvin--Voigt evaporation extension
+
+`check_kv_evaporation.py` guards the JETSPIN extension that combines the
+Yarin concentration-dependent viscosity and elastic-modulus laws with the
+Kelvin--Voigt constitutive model.  It checks the product-rule terms caused
+by time-dependent material properties and verifies that the frozen-
+concentration limit reduces to the historical JETSPIN Kelvin--Voigt form.
+The smoke suite additionally runs short coupled evaporation/Kelvin--Voigt
+jobs with Euler, Heun (RK2), and classical RK4 integration.

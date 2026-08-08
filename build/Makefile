@@ -17,7 +17,7 @@ OBJ_MOD = serial_version_mod.o parallel_version_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	integrator_mod.o statistic_mod.o io_mod.o
+	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o
 
 OBJ_SRC = main.o
 
@@ -146,24 +146,24 @@ seq:serial_version_mod.o parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
-	statistic_mod.o io_mod.o main.o
+	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	integrator_mod.o statistic_mod.o io_mod.o main.o
+	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 	
 mpi:parallel_version_mod.o parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
-	statistic_mod.o io_mod.o main.o
+	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	integrator_mod.o statistic_mod.o io_mod.o main.o
+	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 
 serial_version_mod.o:serial_version_mod.f90
@@ -216,6 +216,9 @@ driver_eom_mod.o: driver_eom_mod.f90
 
 integrator_mod.o:integrator_mod.f90
 	$(FC) $(FFLAGS) integrator_mod.f90
+
+integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90
+	$(FC) $(FFLAGS) integrator_kv_ev_mod.f90
 
 statistic_mod.o:statistic_mod.f90
 	$(FC) $(FFLAGS) statistic_mod.f90

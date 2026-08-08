@@ -52,6 +52,10 @@ S. Koombhongse and D. H. Reneker, J. Appl. Phys. 89, 3018-3026 (2001),
 using the standard JETSPIN nondimensionalization. Its equations,         
 rheological corrections and input directives are documented in          
 manual/evaporation.tex.                                                 
+The same concentration-dependent viscosity and elastic-modulus laws can    
+also be used with the Kelvin-Voigt rheology. This is documented as a       
+JETSPIN extension of the Yarin concentration laws (not as part of the       
+original Yarin-2001 Maxwell model).                                        
                                                                         
 A dedicated Yarin-2001 reference/regression input is provided in        
 examples/input-8. It uses the 6 wt% aqueous-PEO material and setup       
@@ -120,6 +124,10 @@ New features in JETSPIN Version 1.22
                                                                         
   - The Yarin-2001 evaporation cutoff and rheological model are         
     documented in manual/evaporation.tex.                               
+                                                                        
+  - Evaporation can be combined with Kelvin-Voigt rheology using the       
+    same concentration-dependent mu and G laws, including the required     
+    product-rule terms for time-dependent material properties.              
                                                                         
   - Example 8 was added as a 6 wt% aqueous-PEO Yarin-2001 reference     
     and regression case for evaporation and rheological solidification. 

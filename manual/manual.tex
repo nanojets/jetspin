@@ -285,9 +285,10 @@ contained in the \textit{source} sub-directory. The \textit{examples}
 sub-directory contains different test cases that can help the user
 to edit new input files. The \textit{build} sub-directory stores a
 UNIX \texttt{makefile} that assembles the executable versions of the
-code both in serial and parallel version with different compilers\texttt{,
-which} should be copied (and eventually modified) into the \textit{source}
-sub-directory in order to compile JETSPIN (see Section \ref{sec:Compiling-the-Source}).
+code both in serial and parallel versions with different compilers.
+It is invoked from the repository root while using the \textit{source}
+sub-directory as its working directory (see Section
+\ref{sec:Compiling-the-Source}); it does not need to be copied.
 Finally, after JETSPIN was compiled, the \textit{execute} sub-directory
 contains the binary executable file, where it can be run.
 
@@ -346,25 +347,33 @@ size with at least 50 beads for each node (further details in Ref
 
 \section{Compiling the Source Code\label{sec:Compiling-the-Source}}
 
-The \textit{build} sub-directory stores a UNIX \textbf{makefile} that
-assembles the executable versions of the code both in serial and parallel
-version with different compilers. Note that JETSPIN may be compiled
-on any UNIX platform. The \textbf{makefile} should be copied (and
-eventually modified for several common workstations and parallel computers)
-into the \textit{source} sub-directory, where the code is compiled
-and linked. Finally, the binary executable file can be run in the
-\textit{execute} sub-directory, which isintended to be the 'working'
-directory from which jobs are submitted for execution and the data
-files manipulated. A list of targets for several common workstations
-and parallel computers can be used by the command
+The \textit{build} sub-directory stores a UNIX \textbf{Makefile} that
+assembles serial and parallel executable versions with different
+compilers. JETSPIN may be compiled on any UNIX platform. From the root
+of the repository, invoke this file directly while making \textit{source}
+the working directory; there is no need to copy the Makefile. Use
 
 \bigskip{}
 
-\texttt{make target }
+\texttt{make -C source -f ../build/Makefile target}
 
 \bigskip{}
 
-where \texttt{target} is one of the options reported in Tab \ref{Tab:targets}.
+where \texttt{target} is one of the options reported in
+Table~\ref{Tab:targets}. Object and module files are generated in
+\textit{source}, and the resulting \texttt{main.x} executable is placed
+in \textit{execute}. For example, the serial GFortran build is produced
+with
+
+\bigskip{}
+
+\texttt{make -C source -f ../build/Makefile gfortran}
+
+\bigskip{}
+
+and the corresponding Open MPI build with target
+\texttt{gfortran-mpi}. Build products can be removed with target
+\texttt{clean} using the same command form.
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
 binary executable file can be run in the \textit{execute} sub-directory.
@@ -401,7 +410,7 @@ help  & return the list of possible target choices\tabularnewline
 \end{tabular}
 \par\end{centering}
 \protect\caption{List of targets for several common workstations and parallel computers,
-which can be used by the command \textquotedbl{}\texttt{make target}\textquotedbl{}.}
+which can be used with the Makefile in the \textit{build} sub-directory.}
 
 \label{Tab:targets} 
 \end{table}
@@ -1362,6 +1371,8 @@ yield stress $f$  & yield stress (default: 0)\tabularnewline
 \label{tab:inputlist}  & \tabularnewline
 \end{longtable}
 
+\input{evaporation-input}
+
 \section{Output files\label{sec:Output-files}}
 
 A series of specific directives causes the writing of output files
@@ -1540,24 +1551,7 @@ needle of radius $250\,$micron.}
 
 \section{Test Case 6: Three-D simulation of a quasi-Newtonian fluid}
 
-\section{Test Case 7: Three-D simulation with evaporation and an orthogonal rotating electric field}
-
-Test Case 7 combines the three-dimensional Maxwell model with an
-orthogonal rotating electric field and the solvent evaporation and
-solidification model described in Sec.~\ref{sec:Evaporation}.  The
-setting \texttt{evaporation tconstant 1} reproduces the relaxation-time
-law of Eq.~(38) of Yarin, Koombhongse and Reneker
-\cite{yarin2001bending}.  The evaporation cutoff is the Yarin criterion
-$c_s=0.1$, which in JETSPIN is imposed through the equivalent volume
-ratio $V_i/V_i^0=c_{p,0}/0.9$.
-
-The example is intended as a regression and reference case for the
-coupled JETSPIN implementation.  Its initial polymer fraction is
-$c_{p,0}=0.025$ and therefore it should not be interpreted as a
-quantitative reproduction of the 6\% aqueous-PEO case used in the
-original Yarin et al. comparison.  The orthogonal rotating field is a
-separate JETSPIN extension and is not part of the 2001 evaporation
-model.
+\input{evaporation-examples}
 
 \newpage{}
 

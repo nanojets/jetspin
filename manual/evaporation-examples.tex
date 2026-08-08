@@ -1,0 +1,65 @@
+% Evaporation examples, included in the Example Simulations chapter.
+
+\section{Test Case 7: Three-D simulation with evaporation and an orthogonal rotating electric field}
+
+Test Case 7 combines the three-dimensional Maxwell model with an
+orthogonal rotating electric field and the solvent evaporation and
+solidification model described in Sec.~\ref{sec:Evaporation}. The
+setting \texttt{evaporation tconstant 1} reproduces the relaxation-time
+law of Eq.~(38) of Yarin, Koombhongse and Reneker
+\cite{yarin2001bending}. The evaporation cutoff is the Yarin criterion
+$c_s=0.1$, which in JETSPIN is imposed through the equivalent volume
+ratio $V_i/V_i^0=c_{p,0}/0.9$.
+
+The example in \texttt{examples/input-7/input.dat} is intended as a
+regression and reference case for the coupled JETSPIN implementation.
+Its initial polymer fraction is $c_{p,0}=0.025$ and therefore it should
+not be interpreted as a quantitative reproduction of the 6\% aqueous-PEO
+case used in the original Yarin et al. comparison. The orthogonal rotating
+field is a separate JETSPIN extension and is not part of the 2001
+evaporation model.
+
+\section{Test Case 8: Yarin et al. (2001) reference parameters\label{sec:Test-Case-8}}
+
+The directory \texttt{examples/input-8} contains a dedicated reference
+case based on the 6 wt\% aqueous PEO calculations of
+Ref.~\cite{yarin2001bending}. The values used there are
+$a_0=0.015\,\mathrm{cm}$, $\rho=1\,\mathrm{g/cm^3}$,
+$\alpha=70\,\mathrm{dyn/cm}$, $\mu_0=10^4\,\mathrm{P}$,
+$\theta_0=10^{-2}\,\mathrm{s}$, a charge density corresponding to
+$1\,\mathrm{C/L}$, $h=20\,\mathrm{cm}$, and an applied field of
+$1.5\,\mathrm{kV/m}$. In JETSPIN cgs units these correspond to
+$G_0=\mu_0/\theta_0=10^6\,\mathrm{Ba}$, a charge density
+$2.99792458\times10^6\,\mathrm{statC/cm^3}$, and an applied potential
+of approximately $1\,\mathrm{statV}$ across the 20 cm gap. The ambient
+conditions are $T=293.15\,\mathrm{K}$ and $RH=0.165$, while the
+solidification parameters are $B=7$, $m=0.1$ and
+$t_{\mathrm{ev}}=1$.
+
+The paper reports $K_s=100$. Since $K_s=\omega\theta_0$, Test Case 8
+uses $\omega=10^4\,\mathrm{s^{-1}}$. The small perturbation amplitude
+used to seed bending is a JETSPIN numerical choice rather than a value
+specified in the dimensional parameter list of Ref.~\cite{yarin2001bending}.
+The initial bead spacing is similarly chosen for compatibility with the
+JETSPIN injection algorithm: the test uses $l_{step}=0.0325\,\mathrm{cm}$,
+the electrostatic cutoff length estimated in the same paper. Therefore
+Test Case 8 is intended as an order-of-magnitude reference and regression
+test of the evaporation/rheology implementation, rather than as a pointwise
+reproduction of the original discretized trajectory.
+
+The test intentionally omits the \texttt{evaporation diffusivity}
+directive, so that Eq.~\ref{eq:evap-default-diffusivity} is exercised.
+At $293.15\,\mathrm{K}$ the expected value is
+$D_a\simeq0.242001758\,\mathrm{cm^2/s}$. The solidification cutoff is
+\begin{equation}
+ \frac{V_i}{V_i^0}=\frac{0.06}{0.9}=0.0666666667,
+\end{equation}
+for which $c_p=0.9$. With $B=7$ and $m=0.1$, the corresponding
+reference ratios are
+\begin{equation}
+ \frac{\mu}{\mu_0}\simeq43.9783350,\qquad
+ \frac{\theta}{\theta_0}=15,\qquad
+ \frac{G}{G_0}\simeq2.9318890.
+\end{equation}
+These values provide simple numerical targets for future regression
+checks of the evaporation cutoff and concentration-dependent rheology.

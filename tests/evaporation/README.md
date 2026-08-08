@@ -12,6 +12,8 @@ It checks the Test 8 input against fixed numerical targets:
 - `theta/theta0 = 15`;
 - `G/G0 = 2.93188900014`.
 
+These exact numbers are software-regression targets for the chosen Test 8 input, not a claim that the dimensional parameters of the 2001 calculation are known with corresponding experimental precision.  Test 8 should be regarded primarily as an order-of-magnitude reference case.
+
 When the Fortran sources are supplied, the checker also verifies that the production code still contains the Yarin concentration, viscosity, relaxation-time and cutoff expressions, together with the corrected Seaver atmospheric-pressure diffusivity fallback.  When a JETSPIN `run.log` is supplied it compares the diffusivity actually initialized by the executable with the analytical value above.
 
 Run the formula/source checks directly from the repository root with:
@@ -33,7 +35,6 @@ tests/smoke/run.sh debug
 The MPI smoke suite remains intentionally short and currently runs only Test Case 1.  The GitHub Actions `Smoke tests` workflow is triggered by changes under `tests/evaporation/` as well as by source and example changes.
 
 The checker is deliberately a regression guard, not an independent reimplementation of the full Yarin trajectory.  Test Case 8 itself exercises the coupled JETSPIN equations, while the fixed values above provide stable diagnostics for the evaporation cutoff and concentration-dependent rheology.
-
 
 ## Kelvin--Voigt evaporation extension
 

@@ -9,12 +9,13 @@
  system 3
  integrator 3
 
- timestep 1.d-8                             !s
- final time 1.d-2                           !s; paper discusses trajectories over ~6.5 ms
- print time 1.d-4                           !s
+ # timestep and print intervals are in seconds
+ timestep 1.d-8
+ final time 1.d-2
+ print time 1.d-4
  seed 317
 
- print xyz 1.d-4                            !s
+ print xyz 1.d-4
  print xyz maxnumber 1000
  print list t x yz volr n rc evrc visc gc
  printstat list t x vn yz n curn curc evrc visc gc
@@ -25,43 +26,58 @@
  multiple step no
  dynamic refinement no
 
- ! Yarin et al. dimensional material/setup parameters.
+ # Yarin et al. dimensional material/setup parameters.
+ # initial length: electrostatic cutoff length L in Yarin 2001 [cm]
  points 1
- initial length 0.0325d0                    !cm; electrostatic cutoff length L in Yarin 2001
- nozzle velocity 10.d0                      !cm/s; representative measured initial speed ~0.1 m/s
- nozzle stress 0.d0                         !g cm-1 s-2; numerical initialization
- yield stress 0.d0                          !g cm-1 s-2; Maxwell fluid
- nozzle cross 0.015d0                       !cm = 150 micrometers
- density mass 1.d0                          !g cm-3 = 1000 kg m-3
- density charge 2.99792458d6                !statC cm-3 = 1 C/L
- viscosity 1.d4                             !P = g cm-1 s-1
- elastic modulus 1.d6                       !Ba = g cm-1 s-2; gives theta0=mu0/G0=0.01 s
- collector distance 20.d0                   !cm
- external potential 1.d0                    !statV; E=1/20=0.05 statV/cm = 1.5 kV/m
- surface tension 70.d0                      !dyn/cm = g s-2
+ initial length 0.0325d0
+ # representative measured initial speed about 0.1 m/s [cm/s]
+ nozzle velocity 10.d0
+ # numerical stress initialization [g cm-1 s-2]
+ nozzle stress 0.d0
+ # Maxwell fluid [g cm-1 s-2]
+ yield stress 0.d0
+ # a0 = 150 micrometers [cm]
+ nozzle cross 0.015d0
+ # rho = 1000 kg/m3 [g cm-3]
+ density mass 1.d0
+ # 1 C/L converted to statC cm-3
+ density charge 2.99792458d6
+ # mu0 = 1000 kg/(m s) = 1e4 P [g cm-1 s-1]
+ viscosity 1.d4
+ # G0=mu0/theta0 with theta0=0.01 s [g cm-1 s-2]
+ elastic modulus 1.d6
+ collector distance 20.d0
+ # E=1/20=0.05 statV/cm = 1.5 kV/m
+ external potential 1.d0
+ # 0.07 N/m = 70 dyn/cm [g s-2]
+ surface tension 70.d0
 
- ! The paper reports K_s=100.  Since K_s=omega*theta0 and theta0=0.01 s,
- ! omega=1.0e4 s^-1.  The perturbation amplitude is a small JETSPIN
- ! numerical seed; it is not specified among the dimensional parameters
- ! reported in Yarin et al. (2001).
+ # The paper reports K_s=100. Since K_s=omega*theta0 and theta0=0.01 s,
+ # omega=1.0e4 s^-1. The perturbation amplitude is a small JETSPIN
+ # numerical seed; it is not specified among the dimensional parameters
+ # reported in Yarin et al. (2001).
  perturbation yes
- perturbation frequency 1.d4                !s^-1
- perturbation amplitude 1.d-3               !cm
+ perturbation frequency 1.d4
+ perturbation amplitude 1.d-3
 
- ! Evaporation and rheological solidification: Yarin Eqs. (28), (34),
- ! (36)-(43).  Initial PEO concentration is 6 wt%.
+ # Evaporation and rheological solidification: Yarin Eqs. (28), (34),
+ # (36)-(43). Initial PEO concentration is 6 wt%.
  evaporation yes
  evaporation polymer frac 0.06d0
- evaporation airviscosity 0.15d0            !cm2/s
- evaporation temperature 293.15d0           !K = 20 C
- evaporation umidity 0.165d0                !relative humidity = 16.5%
+ # air kinematic viscosity [cm2/s]
+ evaporation airviscosity 0.15d0
+ # T = 20 C [K]
+ evaporation temperature 293.15d0
+ # relative humidity = 16.5%
+ evaporation umidity 0.165d0
  evaporation bconstant 7.d0
  evaporation mconstant 0.1d0
- evaporation tconstant 1.d0                 !theta/theta0 = cp/cp0
+ # theta/theta0 = cp/cp0
+ evaporation tconstant 1.d0
 
- ! No explicit evaporation diffusivity is given here on purpose.
- ! JETSPIN therefore exercises its Seaver/Yarin atmospheric-pressure
- ! water-vapour fallback: D_a ~= 0.2420 cm2/s at 293.15 K.
- ! Evaporation stops at cs=0.1, hence V/V0=cp0/0.9=0.0666666667.
+ # No explicit evaporation diffusivity is given here on purpose.
+ # JETSPIN therefore exercises its Seaver/Yarin atmospheric-pressure
+ # water-vapour fallback: D_a ~= 0.2420 cm2/s at 293.15 K.
+ # Evaporation stops at cs=0.1, hence V/V0=cp0/0.9=0.0666666667.
 
  Finish

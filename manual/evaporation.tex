@@ -1,0 +1,163 @@
+% JETSPIN evaporation model documentation
+% Yarin, Koombhongse and Reneker, J. Appl. Phys. 89, 3018--3026 (2001)
+
+\section{Solvent evaporation and solidification\label{sec:Evaporation}}
+
+JETSPIN implements the solvent-evaporation model introduced by Yarin,
+Koombhongse and Reneker \cite{yarin2001bending}.  The dimensional mass-transfer
+correlation is
+\begin{equation}
+ Sh=0.495\,Re^{1/3}Sc^{1/2},
+ \qquad
+ Re=\frac{2a_i|\mathbf{v}_i|}{\nu_a},
+ \qquad
+ Sc=\frac{\nu_a}{D_a},
+ \label{eq:evap-sherwood}
+\end{equation}
+where $a_i$ is the local jet radius, $\nu_a$ is the kinematic viscosity
+of air, and $D_a$ is the diffusion coefficient of solvent vapour in air.
+For a discrete jet element of length $l_i$ and volume
+$V_i=\pi a_i^2l_i$, the corresponding evaporation equation is
+\begin{equation}
+ \frac{dV_i}{dt}=
+ -0.495\,D_a Re_i^{1/3}Sc^{1/2}
+ \left[c_{s,\mathrm{eq}}(T)-c_{s,\infty}\right]\pi l_i .
+ \label{eq:evap-volume-dimensional}
+\end{equation}
+This is the discrete form of Eq.~(34) of Yarin et al.
+\cite{yarin2001bending}.
+
+The ambient value used by JETSPIN is obtained from the relative humidity
+$RH$ according to
+\begin{equation}
+ c_{s,\infty}=RH\,c_{s,\mathrm{eq}}(T).
+ \label{eq:evap-humidity}
+\end{equation}
+If the saturation vapour concentration is not supplied explicitly,
+JETSPIN evaluates it from the temperature using the correlation of
+Seaver, Galloway and Manuccia employed by Yarin et al.
+
+\subsection{JETSPIN nondimensionalization}
+
+The evaporation equations are integrated together with the equations of
+motion in the standard JETSPIN dimensionless variables.  With
+\begin{equation}
+ t_0=\frac{\mu_0}{G_0},
+ \qquad
+ L_0=\sqrt{\frac{q_0^2}{\pi a_0^2G_0}},
+\end{equation}
+JETSPIN uses
+\begin{equation}
+ \bar t=\frac{t}{t_0},\quad
+ \bar l_i=\frac{l_i}{L_0},\quad
+ \bar{\mathbf v}_i=\frac{t_0}{L_0}\mathbf v_i,\quad
+ \bar V_i=\frac{V_i}{L_0^3},
+\end{equation}
+and
+\begin{equation}
+ \bar\nu_a=\nu_a\frac{t_0}{L_0^2},
+ \qquad
+ \bar D_a=D_a\frac{t_0}{L_0^2}.
+\end{equation}
+Both $Re$ and $Sc$ are invariant under this rescaling.  Consequently,
+Eq.~\ref{eq:evap-volume-dimensional} becomes
+\begin{equation}
+ \frac{d\bar V_i}{d\bar t}=
+ -0.495\,\bar D_a Re_i^{1/3}Sc^{1/2}
+ \left[c_{s,\mathrm{eq}}(T)-c_{s,\infty}\right]\pi\bar l_i,
+ \label{eq:evap-volume-dimensionless}
+\end{equation}
+which is the expression evaluated in \texttt{eom\_ev\_mod.f90}.
+The arrays \texttt{jetvl} and \texttt{jetve} contain, respectively,
+the reference volume $\bar V_i^0$ of the material element before solvent
+loss and its instantaneous volume $\bar V_i$ after evaporation.
+
+\subsection{Polymer concentration and rheological solidification}
+
+Conservation of polymer mass gives
+\begin{equation}
+ c_{p,i}=c_{p,0}\frac{V_i^0}{V_i}.
+ \label{eq:evap-cp}
+\end{equation}
+The viscosity is updated according to Eqs.~(37) and (41) of Yarin et al.:
+\begin{equation}
+ \frac{\mu_i}{\mu_0}=
+ 10^{B\left(c_{p,i}^{m}-c_{p,0}^{m}\right)}.
+ \label{eq:evap-viscosity}
+\end{equation}
+For the Yarin--Koombhongse--Reneker model the relaxation time obeys
+\begin{equation}
+ \frac{\theta_i}{\theta_0}=\frac{c_{p,i}}{c_{p,0}},
+ \label{eq:evap-relaxation}
+\end{equation}
+and, since $G_i=\mu_i/\theta_i$,
+\begin{equation}
+ \frac{G_i}{G_0}=
+ \frac{10^{B\left(c_{p,i}^{m}-c_{p,0}^{m}\right)}}
+      {c_{p,i}/c_{p,0}}.
+ \label{eq:evap-elastic}
+\end{equation}
+JETSPIN retains a generalized exponent $t_{\mathrm{ev}}$ through
+$\theta_i/\theta_0=(c_{p,i}/c_{p,0})^{t_{\mathrm{ev}}}$; setting
+\texttt{evaporation tconstant 1} gives exactly Eq.~\ref{eq:evap-relaxation}
+and is the Yarin-2001 choice.  The default value is one.
+
+For Maxwell rheology, with $\bar\sigma_i=\sigma_i/G_0$, the resulting
+constitutive equation is
+\begin{equation}
+ \frac{d\bar\sigma_i}{d\bar t}=
+ \frac{1}{\theta_i/\theta_0}
+ \left[
+ \frac{\mu_i}{\mu_0}\frac{1}{\bar l_i}
+ \frac{d\bar l_i}{d\bar t}-\bar\sigma_i
+ \right],
+ \label{eq:evap-maxwell}
+\end{equation}
+which is Eq.~(39) of Yarin et al. written in the JETSPIN scaling.
+
+\subsection{Evaporation cutoff}
+
+Yarin et al. stop the evaporation calculation when the solvent mass
+fraction
+\begin{equation}
+ c_{s,i}=1-c_{p,i}
+\end{equation}
+reaches $c_{s,i}=0.1$.  Using Eq.~\ref{eq:evap-cp}, the equivalent
+condition on the volume represented by a bead is
+\begin{equation}
+ \frac{V_i}{V_i^0}=\frac{c_{p,0}}{1-0.1}=\frac{c_{p,0}}{0.9}.
+ \label{eq:evap-cutoff}
+\end{equation}
+The JETSPIN integrators enforce Eq.~\ref{eq:evap-cutoff} at every
+intermediate and final integration stage.  Once this limit is reached,
+$V_i$, $c_{p,i}$, $\mu_i$, $\theta_i$, and $G_i$ remain constant, as in
+the solidification cutoff adopted in Ref.~\cite{yarin2001bending}.
+
+\subsection{Input directives}
+
+The following directives activate and parameterize evaporation:
+\begin{description}
+ \item[\texttt{evaporation yes}] activate solvent evaporation and the
+ concentration-dependent rheology.
+ \item[\texttt{evaporation polymer frac} $f$] initial polymer mass
+ fraction $c_{p,0}$.
+ \item[\texttt{evaporation airviscosity} $f$] kinematic viscosity of
+ air $\nu_a$ in $\mathrm{cm^2/s}$.
+ \item[\texttt{evaporation temperature} $f$] temperature in kelvin.
+ \item[\texttt{evaporation umidity} $f$] relative humidity $RH$ in the
+ interval $[0,1]$.  The historical spelling \texttt{umidity} is retained
+ for input-file compatibility.
+ \item[\texttt{evaporation diffusivity} $f$] vapour diffusion coefficient
+ $D_a$ in $\mathrm{cm^2/s}$.
+ \item[\texttt{evaporation bconstant} $f$] parameter $B$ in
+ Eq.~\ref{eq:evap-viscosity}.
+ \item[\texttt{evaporation mconstant} $f$] exponent $m$ in
+ Eq.~\ref{eq:evap-viscosity}.
+ \item[\texttt{evaporation tconstant} $f$] exponent
+ $t_{\mathrm{ev}}$ in the generalized relaxation-time law; use $f=1$
+ to reproduce Yarin et al. (2001).
+\end{description}
+
+The example in \texttt{examples/input-7/input.dat} uses Maxwell rheology
+and \texttt{evaporation tconstant 1}, and therefore follows the
+Yarin-2001 rheological law.

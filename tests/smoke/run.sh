@@ -167,6 +167,63 @@ if [ "$mode" != mpi ]; then
         fi
         kv_integrator=$((kv_integrator + 1))
     done
+
+    # Exercise the three-way coupling explicitly.  Test Case 5 is the
+    # historical dynamic-refinement example; a lower allowed refinement
+    # threshold and a short accelerated timestep make at least one Akima
+    # remeshing event occur during the smoke run.  Evaporation and the
+    # Kelvin-Voigt extension are then enabled on the same trajectory.
+    refine_dir="$work_dir/kv-evap-refine"
+    mkdir -p "$refine_dir"
+    cp "$work_dir/execute/main.x" "$refine_dir/main.x"
+    cp "$repo_root/examples/input-5/input.dat" "$refine_dir/input.dat"
+    sed -i 's/\r$//' "$refine_dir/input.dat"
+    sed -i \
+        -e 's/^[[:space:]]*integrator[[:space:]].*/ integrator 3/' \
+        -e 's/^[[:space:]]*timestep[[:space:]].*/ timestep 1.d-6/' \
+        -e 's/^[[:space:]]*final time[[:space:]].*/ final time 6.d-3/' \
+        -e 's/^[[:space:]]*print time[[:space:]].*/ print time 5.d-4/' \
+        -e 's/^[[:space:]]*dynamic refinement every[[:space:]].*/ dynamic refinement every 5.d-4/' \
+        -e 's/^[[:space:]]*dynamic refinement threshold[[:space:]].*/ dynamic refinement threshold 0.1d0/' \
+        -e 's/^[[:space:]]*print list[[:space:]].*/ print list t n nref/' \
+        "$refine_dir/input.dat"
+    sed -i '/^[[:space:]]*Finish/i\ kvfluid yes\
+ evaporation yes\
+ evaporation polymer frac 0.06d0\
+ evaporation airviscosity 0.15d0\
+ evaporation temperature 293.15d0\
+ evaporation umidity 0.165d0\
+ evaporation bconstant 7.d0\
+ evaporation mconstant 0.1d0\
+ evaporation tconstant 1.d0\
+ evaporation diffusivity 0.242d0' "$refine_dir/input.dat"
+
+    echo "Running Kelvin-Voigt evaporation with dynamic refinement"
+    (
+        cd "$refine_dir"
+        timeout "${JETSPIN_SMOKE_TIMEOUT:-30}" ./main.x > run.log 2>&1
+    )
+    grep -q 'Program closed correctly' "$refine_dir/run.log"
+    grep -q 'dynamic refinement yes' "$refine_dir/run.log"
+    grep -q 'evaporation yes' "$refine_dir/run.log"
+    grep -q 'Kelvin-Voigt evaporation integrator active' "$refine_dir/run.log"
+    if ! awk '
+        $1 ~ /^[0-9]+$/ && NF == 4 {
+            if (($4 + 0) > 0) refined = 1
+            if (($3 + 0) > maxbeads) maxbeads = $3 + 0
+        }
+        END { exit (refined && maxbeads > 100) ? 0 : 1 }
+    ' "$refine_dir/run.log"; then
+        echo "Dynamic-refinement evaporation run did not force refinement/capacity growth" >&2
+        tail -80 "$refine_dir/run.log" >&2
+        exit 1
+    fi
+    if grep -Eiq '(^|[^[:alpha:]])(error|nan|[-+]?inf(inity)?)([^[:alpha:]]|$)' \
+        "$refine_dir/run.log" "$refine_dir/statout.dat"; then
+        echo "Kelvin-Voigt evaporation dynamic-refinement run failed" >&2
+        tail -80 "$refine_dir/run.log" >&2
+        exit 1
+    fi
 fi
 
 echo "Smoke mode $mode passed ($last_case case(s))"

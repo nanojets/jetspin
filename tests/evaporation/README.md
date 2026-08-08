@@ -44,6 +44,6 @@ Kelvin--Voigt constitutive model.  It checks the product-rule terms caused
 by time-dependent material properties and verifies that the frozen-
 concentration limit reduces to the historical JETSPIN Kelvin--Voigt form.
 The smoke suite additionally runs short coupled evaporation/Kelvin--Voigt
-jobs with Euler, Heun (RK2), and classical RK4 integration.  These runs
-validate the coupled implementation and integrator paths; they are not
-intended as quantitative physical benchmarks.
+jobs with Euler, Heun (RK2), and classical RK4 integration in the serial
+and debug builds.  These runs validate the coupled implementation and
+integrator paths; they are not intended as quantitative physical benchmarks.

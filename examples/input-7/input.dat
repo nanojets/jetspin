@@ -1,5 +1,7 @@
  
- !Example JETSPIN input file 4 for simulation with gas couterflow
+ !Example JETSPIN input file 7: solvent evaporation with Maxwell rheology
+ !Evaporation/solidification follows Yarin, Koombhongse and Reneker,
+ !J. Appl. Phys. 89, 3018-3026 (2001), in JETSPIN dimensionless units.
 
  system 3
  integrator 3
@@ -63,17 +65,17 @@
  external potential freq 2.5d4
  
  evaporation yes
- evaporation polymer frac 0.025d0
- evaporation airviscosity 0.1511d0
- evaporation temperature 298.15d0
- evaporation umidity 0.165d0
- evaporation bconstant 7.d0
- evaporation mconstant 0.1d0
- evaporation tconstant 1.d0
- evaporation diffusivity 0.25d0
+ evaporation polymer frac 0.025d0             !initial polymer mass fraction cp0
+ evaporation airviscosity 0.1511d0            !air kinematic viscosity [cm^2/s]
+ evaporation temperature 298.15d0             !temperature [K]
+ evaporation umidity 0.165d0                  !relative humidity (0--1)
+ evaporation bconstant 7.d0                   !B in mu/mu0=10^[B(cp^m-cp0^m)]
+ evaporation mconstant 0.1d0                  !m in the Yarin solidification law
+ evaporation tconstant 1.d0                   !Yarin Eq. (38): theta/theta0=cp/cp0
+ evaporation diffusivity 0.25d0               !solvent-vapour diffusivity in air [cm^2/s]
  
- 
- 
+ !In the Yarin-2001 model evaporation stops at solvent mass fraction cs=0.1.
+ !JETSPIN therefore limits V/V0 to cp0/(1-0.1), not to a fixed 0.1.
  
  Finish
 

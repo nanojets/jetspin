@@ -1,0 +1,67 @@
+
+ !Example JETSPIN input file 8: Yarin-2001 evaporation reference case
+ !Aqueous PEO, 6 wt%, based on Yarin, Koombhongse and Reneker,
+ !J. Appl. Phys. 89, 3018-3026 (2001).
+ !All dimensional input quantities are in the JETSPIN cgs convention.
+ !This is a parameter-fidelity regression case, not a bitwise reproduction
+ !of the original 2001 discretization or of Fig. 2 in that paper.
+
+ system 3
+ integrator 3
+
+ timestep 1.d-8                             !s
+ final time 1.d-2                           !s; paper discusses trajectories over ~6.5 ms
+ print time 1.d-4                           !s
+ seed 317
+
+ print xyz 1.d-4                            !s
+ print xyz maxnumber 1000
+ print list t x yz volr n rc evrc visc gc
+ printstat list t x vn yz n curn curc evrc visc gc
+
+ inserting yes
+ removing yes
+
+ multiple step no
+ dynamic refinement no
+
+ ! Yarin et al. dimensional material/setup parameters.
+ points 1
+ initial length 0.0325d0                    !cm; electrostatic cutoff length L in Yarin 2001
+ nozzle velocity 10.d0                      !cm/s; representative measured initial speed ~0.1 m/s
+ nozzle stress 0.d0                         !g cm-1 s-2; numerical initialization
+ yield stress 0.d0                          !g cm-1 s-2; Maxwell fluid
+ nozzle cross 0.015d0                       !cm = 150 micrometers
+ density mass 1.d0                          !g cm-3 = 1000 kg m-3
+ density charge 2.99792458d6                !statC cm-3 = 1 C/L
+ viscosity 1.d4                             !P = g cm-1 s-1
+ elastic modulus 1.d6                       !Ba = g cm-1 s-2; gives theta0=mu0/G0=0.01 s
+ collector distance 20.d0                   !cm
+ external potential 1.d0                    !statV; E=1/20=0.05 statV/cm = 1.5 kV/m
+ surface tension 70.d0                      !dyn/cm = g s-2
+
+ ! The paper reports K_s=100.  Since K_s=omega*theta0 and theta0=0.01 s,
+ ! omega=1.0e4 s^-1.  The perturbation amplitude is a small JETSPIN
+ ! numerical seed; it is not specified among the dimensional parameters
+ ! reported in Yarin et al. (2001).
+ perturbation yes
+ perturbation frequency 1.d4                !s^-1
+ perturbation amplitude 1.d-3               !cm
+
+ ! Evaporation and rheological solidification: Yarin Eqs. (28), (34),
+ ! (36)-(43).  Initial PEO concentration is 6 wt%.
+ evaporation yes
+ evaporation polymer frac 0.06d0
+ evaporation airviscosity 0.15d0            !cm2/s
+ evaporation temperature 293.15d0           !K = 20 C
+ evaporation umidity 0.165d0                !relative humidity = 16.5%
+ evaporation bconstant 7.d0
+ evaporation mconstant 0.1d0
+ evaporation tconstant 1.d0                 !theta/theta0 = cp/cp0
+
+ ! No explicit evaporation diffusivity is given here on purpose.
+ ! JETSPIN therefore exercises its Seaver/Yarin atmospheric-pressure
+ ! water-vapour fallback: D_a ~= 0.2420 cm2/s at 293.15 K.
+ ! Evaporation stops at cs=0.1, hence V/V0=cp0/0.9=0.0666666667.
+
+ Finish

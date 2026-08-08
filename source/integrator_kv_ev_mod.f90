@@ -37,6 +37,8 @@ module integrator_kv_ev_mod
  double precision, allocatable, save :: yvx(:),yvy(:),yvz(:),yev(:)
  logical, save :: lworkspace=.false.
  logical, save :: lannounced=.false.
+ integer, save :: workspace_mxnpjet=-1
+ integer, save :: workspace_mxchunk=-1
 
  contains
 
@@ -91,7 +93,14 @@ module integrator_kv_ev_mod
  subroutine ensure_workspace()
   implicit none
 
-  if(lworkspace)return
+  if(lworkspace)then
+    if(workspace_mxnpjet>=mxnpjet .and. workspace_mxchunk>=mxchunk)return
+
+    deallocate(fxx,fyy,fzz,fst,fev)
+    deallocate(f1vx,f1vy,f1vz,f2vx,f2vy,f2vz)
+    deallocate(f3vx,f3vy,f3vz,f4vx,f4vy,f4vz)
+    deallocate(yxx,yyy,yzz,yst,yvx,yvy,yvz,yev)
+  endif
 
   allocate(fxx(0:mxchunk,4),fyy(0:mxchunk,4),fzz(0:mxchunk,4))
   allocate(fst(0:mxchunk,4),fev(0:mxchunk,4))
@@ -102,6 +111,8 @@ module integrator_kv_ev_mod
   allocate(yxx(0:mxnpjet),yyy(0:mxnpjet),yzz(0:mxnpjet))
   allocate(yst(0:mxnpjet),yvx(0:mxnpjet),yvy(0:mxnpjet))
   allocate(yvz(0:mxnpjet),yev(0:mxnpjet))
+  workspace_mxnpjet=mxnpjet
+  workspace_mxchunk=mxchunk
   lworkspace=.true.
 
   return

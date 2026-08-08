@@ -17,9 +17,9 @@ Dario Pisignano          University of Salento             Italy
 Giuseppe Pontrelli       IAC-CNR, Rome                     Italy        
 Sauro Succi              IAC-CNR, Rome                     Italy        
                                                                         
-The software development process has received funding from the          
-European Research Council under the European Union's Seventh Framework  
-Programme (FP/2007-2013)/ERC Grant Agreement n. 306357 (NANO-JETS).     
+The software development process has received funding from the European
+Research Council under the European Union's Seventh Framework Programme
+(FP/2007-2013)/ERC Grant Agreement n. 306357 (NANO-JETS).               
                                                                         
 This is an experimental code. The authors accept no responsibility      
 for the performance of the code or for the correctness of the results.  
@@ -52,6 +52,11 @@ S. Koombhongse and D. H. Reneker, J. Appl. Phys. 89, 3018-3026 (2001),
 using the standard JETSPIN nondimensionalization. Its equations,         
 rheological corrections and input directives are documented in          
 manual/evaporation.tex.                                                 
+                                                                        
+A dedicated Yarin-2001 reference/regression input is provided in        
+examples/input-8. It uses the 6 wt% aqueous-PEO material and setup       
+parameters reported in that paper and documents the expected            
+evaporation cutoff and concentration-dependent rheological ratios.      
                                                                         
 Compiling JETSPIN                                                       
                                                                         
@@ -115,6 +120,9 @@ New features in JETSPIN Version 1.22
                                                                         
   - The Yarin-2001 evaporation cutoff and rheological model are         
     documented in manual/evaporation.tex.                               
+                                                                        
+  - Example 8 was added as a 6 wt% aqueous-PEO Yarin-2001 reference     
+    and regression case for evaporation and rheological solidification. 
                                                                         
   - The job close directive was added to ensure a controlled close down 
     procedure when a job runs out of time.                              

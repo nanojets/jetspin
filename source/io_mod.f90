@@ -1890,10 +1890,6 @@
         ltest=.true.
       endif 
     endif
-    if(lKVfluid)then
-      call warning(101)
-      ltest=.true.
-    endif
     if(.not. lBev)then
       call warning(103)
       ltest=.true.

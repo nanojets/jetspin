@@ -17,9 +17,9 @@ Dario Pisignano          University of Salento             Italy
 Giuseppe Pontrelli       IAC-CNR, Rome                     Italy        
 Sauro Succi              IAC-CNR, Rome                     Italy        
                                                                         
-The software development process has received funding from the          
-European Research Council under the European Union's Seventh Framework  
-Programme (FP/2007-2013)/ERC Grant Agreement n. 306357 (NANO-JETS).     
+The software development process has received funding from the European
+Research Council under the European Union's Seventh Framework Programme
+(FP/2007-2013)/ERC Grant Agreement n. 306357 (NANO-JETS).               
                                                                         
 This is an experimental code. The authors accept no responsibility      
 for the performance of the code or for the correctness of the results.  
@@ -46,6 +46,21 @@ Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,
 Sauro Succi, JETSPIN: A specific-purpose open-source software for       
 electrospinning simulations of nanofibers, Computer Physics             
 Communications, 197 (2015), pp. 227-238.                                
+                                                                        
+The evaporation model introduced in Version 1.22 follows A. L. Yarin,   
+S. Koombhongse and D. H. Reneker, J. Appl. Phys. 89, 3018-3026 (2001), 
+using the standard JETSPIN nondimensionalization. Its equations,         
+rheological corrections and input directives are documented in          
+manual/evaporation.tex.                                                 
+The same concentration-dependent viscosity and elastic-modulus laws can    
+also be used with the Kelvin-Voigt rheology. This is documented as a       
+JETSPIN extension of the Yarin concentration laws (not as part of the       
+original Yarin-2001 Maxwell model).                                        
+                                                                        
+A dedicated Yarin-2001 reference/regression input is provided in        
+examples/input-8. It uses the 6 wt% aqueous-PEO material and setup       
+parameters reported in that paper and documents the expected            
+evaporation cutoff and concentration-dependent rheological ratios.      
                                                                         
 Compiling JETSPIN                                                       
                                                                         
@@ -106,6 +121,16 @@ New features in JETSPIN Version 1.22
   - Oscillating electric fields added                                   
                                                                         
   - Evaporation effect added                                            
+                                                                        
+  - The Yarin-2001 evaporation cutoff and rheological model are         
+    documented in manual/evaporation.tex.                               
+                                                                        
+  - Evaporation can be combined with Kelvin-Voigt rheology using the       
+    same concentration-dependent mu and G laws, including the required     
+    product-rule terms for time-dependent material properties.              
+                                                                        
+  - Example 8 was added as a 6 wt% aqueous-PEO Yarin-2001 reference     
+    and regression case for evaporation and rheological solidification. 
                                                                         
   - The job close directive was added to ensure a controlled close down 
     procedure when a job runs out of time.                              

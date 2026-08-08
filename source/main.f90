@@ -47,12 +47,13 @@
                        tstep,xyzrescale,set_resolution_length, &
                        allocate_jet,set_initial_jet,add_jetbead, &
                        remove_jetbead,erase_jetbead,lengthscale, &
-                       pdbrescale,lreadrest
+                       pdbrescale,lreadrest,lKVfluid,levaporation
   use breaking_mod,   only : ckeck_breakup
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
                                refbeadstartfit
   use integrator_mod, only : initime,endtime,driver_integrator
+  use integrator_kv_ev_mod, only : driver_integrator_KV_ev
   use statistic_mod,  only : statistic_driver
   use io_mod,         only : iprintdat,iprintxyz,lprintdat,lprintxyz,&
                        maxnumxyz,sprintdat,print_logo,read_input,&
@@ -178,7 +179,11 @@
     lrecycle=((dble(nstep)*tstep)<endtime)
     
 !   integrate the system
-    call driver_integrator(mytime,tstep,nstep,ldorefinment)
+    if(lKVfluid.and.levaporation)then
+      call driver_integrator_KV_ev(mytime,tstep,nstep,ldorefinment)
+    else
+      call driver_integrator(mytime,tstep,nstep,ldorefinment)
+    endif
     
 !   check if a new bead should be added and/or removed
     call add_jetbead(nstep,mytime,ladd)

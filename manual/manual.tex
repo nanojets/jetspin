@@ -1045,6 +1045,7 @@ and groups employed in the text.}
 \label{tab:tabella-adimensionale} 
 \end{table}
 
+\input{evaporation}
 
 \section{Integration schemes}
 
@@ -1265,6 +1266,18 @@ dynam refin start $f$  & the refinement is applied only if the simulation time i
 dynam refin anchor $f$ & during the refinement procedure all the anchor beads inserted\tabularnewline
  & at distance $f$ preserve their positions\tabularnewline
  & (they are manteined as knots of both the old and new meshes)\tabularnewline
+evaporation yes  & activate solvent evaporation and concentration-dependent rheology (default: no)\tabularnewline
+evaporation polymer frac $f$  & initial polymer mass fraction $c_{p,0}$\tabularnewline
+evaporation airviscosity $f$  & kinematic viscosity of air $\nu_a$ in $\mathrm{cm}^{2}/\mathrm{s}$\tabularnewline
+evaporation temperature $f$  & temperature in kelvin used for the saturation-vapour correlation\tabularnewline
+evaporation umidity $f$  & relative humidity $RH$ in the interval $[0,1]$\tabularnewline
+ & (historical spelling retained for input-file compatibility)\tabularnewline
+evaporation diffusivity $f$  & solvent-vapour diffusion coefficient $D_a$ in $\mathrm{cm}^{2}/\mathrm{s}$\tabularnewline
+evaporation relumidity $f$  & optional saturation-vapour ratio $c_{s,\mathrm{eq}}(T)$\tabularnewline
+ & (if omitted it is evaluated from \texttt{evaporation temperature})\tabularnewline
+evaporation bconstant $f$  & parameter $B$ in the concentration-dependent viscosity law\tabularnewline
+evaporation mconstant $f$  & exponent $m$ in the concentration-dependent viscosity law\tabularnewline
+evaporation tconstant $f$  & exponent in the relaxation-time law; use $f=1$ for Yarin et al. (2001)\tabularnewline
 \uline{elastic modulus} $f$  & elastic modulus of the nanofiber\tabularnewline
 external potential $f$  & electric potential between the nozzle and collector\tabularnewline
  & (the resulting electric field is oriented along \textit{x-axis})\tabularnewline
@@ -1527,7 +1540,24 @@ needle of radius $250\,$micron.}
 
 \section{Test Case 6: Three-D simulation of a quasi-Newtonian fluid}
 
-\section{Test Case 7: Three-D simulation with an orthogonal rotating electric field}
+\section{Test Case 7: Three-D simulation with evaporation and an orthogonal rotating electric field}
+
+Test Case 7 combines the three-dimensional Maxwell model with an
+orthogonal rotating electric field and the solvent evaporation and
+solidification model described in Sec.~\ref{sec:Evaporation}.  The
+setting \texttt{evaporation tconstant 1} reproduces the relaxation-time
+law of Eq.~(38) of Yarin, Koombhongse and Reneker
+\cite{yarin2001bending}.  The evaporation cutoff is the Yarin criterion
+$c_s=0.1$, which in JETSPIN is imposed through the equivalent volume
+ratio $V_i/V_i^0=c_{p,0}/0.9$.
+
+The example is intended as a regression and reference case for the
+coupled JETSPIN implementation.  Its initial polymer fraction is
+$c_{p,0}=0.025$ and therefore it should not be interpreted as a
+quantitative reproduction of the 6\% aqueous-PEO case used in the
+original Yarin et al. comparison.  The orthogonal rotating field is a
+separate JETSPIN extension and is not part of the 2001 evaporation
+model.
 
 \newpage{}
 

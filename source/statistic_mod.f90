@@ -7,7 +7,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -17,8 +17,9 @@
                              insvx,insvy,insvz,jetxx,jetyy,jetzz,jetvx,&
                              jetvy,jetvz,jetst,jetms,jetch,npjet,g,h,&
                              chargescale,jetcr,lengthscale,massscale,&
-                             tao,jetpt,jetvl,nmulstepdone, &
-                             multisteperror,nmultisteperror,V0
+                             tao,jetpt,jetvl,nmulstepdone,jetve,jetce, &
+                             multisteperror,nmultisteperror,V0, &
+                             levaporation,mu,cp0,Bev,mev,tev
  use dynamic_refinement_mod,only : irefinementdone
  use support_functions_mod, only : compute_crosssec,compute_length_path
  use electric_field_mod,    only : actual_form_electric_field
@@ -27,7 +28,7 @@
  
  private
  
- integer, public, parameter :: nmaxstatdata=45
+ integer, public, parameter :: nmaxstatdata=51
  
  double precision, public, save, dimension(nmaxstatdata) :: statdata
  
@@ -47,6 +48,15 @@
  double precision, public, save :: meanimass=0.d0
  double precision, public, save :: meanemass=0.d0
  
+ double precision, public, save :: counterevisc=0.d0
+ double precision, public, save :: meanevisc=0.d0
+ 
+ double precision, public, save :: countereG=0.d0
+ double precision, public, save :: meaneG=0.d0
+ 
+ double precision, public, save :: counterevrat=0.d0
+ double precision, public, save :: meanevrat=0.d0
+ 
  integer, public, save :: ncounterevel=0
  integer, public, save :: ncounterevelrel=0
  double precision, public, save :: counterevel=0.d0
@@ -55,6 +65,9 @@
  double precision, public, save :: meanevelrel=0.d0
  
  integer, public, save :: ncountergeom=0
+ integer, public, save :: ncounterevisc=0
+ integer, public, save :: ncountereG=0
+ integer, public, save :: ncounterevrat=0
  double precision, public, save :: counterelen=0.d0
  double precision, public, save :: counterecross=0.d0
  double precision, public, save :: meanelen=0.d0
@@ -121,6 +134,10 @@
   
   call store_maxstress()
   
+  call store_viscosity_end(lrem,nremovedsub)
+  call store_elastic_end(lrem,nremovedsub)
+  call store_evrat_end(lrem,nremovedsub)
+  
   return
   
  end subroutine statistic_driver
@@ -134,7 +151,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -153,6 +170,9 @@
   
 ! compute all the observables
   call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
+  if(levaporation)then
+    call compute_crosssec(jetxx,jetyy,jetzz,jetve,jetce)
+  endif
   call compute_current_init(tempint)
   call compute_mass_init(tempint)
   
@@ -167,6 +187,10 @@
   
   call compute_elapsed_cpu_time()
   call compute_cpu_time()
+  
+  call compute_viscosity_end()
+  call compute_elastic_end()
+  call compute_evrat_end()
   
 ! store all the observables in the statdata array to be printed
   ipoint=inpjet
@@ -243,6 +267,38 @@
   endif
   call actual_form_electric_field(timesub,vext)
   statdata(45)=vext(1)*V0
+  !viscosity at the collector
+  if(isnan(meanevisc))then
+    statdata(46)=0.d0
+  else
+    statdata(46)=meanevisc
+  endif
+  !elastic mod at the collector
+  if(isnan(meaneG))then
+    statdata(47)=0.d0
+  else
+    statdata(47)=meaneG
+  endif
+  if(isnan(meanemass) .or. isnan(meanevrat))then
+    statdata(48)=0.d0
+  else
+    statdata(48)=(meanemass*(1.d0-meanevrat))*massscale/tao
+  endif
+  if(isnan(meanevrat))then
+    statdata(49)=0.d0
+  else
+    statdata(49)=(1.d0-meanevrat)
+  endif
+  if(levaporation)then
+    statdata(50)=jetve(ipoint)*(lengthscale**3.d0)
+  else
+    statdata(50)=jetvl(ipoint)*(lengthscale**3.d0)
+  endif
+  if(levaporation)then
+    statdata(51)=1.d0-jetve(ipoint)/jetvl(ipoint)
+  else
+    statdata(51)=0.d0
+  endif
   
 ! update the counter
   icount=icount+1
@@ -442,7 +498,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
   
@@ -452,11 +508,20 @@
   integer,intent(in) :: nremovedsub
   
   integer :: ipoint
+  double precision :: cmass
   
   if(lrem)then
-    do ipoint=inpjet-nremovedsub,inpjet-1
-      removedmass=removedmass+jetms(ipoint)
-    enddo
+    if(levaporation)then
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        !correction factor for the evaporated mass
+        cmass=jetve(ipoint)/jetvl(ipoint)
+        removedmass=removedmass+jetms(ipoint)*cmass
+      enddo
+    else
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        removedmass=removedmass+jetms(ipoint)
+      enddo
+    endif
   endif
   
   return
@@ -517,7 +582,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -527,11 +592,20 @@
   integer,intent(in) :: nremovedsub
   
   integer :: ipoint
+  double precision :: cmass
   
   if(lrem)then
-    do ipoint=inpjet-nremovedsub,inpjet-1
-      counteremass=counteremass+jetms(ipoint)
-    enddo
+    if(levaporation)then
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        !correction factor for the evaporated mass
+        cmass=jetve(ipoint)/jetvl(ipoint)
+        counteremass=counteremass+jetms(ipoint)*cmass
+      enddo
+    else
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        counteremass=counteremass+jetms(ipoint)
+      enddo
+    endif
   endif
   
   return
@@ -833,7 +907,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification August 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -856,9 +930,11 @@
          (jetyy(ipoint)-jetyy(ipoint+1))**2.d0+(jetzz(ipoint)- &
           jetzz(ipoint+1))**2.d0)
       end select
-  
-    tempmod1=dsqrt((icrossec**2.d0)*resolution/tempmod0)
-  
+    if(levaporation)then
+      tempmod1=dsqrt(jetve(ipoint)/(tempmod0*Pi))
+    else
+      tempmod1=dsqrt(jetvl(ipoint)/(tempmod0*Pi))
+    endif
     ncountergeom=ncountergeom+1
     counterelen=counterelen+tempmod0
     counterecross=counterecross+tempmod1
@@ -981,6 +1057,221 @@
   return
   
  end subroutine store_maxstress
+ 
+ subroutine store_viscosity_end(lrem,nremovedsub)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for counting the viscosity at the collector
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification May 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
+  
+  integer :: ipoint
+  double precision :: ratmu,cp
+  
+  if(lrem)then
+    if(levaporation)then
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        !mass fraction of actual polymer
+        cp=cp0*jetvl(ipoint)/jetve(ipoint)
+        !ratio between corrected for evaporation mu and old mu
+        ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
+        counterevisc=counterevisc+mu*ratmu
+        ncounterevisc=ncounterevisc+1
+      enddo
+    else
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        counterevisc=counterevisc+mu
+        ncounterevisc=ncounterevisc+1
+      enddo
+    endif
+  endif
+  
+  return
+  
+ end subroutine store_viscosity_end
+ 
+ subroutine compute_viscosity_end()
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the viscosity at the collector
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification May 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  
+  
+  if(ncounterevisc/=0)then
+    meanevisc=counterevisc/dble(ncounterevisc)
+  else
+    meanevisc=0.d0
+  endif
+  
+  ncounterevisc=0
+  counterevisc=0.d0
+  
+  return
+  
+ end subroutine compute_viscosity_end
+ 
+ subroutine store_elastic_end(lrem,nremovedsub)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for counting the elastic mod at the collector
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification May 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
+  
+  integer :: ipoint
+  double precision :: ratmu,cp,rattao,ratg
+  
+  if(lrem)then
+    if(levaporation)then
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        !mass fraction of actual polymer
+        cp=cp0*jetvl(ipoint)/jetve(ipoint)
+        !ratio between corrected for evaporation mu and old mu
+        ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
+        !ratio between corrected for evaporation tao and old tao
+        rattao=(cp/cp0)**tev
+        !ratio between corrected for evaporation G and old G
+        ratg=ratmu/rattao
+        countereG=countereG+G*ratg
+        ncountereG=ncountereG+1
+      enddo
+    else
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        countereG=countereG+G
+        ncountereG=ncountereG+1
+      enddo
+    endif
+  endif
+  
+  return
+  
+ end subroutine store_elastic_end
+ 
+ subroutine compute_elastic_end()
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the elastic mod at the collector
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification May 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  
+  if(ncountereG/=0)then
+    meaneG=countereG/dble(ncountereG)
+  else
+    meaneG=0.d0
+  endif
+  
+  ncountereG=0
+  countereG=0.d0
+  
+  return
+  
+ end subroutine compute_elastic_end
+ 
+ subroutine store_evrat_end(lrem,nremovedsub)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for counting the evaporated volume ratio 
+!     at the collector
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification May 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  logical,intent(in) :: lrem
+  integer,intent(in) :: nremovedsub
+  
+  integer :: ipoint
+  double precision :: ceva
+  
+  if(lrem)then
+    if(levaporation)then
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        !evaporated volume ratio
+        ceva=jetve(ipoint)/jetvl(ipoint)
+        counterevrat=counterevrat+ceva
+        ncounterevrat=ncounterevrat+1
+      enddo
+    else
+      do ipoint=inpjet-nremovedsub,inpjet-1
+        counterevrat=counterevrat+1.d0
+        ncounterevrat=ncounterevrat+1
+      enddo
+    endif
+  endif
+  
+  return
+  
+ end subroutine store_evrat_end
+ 
+ subroutine compute_evrat_end()
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the evaporated volume ratio 
+!     at the collector
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification May 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  
+  if(ncounterevrat/=0)then
+    meanevrat=counterevrat/dble(ncounterevrat)
+  else
+    meanevrat=1.d0
+  endif
+  
+  ncounterevrat=0
+  counterevrat=0.d0
+  
+  return
+  
+ end subroutine compute_evrat_end
   
  end module statistic_mod
 

@@ -8,11 +8,11 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification September 2017
 !     
 !***********************************************************************
  
- use version_mod, only : idrank,abort_world
+ use version_mod, only : idrank,abort_world,finalize_world
  
  implicit none
  
@@ -31,7 +31,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification December 2015
+!     last modification September 2017
 !     
 !***********************************************************************
   
@@ -89,12 +89,17 @@
       case (17)
         write(outp,outf2)'ERROR - multiple step error', &
          ' Please check the input file.'
+      case (18)
+        write(outp,outf)'ERROR - the restart file is corrupted'
+      case (19)
+        write(outp,outf2)'ERROR - array yve not found in subroutine', &
+         ' compute_coulomelec_driver!'
       case default
         write(outp,'(a,i18)')'unknown ERROR! code = ',kode
     end select
   endif
   
-  call abort_world()
+  call finalize_world()
   stop
   
  end subroutine error
@@ -107,7 +112,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification January 2017
 !     
 !***********************************************************************
   
@@ -200,9 +205,11 @@
     case (33)
       write(outp,'(/,a,/)')"WARNING - 'airdrag amplitude' not specified in the input file"
     case (34)
-      write(outp,'(/,a,i18,/)')"WARNING - 'airdrag yes' is not compatible with the actual 'integrator' value",nint(ddata)
+      write(outp,'(/,2a,i18,/)')"WARNING - 'airdrag amplitude' is not", &
+       " compatible with the actual 'integrator' value",nint(ddata)
     case (35)
-      write(outp,'(/,a,i18,/)')"WARNING - 'airdrag yes' is not compatible with the actual 'systype' value",nint(ddata)
+      write(outp,'(/,2a,i18,/)')"WARNING - 'airdrag amplitude' is not", &
+       " compatible with the actual 'systype' value",nint(ddata)
     case (36)
       write(outp,'(/,a,/)')"WARNING - 'inserting mode' not specified in the input file"
     case (37)
@@ -342,6 +349,18 @@
       "WARNING - * erms                 * maximum error of multiple step approach    *"
       write(outp,'(a)') &
       "WARNING - * v                    * value of the external electric potential   *"
+      write(outp,'(a)') &
+      "WARNING - * visc                 * value of the viscosity at the collector    *"
+      write(outp,'(a)') &
+      "WARNING - * gc                   * value of the elastic mod at the collector  *"
+      write(outp,'(a)') &
+      "WARNING - * emfc                 * evaporated mass flux at the collector      *"
+      write(outp,'(a)') &
+      "WARNING - * evrc                 * evaporated volume ratio at the collector   *"
+      write(outp,'(a)') &
+      "WARNING - * vol                  * closest bead volume to the collector       *"
+      write(outp,'(a)') &
+      "WARNING - * volr                 * closest bead volume ratio to the collector *"
       write(outp,'(a,/)') &
       "WARNING - *********************************************************************"
     case (61)
@@ -454,6 +473,47 @@
       write(outp,'(/,a)') &
        "WARNING - 'system' should be 1 or 3 in input file if 'kvfluid' is activated"
       write(outp,'(2a,/)')"WARNING - the actual value is : ",trim(adjustl(r_char))
+    case (90)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'external potential vector' not specified in input file"
+    case (91)
+      write(outp,'(/,a,/)') &
+       "WARNING - 'external potential frequency' not specified in input file"
+    case (92)
+      write(outp,'(/,a)') &
+       "WARNING - 'external potential vector' wrongly specified in input file"
+      write(outp,'(a)') &
+       "WARNING - 'it can be specified only with 'external potential type' = 3"
+      write (r_char,'(i10)')nint(ddata)
+      write(outp,'(2a,/)')"WARNING - its actual value is : ",trim(adjustl(r_char))
+    case (93)
+      write(outp,'(/,a,/)')"WARNING - 'noise variance' not specified in the input file"
+    case (94)
+      write(outp,'(/,a,i18,/)')"WARNING - 'noise yes' is not compatible with the actual 'integrator' value",nint(ddata)
+    case (95)
+      write(outp,'(/,a,i18,/)')"WARNING - 'noise yes' is not compatible with the actual 'systype' value",nint(ddata)
+    case (96)
+      write(outp,'(/,a,/)')"WARNING - 'noise diffusivity' not specified in the input file"
+    case (97)
+      write(outp,'(/,a,/)')"WARNING - 'evaporation polymer frac' not specified in the input file"
+    case (98)
+      write(outp,'(/,a,/)')"WARNING - 'evaporation airviscosity' not specified in the input file"
+    case (99)
+      write(outp,'(/,a,/)')"WARNING - 'evaporation temperature' not specified in the input file"
+    case (100)
+      write(outp,'(/,a,/)')"WARNING - 'evaporation umidity' not specified in the input file"
+    case (101)
+      write(outp,'(/,a,/)')"WARNING - 'evaporation' is not actually implemented for Kelvin–Voigt fluids"
+    case (102)
+      write(outp,'(/,a,g20.10,/)')"WARNING - saturation vapor ratio of solvent automatically set equal to ",ddata
+    case (103)
+      write(outp,'(/,a,/)')"WARNING - 'evaporation bconstant' not specified in the input file"
+    case (104)
+      write(outp,'(/,a,/)')"WARNING - 'evaporation mconstant' not specified in the input file"
+    case (105)
+      write(outp,'(/,a,g20.10,a,/)')"WARNING - mass diffusivity of solvent automatically set equal to ",ddata,' cm^2 s^-1'
+    case (106)
+      write(outp,'(/,a,g20.10,/)')"WARNING - 'evaporation umidity' should be between 0-1, actual value",ddata
     case default
       write(outp,'(/,a,i8,/)')"unknown WARNING! code = ",kode
   end select

@@ -18,7 +18,7 @@
  use nanojet_mod, only : systype,icrossec,inpjet,npjet,resolution, &
                    velext,linserted,airdragamp,jetms,mxnpjet, &
                    linserting,luppot,kuppot,jetch,jetxx,jetyy,jetzz, &
-                   jetpt,jetvl,jetcr,KLor,BLor,lflorentz
+                   jetpt,jetvl,jetcr,KLor,BLor,lflorentz,noisediff
 
  
  implicit none
@@ -779,7 +779,7 @@
   
  end subroutine project_veltangetversor
  
- subroutine compute_stocforce_3d(ipoint,fstocvx,fstocvy,fstocvz)
+ subroutine compute_stocforce_3d(ipoint,fstocvx,fstocvy,fstocvz,cmass)
  
 !***********************************************************************
 !     
@@ -788,7 +788,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification March 2015
+!     last modification May 2017
 !     
 !***********************************************************************
  
@@ -798,10 +798,22 @@
   double precision, intent(out) ::  fstocvx
   double precision, intent(out) ::  fstocvy
   double precision, intent(out) ::  fstocvz
+  double precision, intent(in), optional ::  cmass   
   
   double precision :: factorsub,dadt
   
-  dadt=airdragamp(1)/jetms(ipoint)
+  
+  logical :: lcmass
+  
+  lcmass=.false.
+  if(present(cmass))lcmass=.true.
+  
+  if(lcmass)then
+    dadt=airdragamp(1)/(jetms(ipoint)*cmass)
+  else
+    dadt=airdragamp(1)/jetms(ipoint)
+  endif
+  dadt=dadt+noisediff
   factorsub=dsqrt(2.d0*dadt)
   
   fstocvx = factorsub
@@ -983,7 +995,7 @@
  
  
  
- subroutine compute_lorentz_acc(k,vx,vy,vz,aLorx,aLory,aLorz)
+ subroutine compute_lorentz_acc(k,vx,vy,vz,aLorx,aLory,aLorz,cmass)
 
 !***********************************************************************
 !     
@@ -992,16 +1004,21 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella, F. Cipolletta
-!     last modification April 2016
+!     last modification May 2017
 !     
 !***********************************************************************
 
   implicit none
   integer, intent(in) :: k
   double precision, allocatable, dimension(:), intent(in) :: vx,vy,vz
-  double precision, intent(out) :: aLorx,aLory,aLorz                                                             
+  double precision, intent(out) :: aLorx,aLory,aLorz      
+  double precision, intent(in), optional ::  cmass   
   
   double precision :: KLorsub
+  logical :: lcmass
+  
+  lcmass=.false.
+  if(present(cmass))lcmass=.true.
   
   if(.not. lflorentz)then
     aLorx=0.d0
@@ -1010,7 +1027,11 @@
     return
   endif
   
-  KLorsub=KLor*jetch(k)/(dsqrt(jetms(k)))
+  if(lcmass)then
+    KLorsub=KLor*jetch(k)/(dsqrt(jetms(k)*cmass))
+  else
+    KLorsub=KLor*jetch(k)/(dsqrt(jetms(k)))
+  endif
   
   aLorx = KLorsub *(( vy(k)*BLor(3) )-( vz(k)*BLor(2) ))
   aLory = KLorsub *(( vz(k)*BLor(1) )-( vx(k)*BLor(3) ))

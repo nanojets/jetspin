@@ -10,13 +10,15 @@ TYPE=undefined
 EX=main.x
 EXE = $(BINROOT)/$(EX)
 SHELL=/bin/sh
+MPI_COMPAT_FLAG ?= -fallow-argument-mismatch
+MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
 
 OBJ_MOD = serial_version_mod.o parallel_version_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
-	coulomb_force_mod.o electric_field_mod.o eom_mod.o driver_eom_mod.o \
-	integrator_mod.o statistic_mod.o io_mod.o
+	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
+	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o
 
 OBJ_SRC = main.o
 
@@ -65,77 +67,77 @@ help:
 	@echo "Please examine Makefile for further details "
 
 cygwin:
-	$(MAKE) FC=gfortran \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=gfortran \
 	FFLAGS="-O2 -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE="seq" \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 	
 cygwin-mpi:
-	$(MAKE) FC=mpif90 \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=mpif90 \
 	FFLAGS="-O2 -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 	
 gfortran:
-	$(MAKE) FC=gfortran \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=gfortran \
 	FFLAGS="-O2 -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE="seq" \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 	
 gfortran-mpi:
-	$(MAKE) FC=mpif90 \
-	FFLAGS="-O2 -c" \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=mpif90 \
+	FFLAGS="-O2 $(MPI_COMPAT_FLAG) -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
 gfortran-mpidebugger:
-	$(MAKE) FC=mpif90 \
-	FFLAGS="-O0 -g -fcheck=all -c" \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=mpif90 \
+	FFLAGS="-O0 -g -fcheck=all $(MPI_COMPAT_FLAG) -c" \
 	LDFLAGS="-O0 -g -fcheck=all -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
 gfortran-debugger:
-	$(MAKE) FC=gfortran \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=gfortran \
 	FFLAGS="-O0 -g -fcheck=all -c" \
 	LDFLAGS="-O0 -g -fcheck=all -o" \
 	TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 
 intel:
-	$(MAKE) FC=ifort \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=ifort \
 	FFLAGS="-O2 -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 	
 intel-mpi:
-	$(MAKE) FC=mpiifort \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=mpiifort \
 	FFLAGS="-O2 -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
 intel-openmpi:
-	$(MAKE) FC=mpif90 \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=mpif90 \
 	FFLAGS="-O2 -c" \
 	LDFLAGS="-O2  -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
 intel-debugger:
-	$(MAKE) FC=ifort \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=ifort \
 	FFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -c" \
 	LDFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -o" \
 	TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 
 intel-mpidebugger:
-	$(MAKE) FC=mpiifort \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=mpiifort \
 	FFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -c" \
 	LDFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -o" \
 	TYPE=mpi \
@@ -144,25 +146,25 @@ intel-mpidebugger:
 seq:serial_version_mod.o parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
-	electric_field_mod.o eom_mod.o driver_eom_mod.o integrator_mod.o \
-	statistic_mod.o io_mod.o main.o
+	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
+	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
-	coulomb_force_mod.o electric_field_mod.o eom_mod.o driver_eom_mod.o \
-	integrator_mod.o statistic_mod.o io_mod.o main.o
+	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
+	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 	
 mpi:parallel_version_mod.o parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
-	electric_field_mod.o eom_mod.o driver_eom_mod.o integrator_mod.o \
-	statistic_mod.o io_mod.o main.o
+	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
+	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
-	coulomb_force_mod.o electric_field_mod.o eom_mod.o driver_eom_mod.o \
-	integrator_mod.o statistic_mod.o io_mod.o main.o
+	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
+	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 
 serial_version_mod.o:serial_version_mod.f90
@@ -207,11 +209,17 @@ electric_field_mod.o: electric_field_mod.f90
 eom_mod.o: eom_mod.f90
 	$(FC) $(FFLAGS) eom_mod.f90
 	
+eom_ev_mod.o: eom_ev_mod.f90
+	$(FC) $(FFLAGS) eom_ev_mod.f90
+	
 driver_eom_mod.o: driver_eom_mod.f90
 	$(FC) $(FFLAGS) driver_eom_mod.f90
 
 integrator_mod.o:integrator_mod.f90
 	$(FC) $(FFLAGS) integrator_mod.f90
+
+integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90
+	$(FC) $(FFLAGS) integrator_kv_ev_mod.f90
 
 statistic_mod.o:statistic_mod.f90
 	$(FC) $(FFLAGS) statistic_mod.f90
@@ -224,9 +232,6 @@ main.o:main.f90
 
 clean:
 	rm -rf $(OBJ_MOD) $(OBJ_SRC) *.mod
-
-
-
 
 
 

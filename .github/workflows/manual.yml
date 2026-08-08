@@ -1,0 +1,33 @@
+name: Build manual
+
+on:
+  push:
+    paths:
+      - "manual/**"
+      - ".github/workflows/manual.yml"
+  pull_request:
+    paths:
+      - "manual/**"
+      - ".github/workflows/manual.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile manual
+        uses: xu-cheng/latex-action@v4
+        with:
+          working_directory: manual
+          root_file: manual.tex
+          latexmk_use_xelatex: false
+          args: -pdf -interaction=nonstopmode -halt-on-error
+      - name: Upload PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetspin-manual
+          path: manual/manual.pdf

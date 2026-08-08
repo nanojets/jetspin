@@ -19,6 +19,11 @@
  use eom_mod,     only : eom1,eom3,eom4,eom4_pos,eom4_stress, &
                           eom1_KV_pos_v,eom1_KV_st, &
                           eom3_KV_pos_v,eom3_KV_st
+ use eom_ev_mod,  only : eom1_ev,eom3_ev,eom4_ev,eom4_pos_ev, &
+                          eom4_stress_ev, &
+                          eom1_KV_pos_v_ev,eom1_KV_st_ev, &
+                          eom3_KV_pos_v_ev,eom3_KV_st_ev
+                        
  
  implicit none
  
@@ -29,6 +34,9 @@
  public :: xpsys_stress
  public :: xpsys_KV_pos_v
  public :: xpsys_KV_st
+ public :: xpsys_ev
+ public :: xpsys_pos_ev
+ public :: xpsys_stress_ev
  
  contains
  
@@ -278,6 +286,160 @@
   return
   
  end subroutine xpsys_KV_st
+ 
+ subroutine xpsys_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,timesub,k,fstocvx,fstocvy, &
+       fstocvz) 
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for controlling calls to
+!     subroutines which compute the first derivatives of the system 
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification March 2015
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(in) :: ipoint
+  double precision, allocatable, dimension (:), intent(in) ::  yxx
+  double precision, allocatable, dimension (:), intent(in) ::  yyy
+  double precision, allocatable, dimension (:), intent(in) ::  yzz
+  double precision, allocatable, dimension (:), intent(in) ::  yst
+  double precision, allocatable, dimension (:), intent(in) ::  yvx
+  double precision, allocatable, dimension (:), intent(in) ::  yvy
+  double precision, allocatable, dimension (:), intent(in) ::  yvz
+  double precision, allocatable, dimension (:), intent(in) ::  yvl
+  double precision, allocatable, dimension (:), intent(in) ::  yve
+  double precision, allocatable, dimension (:,:), intent(in) ::  ycf
+  double precision, intent(inout) ::  fxx
+  double precision, intent(inout) ::  fyy
+  double precision, intent(inout) ::  fzz
+  double precision, intent(inout) ::  fst
+  double precision, intent(inout) ::  fvx
+  double precision, intent(inout) ::  fvy
+  double precision, intent(inout) ::  fvz
+  double precision, intent(inout) ::  fve
+  double precision, optional, intent(inout) ::  fstocvx
+  double precision, optional, intent(inout) ::  fstocvy
+  double precision, optional, intent(inout) ::  fstocvz
+  double precision, intent(in) :: timesub
+  integer, intent(in) :: k
+  
+  select case(systype)
+    case (1)
+      call eom1_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,timesub,k)
+    case (3)
+      call eom3_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,timesub,k)
+    case (4)
+      call eom4_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,timesub,k,fstocvx,fstocvy, &
+       fstocvz)
+    case default
+      call error(2)
+  end select
+  
+  return
+  
+ end subroutine xpsys_ev
+ 
+ subroutine xpsys_pos_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve, &
+       ycf,fxx,fyy,fzz,fve,timesub,k) 
+       
+!***********************************************************************
+!     
+!     JETSPIN subroutine for controlling calls to
+!     subroutines which compute only the position first derivatives 
+!     of the system 
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification March 2015
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(in) :: ipoint
+  double precision, allocatable, dimension (:), intent(in) ::  yxx
+  double precision, allocatable, dimension (:), intent(in) ::  yyy
+  double precision, allocatable, dimension (:), intent(in) ::  yzz
+  double precision, allocatable, dimension (:), intent(in) ::  yst
+  double precision, allocatable, dimension (:), intent(in) ::  yvx
+  double precision, allocatable, dimension (:), intent(in) ::  yvy
+  double precision, allocatable, dimension (:), intent(in) ::  yvz
+  double precision, allocatable, dimension (:), intent(in) ::  yvl
+  double precision, allocatable, dimension (:), intent(in) ::  yve
+  double precision, allocatable, dimension (:,:), intent(in) ::  ycf
+  double precision, intent(inout) ::  fxx
+  double precision, intent(inout) ::  fyy
+  double precision, intent(inout) ::  fzz
+  double precision, intent(inout) ::  fve
+  double precision, intent(in) :: timesub
+  integer, intent(in) :: k
+  
+  
+  select case(systype)
+    case (4)
+      call eom4_pos_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
+       fxx,fyy,fzz,fve,timesub,k)
+    case default
+      call error(2)
+  end select
+  
+  return
+  
+ end subroutine xpsys_pos_ev
+ 
+ subroutine xpsys_stress_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve, &
+       ycf,fst,timesub,k) 
+  
+!***********************************************************************
+!     
+!     JETSPIN subroutine for controlling calls to
+!     subroutines which compute only the stress first derivative 
+!     of the system 
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification March 2015
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(in) :: ipoint
+  double precision, allocatable, dimension (:), intent(in) ::  yxx
+  double precision, allocatable, dimension (:), intent(in) ::  yyy
+  double precision, allocatable, dimension (:), intent(in) ::  yzz
+  double precision, allocatable, dimension (:), intent(in) ::  yst
+  double precision, allocatable, dimension (:), intent(in) ::  yvx
+  double precision, allocatable, dimension (:), intent(in) ::  yvy
+  double precision, allocatable, dimension (:), intent(in) ::  yvz
+  double precision, allocatable, dimension (:), intent(in) ::  yvl
+  double precision, allocatable, dimension (:), intent(in) ::  yve
+  double precision, allocatable, dimension (:,:), intent(in) ::  ycf
+  double precision, intent(inout) ::  fst
+  double precision, intent(in) :: timesub
+  integer, intent(in) :: k
+  
+  
+  select case(systype)
+    case (4)
+      call eom4_stress_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve, &
+       ycf,fst,timesub,k)
+    case default
+      call error(2)
+  end select
+  
+  return
+  
+ end subroutine xpsys_stress_ev
 
  end module driver_eom_mod
 

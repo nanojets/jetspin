@@ -7,7 +7,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification April 2016
+!     last modification September 2017
 !     
 !***********************************************************************
  use version_mod,           only : idrank,mxrank,sum_world_darr, &
@@ -20,7 +20,8 @@
                              lmultiplestep,dcutoff,lneighlistdo,tstep, &
                              lmultisteperror,multisteperror,lremove, &
                              jetfm,nmulstepdone,nmultisteperror, &
-                             ldcutoff,incnpjet,maxdispl,lmaxdispl
+                             ldcutoff,incnpjet,maxdispl,lmaxdispl, &
+                             doallocate,cp0,levaporation
  use support_functions_mod, only : beadlength1d,beadlength, &
                              compute_crosssec
  
@@ -158,7 +159,7 @@
  end subroutine restore_charge
  
  subroutine compute_coulomelec_driver(nstep,timesub,ycf,yvl,yxx,yyy, &
-   yzz)
+   yzz,yve)
   
 !***********************************************************************
 !     
@@ -166,7 +167,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification April 2016
+!     last modification September 2017
 !     
 !***********************************************************************
  
@@ -179,23 +180,46 @@
   double precision, allocatable, intent(in) ::  yxx(:)
   double precision, allocatable, intent(in) ::  yyy(:)
   double precision, allocatable, intent(in) ::  yzz(:)
+  double precision, allocatable, intent(in), optional ::  yve(:)
   
   call allocate_coulcrossec(npjet)
-  call compute_crosssec(yxx,yyy,yzz,yvl,coulcrossec)
-  select case(systype)
-  case(1)
-    if(lmultiplestep)then
-      call compute_coulomelec_multistep(nstep,timesub,ycf,yxx)
-    else
-      call compute_coulomelec(nstep,timesub,ycf,yxx)
-    endif
-  case default
-    if(lmultiplestep)then
-      call compute_coulomelec_multistep(nstep,timesub,ycf,yxx,yyy,yzz)
-    else
-      call compute_coulomelec(nstep,timesub,ycf,yxx,yyy,yzz)
-    endif
-  end select
+  if(levaporation)then
+    if(.not. present(yve))call error(19)
+    call compute_crosssec(yxx,yyy,yzz,yve,coulcrossec)
+    select case(systype)
+    case(1)
+      if(lmultiplestep)then
+        call compute_coulomelec_multistep_ev(nstep,timesub,ycf,yxx, &
+         yvl,yve)
+      else
+        call compute_coulomelec_ev(nstep,timesub,ycf,yxx,yvl,yve)
+      endif
+    case default
+      if(lmultiplestep)then
+        call compute_coulomelec_multistep_ev(nstep,timesub,ycf,yxx, &
+         yvl,yve,yyy,yzz)
+      else
+        call compute_coulomelec_ev(nstep,timesub,ycf,yxx,yvl,yve,yyy, &
+         yzz)
+      endif
+    end select
+  else
+    call compute_crosssec(yxx,yyy,yzz,yvl,coulcrossec)
+    select case(systype)
+    case(1)
+      if(lmultiplestep)then
+        call compute_coulomelec_multistep(nstep,timesub,ycf,yxx)
+      else
+        call compute_coulomelec(nstep,timesub,ycf,yxx)
+      endif
+    case default
+      if(lmultiplestep)then
+        call compute_coulomelec_multistep(nstep,timesub,ycf,yxx,yyy,yzz)
+      else
+        call compute_coulomelec(nstep,timesub,ycf,yxx,yyy,yzz)
+      endif
+    end select
+  endif
   
   return
   
@@ -210,7 +234,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification july 2015
+!     last modification September 2017
 !     
 !***********************************************************************
  
@@ -250,16 +274,18 @@
 !     compute the Coulomb forces
       do ipoint=inpjet+idrank,npjet,mxrank
         if(jetfr(ipoint))cycle
-        Qt=jetch(ipoint)*Q/jetms(ipoint)
+        Qt=jetch(ipoint)*Q
         do jpoint=ipoint+1,npjet
           if(jetfr(jpoint))cycle
           if(ldcutoff)then
             dtemp=dabs(yxx(jpoint)-yxx(ipoint))
             if(dtemp>dcutoff)cycle
           endif
-          ycf(ipoint,1)=ycf(ipoint,1)+1.d0*(jetch(jpoint)*Qt)/ &
+          ycf(ipoint,1)=ycf(ipoint,1)+ &
+           1.d0/jetms(ipoint)*(jetch(jpoint)*Qt)/ &
            ((dabs(yxx(jpoint)-yxx(ipoint))+coulcrossec(jpoint))**2.d0)
-          ycf(jpoint,1)=ycf(jpoint,1)-1.d0*(jetch(jpoint)*Qt)/ &
+          ycf(jpoint,1)=ycf(jpoint,1)- &
+           1.d0/jetms(jpoint)*(jetch(jpoint)*Qt)/ &
            ((dabs(yxx(jpoint)-yxx(ipoint))+coulcrossec(jpoint))**2.d0)
         enddo
         if(lmirror)then
@@ -270,7 +296,8 @@
     !          dtemp=dabs(xjpoint-yxx(ipoint))
     !          if(dtemp>dcutoff)cycle
     !        endif
-            ycf(ipoint,1)=ycf(ipoint,1)+1.d0*(jetch(jpoint)*Qt)/ &
+            ycf(ipoint,1)=ycf(ipoint,1)+ &
+             1.d0/jetms(ipoint)*(jetch(jpoint)*Qt)/ &
              ((dabs(xjpoint-yxx(ipoint))+coulcrossec(jpoint))**2.d0)
           enddo
         endif
@@ -298,7 +325,7 @@
 !     compute the Coulomb forces
       do ipoint=inpjet+idrank,npjet,mxrank
         if(jetfr(ipoint))cycle
-        Qt=jetch(ipoint)*Q/jetms(ipoint)
+        Qt=jetch(ipoint)*Q
         do jpoint=ipoint+1,npjet
           if(jetfr(jpoint))cycle
           utang(1)=yxx(ipoint)-yxx(jpoint)
@@ -312,10 +339,10 @@
             versor(1)=utang(1)/norm
             versor(2)=utang(2)/norm
             versor(3)=utang(3)/norm
-            ycf(ipoint,1:3)=ycf(ipoint,1:3)+ &
+            ycf(ipoint,1:3)=ycf(ipoint,1:3)+1.d0/jetms(ipoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
              versor(1:3)
-            ycf(jpoint,1:3)=ycf(jpoint,1:3)- &
+            ycf(jpoint,1:3)=ycf(jpoint,1:3)-1.d0/jetms(jpoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
              versor(1:3)
           endif
@@ -337,7 +364,7 @@
               versor(1)=utang(1)/norm
               versor(2)=utang(2)/norm
               versor(3)=utang(3)/norm
-              ycf(ipoint,1:3)=ycf(ipoint,1:3)- &
+              ycf(ipoint,1:3)=ycf(ipoint,1:3)-1.d0/jetms(ipoint)* &
                (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
                versor(1:3)
             endif
@@ -650,7 +677,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification September 2017
 !     
 !***********************************************************************
  
@@ -686,13 +713,15 @@
       do ipoint=inpjet+idrank,npjet,mxrank
         if(jetfr(ipoint))cycle
         isub=isub+1
-        Qt=jetch(ipoint)*Q/jetms(ipoint)
+        Qt=jetch(ipoint)*Q
         do jpoint=ipoint+1,npjet
           if(jetfr(jpoint))cycle
           norm=dabs(yxx(jpoint)-yxx(ipoint))
-          ycf(ipoint,1)=ycf(ipoint,1)+1.d0*(jetch(jpoint)*Qt)/ &
+          ycf(ipoint,1)=ycf(ipoint,1)+ &
+           1.d0/jetms(ipoint)*(jetch(jpoint)*Qt)/ &
            ((norm+coulcrossec(jpoint))**2.d0)
-          ycf(jpoint,1)=ycf(jpoint,1)-1.d0*(jetch(jpoint)*Qt)/ &
+          ycf(jpoint,1)=ycf(jpoint,1)- &
+           1.d0/jetms(jpoint)*(jetch(jpoint)*Qt)/ &
            ((norm+coulcrossec(jpoint))**2.d0)
           if(norm<=dcutoff)then
             neighlentry(isub)=neighlentry(isub)+1
@@ -701,9 +730,11 @@
             endif
             neighlist(isub,neighlentry(isub))=jpoint
           else
-            coulservicearr(ipoint,1)=coulservicearr(ipoint,1)+1.d0* &
+            coulservicearr(ipoint,1)=coulservicearr(ipoint,1)+ &
+             1.d0/jetms(ipoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)
-            coulservicearr(jpoint,1)=coulservicearr(jpoint,1)-1.d0* &
+            coulservicearr(jpoint,1)=coulservicearr(jpoint,1)- &
+             1.d0/jetms(jpoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)
           endif
         enddo
@@ -713,7 +744,8 @@
             if(jetfr(jpoint))cycle
             xjpoint=dabs(yxx(jpoint)-h)+h
             norm=dabs(xjpoint-yxx(ipoint))
-            ycf(ipoint,1)=ycf(ipoint,1)+1.d0*(jetch(jpoint)*Qt)/ &
+            ycf(ipoint,1)=ycf(ipoint,1)+ &
+             1.d0/jetms(ipoint)*(jetch(jpoint)*Qt)/ &
              ((norm+coulcrossec(jpoint))**2.d0)
             if(norm<=dcutoff)then
               neighlentrymirr(isub)=neighlentrymirr(isub)+1
@@ -722,7 +754,8 @@
               endif
               neighlist(isub,neighlentrymirr(isub))=jpoint
             else
-              coulservicearr(ipoint,1)=coulservicearr(ipoint,1)+1.d0* &
+              coulservicearr(ipoint,1)=coulservicearr(ipoint,1)+ &
+               1.d0/jetms(ipoint)* &
                (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)
             endif
           enddo
@@ -748,7 +781,7 @@
       do ipoint=inpjet+idrank,npjet,mxrank
         if(jetfr(ipoint))cycle
         isub=isub+1
-        Qt=jetch(ipoint)*Q/jetms(ipoint)
+        Qt=jetch(ipoint)*Q
         do jpoint=ipoint+1,npjet
           if(jetfr(jpoint))cycle
           utang(1)=yxx(ipoint)-yxx(jpoint)
@@ -759,10 +792,10 @@
             versor(1)=utang(1)/norm
             versor(2)=utang(2)/norm
             versor(3)=utang(3)/norm
-            ycf(ipoint,1:3)=ycf(ipoint,1:3)+ &
+            ycf(ipoint,1:3)=ycf(ipoint,1:3)+1.d0/jetms(ipoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
              versor(1:3)
-            ycf(jpoint,1:3)=ycf(jpoint,1:3)- &
+            ycf(jpoint,1:3)=ycf(jpoint,1:3)-1.d0/jetms(jpoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
              versor(1:3)
             if(norm<=dcutoff)then
@@ -773,9 +806,11 @@
               neighlist(isub,neighlentry(isub))=jpoint
             else
               coulservicearr(ipoint,1:3)=coulservicearr(ipoint,1:3)+ &
+               1.d0/jetms(ipoint)* &
                (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
                versor(1:3)
               coulservicearr(jpoint,1:3)=coulservicearr(jpoint,1:3)- &
+               1.d0/jetms(jpoint)* &
                (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
                versor(1:3)
             endif
@@ -796,7 +831,7 @@
               versor(1)=utang(1)/norm
               versor(2)=utang(2)/norm
               versor(3)=utang(3)/norm
-              ycf(ipoint,1:3)=ycf(ipoint,1:3)- &
+              ycf(ipoint,1:3)=ycf(ipoint,1:3)-1.d0/jetms(ipoint)* &
                (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
                versor(1:3)
               if(norm<=dcutoff)then
@@ -807,7 +842,8 @@
                 neighlist(isub,neighlentrymirr(isub))=jpoint
               else
                 coulservicearr(ipoint,1:3)=coulservicearr(ipoint,1:3)- &
-                 (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)*&
+                 1.d0/jetms(ipoint)* &
+                 (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
                  versor(1:3)
               endif
             endif
@@ -970,7 +1006,7 @@
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification September 2017
 !     
 !***********************************************************************
   
@@ -993,14 +1029,16 @@
       do ipoint=inpjet+idrank,npjet,mxrank
         if(jetfr(ipoint))cycle
         isub=isub+1
-        Qt=jetch(ipoint)*Q/jetms(ipoint)
+        Qt=jetch(ipoint)*Q
         mymax=neighlentry(isub)
         do jsub=1,mymax
           jpoint=neighlist(isub,jsub)
           norm=dabs(yxx(jpoint)-yxx(ipoint))
-          ycf(ipoint,1)=ycf(ipoint,1)+1.d0*(jetch(jpoint)*Qt)/ &
+          ycf(ipoint,1)=ycf(ipoint,1)+ &
+           1.d0/jetms(ipoint)*(jetch(jpoint)*Qt)/ &
            ((norm+coulcrossec(jpoint))**2.d0)
-          ycf(jpoint,1)=ycf(jpoint,1)-1.d0*(jetch(jpoint)*Qt)/ &
+          ycf(jpoint,1)=ycf(jpoint,1)- &
+           1.d0/jetms(jpoint)*(jetch(jpoint)*Qt)/ &
            ((norm+coulcrossec(jpoint))**2.d0)
         enddo
         if(lmirror)then
@@ -1009,7 +1047,8 @@
             jpoint=neighlist(isub,jsub)
             xjpoint=dabs(yxx(jpoint)-h)+h
             norm=dabs(xjpoint-yxx(ipoint))
-            ycf(ipoint,1)=ycf(ipoint,1)+1.d0*(jetch(jpoint)*Qt)/ &
+            ycf(ipoint,1)=ycf(ipoint,1)+ &
+             1.d0/jetms(ipoint)*(jetch(jpoint)*Qt)/ &
              ((norm+coulcrossec(jpoint))**2.d0)
           enddo
         endif
@@ -1019,7 +1058,7 @@
       do ipoint=inpjet+idrank,npjet,mxrank
         if(jetfr(ipoint))cycle
         isub=isub+1
-        Qt=jetch(ipoint)*Q/jetms(ipoint)
+        Qt=jetch(ipoint)*Q
         mymax=neighlentry(isub)
         do jsub=1,mymax
           jpoint=neighlist(isub,jsub)
@@ -1031,10 +1070,10 @@
             versor(1)=utang(1)/norm
             versor(2)=utang(2)/norm
             versor(3)=utang(3)/norm
-            ycf(ipoint,1:3)=ycf(ipoint,1:3)+ &
+            ycf(ipoint,1:3)=ycf(ipoint,1:3)+1.d0/jetms(ipoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
              versor(1:3)
-            ycf(jpoint,1:3)=ycf(jpoint,1:3)- &
+            ycf(jpoint,1:3)=ycf(jpoint,1:3)-1.d0/jetms(jpoint)* &
              (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
              versor(1:3)
           endif
@@ -1054,7 +1093,7 @@
               versor(1)=utang(1)/norm
               versor(2)=utang(2)/norm
               versor(3)=utang(3)/norm
-              ycf(ipoint,1:3)=ycf(ipoint,1:3)- &
+              ycf(ipoint,1:3)=ycf(ipoint,1:3)-1.d0/jetms(ipoint)* &
                (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
                versor(1:3)
             endif
@@ -1221,7 +1260,6 @@
   integer :: newnservicelist1,newnservicelist2
   logical :: ldoreallocate
   
-  call error(18)
   
   mychunk=ceiling(dble(mxnpjet)/dble(mxrank))
   newmaxneighlist=maxneighlist+incnpjet
@@ -1298,23 +1336,23 @@
   select case(systype)
     case(1)
       
-      if(newjob .or. newlist)then
+      if(newjob .or. newlist .or. doallocate)then
         
         if(newjob)then
           mychunkold=mychunk
-          allocate (xold(mychunk))
-          allocate (xdif(mychunk))
+          allocate (xold(0:mychunk))
+          allocate (xdif(0:mychunk))
         else
           if(mychunk>mychunkold)then
             mychunkold=mychunk
             deallocate(xold)
             deallocate(xdif)
-            allocate (xold(mychunk))
-            allocate (xdif(mychunk))
+            allocate (xold(0:mychunk))
+            allocate (xdif(0:mychunk))
           endif
         endif
         
-        isub=0
+        isub=-1
         do ipoint=inpjet+idrank,npjet,mxrank
           isub=isub+1
           xold(isub)=yxx(ipoint)
@@ -1325,7 +1363,7 @@
       else
         
 !       calculate atomic shifts
-        isub=0
+        isub=-1
         do ipoint=inpjet+idrank,npjet,mxrank
           isub=isub+1
           xdif(isub)=yxx(ipoint)-xold(isub)
@@ -1350,7 +1388,7 @@
         
 !       update stored positions
         if(newlist)then
-          isub=0
+          isub=-1
           do ipoint=inpjet+idrank,npjet,mxrank
             isub=isub+1
             xold(isub)=yxx(ipoint)
@@ -1360,23 +1398,25 @@
       
     case default
        
-      if(newjob .or. newlist)then
+      if(newjob .or. newlist .or. doallocate)then
         
         if(newjob)then
           mychunkold=mychunk
-          allocate (xold(mychunk),yold(mychunk),zold(mychunk))
-          allocate (xdif(mychunk),ydif(mychunk),zdif(mychunk))
+          allocate (xold(0:mychunk),yold(0:mychunk),zold(0:mychunk))
+          allocate (xdif(0:mychunk),ydif(0:mychunk),zdif(0:mychunk))
         else
           if(mychunk>mychunkold)then
             mychunkold=mychunk
             deallocate(xold,yold,zold)
             deallocate(xdif,ydif,zdif)
-            allocate (xold(mychunk),yold(mychunk),zold(mychunk))
-            allocate (xdif(mychunk),ydif(mychunk),zdif(mychunk))
+            allocate (xold(0:mychunk),yold(0:mychunk), &
+             zold(0:mychunk))
+            allocate (xdif(0:mychunk),ydif(0:mychunk), &
+             zdif(0:mychunk))
           endif
         endif
         
-        isub=0
+        isub=-1
         do ipoint=inpjet+idrank,npjet,mxrank
           isub=isub+1
           xold(isub)=yxx(ipoint)
@@ -1389,7 +1429,7 @@
       else
         
 !       calculate atomic shifts
-        isub=0
+        isub=-1
         do ipoint=inpjet+idrank,npjet,mxrank
           isub=isub+1
           xdif(isub)=yxx(ipoint)-xold(isub)
@@ -1416,7 +1456,7 @@
         
 !       update stored positions
         if(newlist)then
-          isub=0
+          isub=-1
           do ipoint=inpjet+idrank,npjet,mxrank
             isub=isub+1
             xold(isub)=yxx(ipoint)
@@ -1431,6 +1471,869 @@
   return
    
  end subroutine list_test
+ 
+ subroutine compute_coulomelec_ev(nstep,timesub,ycf,yxx,yvl,yve,yyy,yzz)
+  
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the Coulomb forces of a
+!     n-body system by the direct summation method
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification September 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) ::  nstep
+  double precision, intent(in) ::  timesub
+  double precision, allocatable, intent(inout) ::  ycf(:,:)
+  double precision, allocatable, intent(in) ::  yxx(:)
+  double precision, allocatable, intent(in) ::  yvl(:)
+  double precision, allocatable, intent(in) ::  yve(:)
+  double precision, allocatable, intent(in), optional ::  yyy(:)
+  double precision, allocatable, intent(in), optional ::  yzz(:)
+  
+  double precision, parameter :: onethird=1.d0/(dsqrt(3.d0))
+  
+  integer :: ipoint,jpoint,imiomax
+  double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,dtemp,cp,cmass1, &
+   cmass2
+  double precision, dimension(3) :: versor,utang
+  
+  
+  select case(systype)
+    case(1)
+    
+      imiomax=mxnpjet
+      if(ncoulforce/=0)then
+        if(imiomax>ncoulforce)then
+          deallocate(ycf)
+          ncoulforce=imiomax
+          allocate(ycf(0:ncoulforce,1))
+        endif
+      else
+        ncoulforce=imiomax
+        allocate(ycf(0:ncoulforce,1))
+      endif
+  
+      ycf(0:ncoulforce,1:1)=0.d0
+      
+!     compute the Coulomb forces
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        !mass fraction of actual polymer
+        cp=cp0*yvl(ipoint)/yve(ipoint)
+        !correction factor for the evaporated mass
+        cmass1=yve(ipoint)/yvl(ipoint)
+        Qt=jetch(ipoint)*Q
+        do jpoint=ipoint+1,npjet
+          if(jetfr(jpoint))cycle
+          if(ldcutoff)then
+            dtemp=dabs(yxx(jpoint)-yxx(ipoint))
+            if(dtemp>dcutoff)cycle
+          endif
+          cmass2=yve(jpoint)/yvl(jpoint)
+          ycf(ipoint,1)=ycf(ipoint,1)+ &
+           1.d0/(jetms(ipoint)*cmass1)*(jetch(jpoint)*Qt)/ &
+           ((dabs(yxx(jpoint)-yxx(ipoint))+coulcrossec(jpoint))**2.d0)
+          ycf(jpoint,1)=ycf(jpoint,1)- &
+           1.d0/(jetms(jpoint)*cmass2)*(jetch(jpoint)*Qt)/ &
+           ((dabs(yxx(jpoint)-yxx(ipoint))+coulcrossec(jpoint))**2.d0)
+        enddo
+        if(lmirror)then
+          do jpoint=inpjet,npjet
+            if(jetfr(jpoint))cycle
+            xjpoint=dabs(yxx(jpoint)-h)+h
+    !        if(ldcutoff)then
+    !          dtemp=dabs(xjpoint-yxx(ipoint))
+    !          if(dtemp>dcutoff)cycle
+    !        endif
+            ycf(ipoint,1)=ycf(ipoint,1)+ &
+             1.d0/(jetms(ipoint)*cmass1)*(jetch(jpoint)*Qt)/ &
+             ((dabs(xjpoint-yxx(ipoint))+coulcrossec(jpoint))**2.d0)
+          enddo
+        endif
+      enddo
+      
+      imiomax=ncoulforce+1
+      call sum_world_darr(ycf,imiomax)
+      
+    case default
+      
+      imiomax=mxnpjet
+      if(ncoulforce/=0)then
+        if(imiomax>ncoulforce)then
+          deallocate(ycf)
+          ncoulforce=imiomax
+          allocate(ycf(0:ncoulforce,3))
+        endif
+      else
+        ncoulforce=imiomax
+        allocate(ycf(0:ncoulforce,3))
+      endif
+      
+      ycf(0:ncoulforce,1:3)=0.d0
+      
+!     compute the Coulomb forces
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        !mass fraction of actual polymer
+        cp=cp0*yvl(ipoint)/yve(ipoint)
+        !correction factor for the evaporated mass
+        cmass1=yve(ipoint)/yvl(ipoint)
+        Qt=jetch(ipoint)*Q
+        do jpoint=ipoint+1,npjet
+          if(jetfr(jpoint))cycle
+          utang(1)=yxx(ipoint)-yxx(jpoint)
+          utang(2)=yyy(ipoint)-yyy(jpoint)
+          utang(3)=yzz(ipoint)-yzz(jpoint)
+          norm = modulvec(utang)
+          cmass2=yve(jpoint)/yvl(jpoint)
+   !       if(ldcutoff)then
+   !         if(norm>dcutoff)cycle
+   !       endif
+          if(norm>1.d-30)then
+            versor(1)=utang(1)/norm
+            versor(2)=utang(2)/norm
+            versor(3)=utang(3)/norm
+            ycf(ipoint,1:3)=ycf(ipoint,1:3)+ &
+             1.d0/(jetms(ipoint)*cmass1)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+             versor(1:3)
+            ycf(jpoint,1:3)=ycf(jpoint,1:3)- &
+             1.d0/(jetms(jpoint)*cmass2)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+             versor(1:3)
+          endif
+        enddo
+        if(lmirror)then
+          do jpoint=inpjet,npjet
+            if(jetfr(jpoint))cycle
+            xjpoint=dabs(yxx(jpoint)-h)+h
+            yjpoint=yyy(jpoint)
+            zjpoint=yzz(jpoint)
+            utang(1)=yxx(ipoint)-xjpoint
+            utang(2)=yyy(ipoint)-yjpoint
+            utang(3)=yzz(ipoint)-zjpoint
+            norm = modulvec(utang)
+            if(ldcutoff)then
+              if(norm>dcutoff)cycle
+            endif
+            if(norm>1.d-30)then
+              versor(1)=utang(1)/norm
+              versor(2)=utang(2)/norm
+              versor(3)=utang(3)/norm
+              ycf(ipoint,1:3)=ycf(ipoint,1:3)- &
+               1.d0/(jetms(ipoint)*cmass1)* &
+               (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+               versor(1:3)
+            endif
+          enddo
+        endif
+      enddo
+      
+      imiomax=(ncoulforce+1)*3
+      call sum_world_darr(ycf,imiomax)
+      
+  end select
+       
+  return
+  
+ end subroutine compute_coulomelec_ev
+ 
+ subroutine compute_neighlist_and_coulomelec_ev(ycf,outerycf, &
+  timesub,yxx,yvl,yve,yyy,yzz)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for allocating arrays necessary for computing
+!     the Coulomb forces
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification September 2017
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  double precision, allocatable, intent(inout) ::  ycf(:,:)
+  double precision, allocatable, intent(inout) :: outerycf(:,:)
+  double precision, intent(in) ::  timesub
+  double precision, allocatable, intent(in) ::  yxx(:)
+  double precision, allocatable, intent(in) ::  yvl(:)
+  double precision, allocatable, intent(in) ::  yve(:)
+  double precision, allocatable, intent(in), optional ::  yyy(:)
+  double precision, allocatable, intent(in), optional ::  yzz(:)
+  
+  integer :: isub,imiomax,ipoint,jpoint
+  double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,dtemp(1),dt,deno
+  double precision :: cp,cmass1,cmass2
+  double precision, dimension(3) :: versor,utang
+  
+  ycf(:,:)=0.d0
+  outerycf(:,:)=0.d0
+  coulservicearr(:,:)=0.d0
+  jetfm(:)=.false.
+  jetfm(inpjet:npjet)=jetfr(inpjet:npjet)
+  msinpjet=inpjet
+  msnpjet=npjet
+  neighlentry(:)=0
+  neighlist(:,:)=0
+  if(lmirror)neighlentrymirr(:)=0
+  
+  
+  select case(systype)
+    case(1)
+!     compute the Coulomb forces
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        !mass fraction of actual polymer
+        cp=cp0*yvl(ipoint)/yve(ipoint)
+        !correction factor for the evaporated mass
+        cmass1=yve(ipoint)/yvl(ipoint)
+        Qt=jetch(ipoint)*Q
+        do jpoint=ipoint+1,npjet
+          if(jetfr(jpoint))cycle
+          norm=dabs(yxx(jpoint)-yxx(ipoint))
+          cmass2=yve(jpoint)/yvl(jpoint)
+          ycf(ipoint,1)=ycf(ipoint,1)+1.d0/ &
+           (jetms(ipoint)*cmass1)*(jetch(jpoint)*Qt)/ &
+           ((norm+coulcrossec(jpoint))**2.d0)
+          ycf(jpoint,1)=ycf(jpoint,1)-1.d0/ &
+           (jetms(jpoint)*cmass2)*(jetch(jpoint)*Qt)/ &
+           ((norm+coulcrossec(jpoint))**2.d0)
+          if(norm<=dcutoff)then
+            neighlentry(isub)=neighlentry(isub)+1
+            if(neighlentry(isub)>maxneighlist)then
+              call reallocate_neighlist()
+            endif
+            neighlist(isub,neighlentry(isub))=jpoint
+          else
+            coulservicearr(ipoint,1)=coulservicearr(ipoint,1)+1.d0/ &
+             (jetms(ipoint)*cmass1)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)
+            coulservicearr(jpoint,1)=coulservicearr(jpoint,1)-1.d0/ &
+             (jetms(jpoint)*cmass2)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)
+          endif
+        enddo
+        if(lmirror)then
+          neighlentrymirr(isub)=neighlentry(isub)
+          do jpoint=inpjet,npjet
+            if(jetfr(jpoint))cycle
+            xjpoint=dabs(yxx(jpoint)-h)+h
+            norm=dabs(xjpoint-yxx(ipoint))
+            ycf(ipoint,1)=ycf(ipoint,1)+1.d0/(jetms(ipoint)*cmass1)* &
+             (jetch(jpoint)*Qt)/ &
+             ((norm+coulcrossec(jpoint))**2.d0)
+            if(norm<=dcutoff)then
+              neighlentrymirr(isub)=neighlentrymirr(isub)+1
+              if(neighlentrymirr(isub)>maxneighlist)then
+                call reallocate_neighlist()
+              endif
+              neighlist(isub,neighlentrymirr(isub))=jpoint
+            else
+              coulservicearr(ipoint,1)=coulservicearr(ipoint,1)+1.d0/ &
+               (jetms(ipoint)*cmass1)* &
+               (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)
+            endif
+          enddo
+        endif
+      enddo
+      
+      imiomax=ncoulforce+1
+      call sum_world_darr(ycf,imiomax)
+      call sum_world_darr(coulservicearr,imiomax)
+      
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        outerycf(isub,1)=coulservicearr(ipoint,1)
+      enddo
+    
+      
+    case default
+    
+!     compute the Coulomb forces
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        !mass fraction of actual polymer
+        cp=cp0*yvl(ipoint)/yve(ipoint)
+        !correction factor for the evaporated mass
+        cmass1=yve(ipoint)/yvl(ipoint)
+        Qt=jetch(ipoint)*Q
+        do jpoint=ipoint+1,npjet
+          if(jetfr(jpoint))cycle
+          utang(1)=yxx(ipoint)-yxx(jpoint)
+          utang(2)=yyy(ipoint)-yyy(jpoint)
+          utang(3)=yzz(ipoint)-yzz(jpoint)
+          norm = modulvec(utang)
+          if(norm>1.d-30)then
+            versor(1)=utang(1)/norm
+            versor(2)=utang(2)/norm
+            versor(3)=utang(3)/norm
+            cmass2=yve(jpoint)/yvl(jpoint)
+            ycf(ipoint,1:3)=ycf(ipoint,1:3)+ &
+             1.d0/(jetms(ipoint)*cmass1)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+             versor(1:3)
+            ycf(jpoint,1:3)=ycf(jpoint,1:3)- &
+             1.d0/(jetms(jpoint)*cmass2)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+             versor(1:3)
+            if(norm<=dcutoff)then
+              neighlentry(isub)=neighlentry(isub)+1
+              if(neighlentry(isub)>maxneighlist)then
+                call reallocate_neighlist()
+              endif
+              neighlist(isub,neighlentry(isub))=jpoint
+            else
+              coulservicearr(ipoint,1:3)=coulservicearr(ipoint,1:3)+ &
+               1.d0/(jetms(ipoint)*cmass1)* &
+               (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+               versor(1:3)
+              coulservicearr(jpoint,1:3)=coulservicearr(jpoint,1:3)- &
+               1.d0/(jetms(jpoint)*cmass2)* &
+               (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+               versor(1:3)
+            endif
+          endif
+        enddo
+        if(lmirror)then
+          neighlentrymirr(isub)=neighlentry(isub)
+          do jpoint=inpjet,npjet
+            if(jetfr(jpoint))cycle
+            xjpoint=dabs(yxx(jpoint)-h)+h
+            yjpoint=yyy(jpoint)
+            zjpoint=yzz(jpoint)
+            utang(1)=yxx(ipoint)-xjpoint
+            utang(2)=yyy(ipoint)-yjpoint
+            utang(3)=yzz(ipoint)-zjpoint
+            norm = modulvec(utang)
+            if(norm>1.d-30)then
+              versor(1)=utang(1)/norm
+              versor(2)=utang(2)/norm
+              versor(3)=utang(3)/norm
+              ycf(ipoint,1:3)=ycf(ipoint,1:3)- &
+               1.d0/(jetms(ipoint)*cmass1)* &
+               (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+               versor(1:3)
+              if(norm<=dcutoff)then
+                neighlentrymirr(isub)=neighlentrymirr(isub)+1
+                if(neighlentrymirr(isub)>maxneighlist)then
+                  call reallocate_neighlist()
+                endif
+                neighlist(isub,neighlentrymirr(isub))=jpoint
+              else
+                coulservicearr(ipoint,1:3)=coulservicearr(ipoint,1:3)- &
+                 1.d0/(jetms(ipoint)*cmass1)* &
+                 (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)*&
+                 versor(1:3)
+              endif
+            endif
+          enddo
+        endif
+      enddo
+      
+      imiomax=(ncoulforce+1)*3
+      call sum_world_darr(ycf,imiomax)
+      call sum_world_darr(coulservicearr,imiomax)
+      
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        outerycf(isub,1:3)=coulservicearr(ipoint,1:3)
+      enddo
+      
+  end select
+  
+  
+  return
+  
+ end subroutine compute_neighlist_and_coulomelec_ev
+ 
+ subroutine compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve,yyy,yzz)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the Coulomb forces belonging to
+!     the inner shell by the multiple step approach
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification September 2017
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  double precision, intent(in) ::  timesub
+  double precision, allocatable, intent(inout) ::  ycf(:,:)
+  double precision, allocatable, intent(in) ::  yxx(:)
+  double precision, allocatable, intent(in) ::  yvl(:)
+  double precision, allocatable, intent(in) ::  yve(:)
+  double precision, allocatable, intent(in), optional ::  yyy(:)
+  double precision, allocatable, intent(in), optional ::  yzz(:)
+  
+  
+  integer :: ipoint,isub,mymax,mymaxmirr,jsub,jpoint
+  double precision :: norm,Qt,xjpoint,yjpoint,zjpoint
+  double precision :: cp,cmass1,cmass2
+  double precision, dimension(3) :: versor,utang
+  
+  select case(systype)
+    case(1)
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        !mass fraction of actual polymer
+        cp=cp0*yvl(ipoint)/yve(ipoint)
+        !correction factor for the evaporated mass
+        cmass1=yve(ipoint)/yvl(ipoint)
+        Qt=jetch(ipoint)*Q
+        mymax=neighlentry(isub)
+        do jsub=1,mymax
+          jpoint=neighlist(isub,jsub)
+          norm=dabs(yxx(jpoint)-yxx(ipoint))
+          cmass2=yve(jpoint)/yvl(jpoint)
+          ycf(ipoint,1)=ycf(ipoint,1)+ &
+           1.d0/(jetms(ipoint)*cmass1)*(jetch(jpoint)*Qt)/ &
+           ((norm+coulcrossec(jpoint))**2.d0)
+          ycf(jpoint,1)=ycf(jpoint,1)- &
+           1.d0/(jetms(jpoint)*cmass2)*(jetch(jpoint)*Qt)/ &
+           ((norm+coulcrossec(jpoint))**2.d0)
+        enddo
+        if(lmirror)then
+          mymaxmirr=neighlentrymirr(isub)
+          do jsub=mymax+1,mymaxmirr
+            jpoint=neighlist(isub,jsub)
+            xjpoint=dabs(yxx(jpoint)-h)+h
+            norm=dabs(xjpoint-yxx(ipoint))
+            ycf(ipoint,1)=ycf(ipoint,1)+ &
+             1.d0/(jetms(ipoint)*cmass1)*(jetch(jpoint)*Qt)/ &
+             ((norm+coulcrossec(jpoint))**2.d0)
+          enddo
+        endif
+      enddo     
+    case default
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        !mass fraction of actual polymer
+        cp=cp0*yvl(ipoint)/yve(ipoint)
+        !correction factor for the evaporated mass
+        cmass1=yve(ipoint)/yvl(ipoint)
+        Qt=jetch(ipoint)*Q
+        mymax=neighlentry(isub)
+        do jsub=1,mymax
+          jpoint=neighlist(isub,jsub)
+          utang(1)=yxx(ipoint)-yxx(jpoint)
+          utang(2)=yyy(ipoint)-yyy(jpoint)
+          utang(3)=yzz(ipoint)-yzz(jpoint)
+          norm = modulvec(utang)
+          cmass2=yve(jpoint)/yvl(jpoint)
+          if(norm>1.d-30)then
+            versor(1)=utang(1)/norm
+            versor(2)=utang(2)/norm
+            versor(3)=utang(3)/norm
+            ycf(ipoint,1:3)=ycf(ipoint,1:3)+1.d0/(jetms(ipoint)*cmass1)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+             versor(1:3)
+            ycf(jpoint,1:3)=ycf(jpoint,1:3)-1.d0/(jetms(jpoint)*cmass2)* &
+             (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+             versor(1:3)
+          endif
+        enddo
+        if(lmirror)then
+          mymaxmirr=neighlentrymirr(isub)
+          do jsub=mymax+1,mymaxmirr
+            jpoint=neighlist(isub,jsub)
+            xjpoint=dabs(yxx(jpoint)-h)+h
+            yjpoint=yyy(jpoint)
+            zjpoint=yzz(jpoint)
+            utang(1)=yxx(ipoint)-xjpoint
+            utang(2)=yyy(ipoint)-yjpoint
+            utang(3)=yzz(ipoint)-zjpoint
+            norm = modulvec(utang)
+            if(norm>1.d-30)then
+              versor(1)=utang(1)/norm
+              versor(2)=utang(2)/norm
+              versor(3)=utang(3)/norm
+              ycf(ipoint,1:3)=ycf(ipoint,1:3)-1.d0/(jetms(ipoint)*cmass1)* &
+               (jetch(jpoint)*Qt)/((norm+coulcrossec(jpoint))**2.d0)* &
+               versor(1:3)
+            endif
+          enddo
+        endif
+      enddo
+  end select
+  
+  return
+      
+ end subroutine compute_inner_coulomelec_ev
+ 
+ subroutine compute_coulomelec_multistep_ev(nstep,timesub,ycf,yxx, &
+  yvl,yve,yyy,yzz)
+  
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the Coulomb forces of a
+!     n-body system by the multiple step approach
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification May 2017
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(in) ::  nstep
+  double precision, intent(in) ::  timesub
+  double precision, allocatable, intent(inout) ::  ycf(:,:)
+  double precision, allocatable, intent(in) ::  yxx(:)
+  double precision, allocatable, intent(in) ::  yvl(:)
+  double precision, allocatable, intent(in) ::  yve(:)
+  double precision, allocatable, intent(in), optional ::  yyy(:)
+  double precision, allocatable, intent(in), optional ::  yzz(:)
+  
+  double precision, parameter :: onethird=1.d0/(dsqrt(3.d0))
+  
+  integer :: ipoint,jpoint,imiomax,isub,jsub
+  double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,meanerrms,dt
+  double precision, dimension(3) :: versor,utang
+  
+  logical :: lneighlistdosub,ldodirectsum
+  double precision, save :: myoldtime=0.d0
+  
+  integer :: inpjetmio,npjetmio
+  double precision :: daje(3),daje2(3)
+  logical, save :: lfirst=.true.
+  logical, save :: lcheckerr=.true.
+  
+  
+  lneighlistdosub=.false.
+  meanerrms=0.d0
+  
+  
+  if(lremove)then
+    do ipoint=inpjet,npjet
+      if(jetfr(ipoint))then
+        if(.not. jetfm(ipoint))lneighlistdosub=.true.
+      endif
+    enddo
+  endif
+  
+  select case(systype)
+    case(1)
+      
+      call allocate_coularrays(mxnpjet,ycf,1,lneighlistdosub)
+      ldodirectsum=(mod(nstep,nmulstep)==0)
+      if(ldodirectsum)lcheckerr=.true.
+      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. ldodirectsum)
+      lneighlistdo=(lneighlistdo .and. (.not. lcomputfder))
+      call list_test(lneighlistdo,timesub,yxx)
+      if(lneighlistdo)then
+        lneighlistdo=.false.
+        lcomputfder=.true.
+        ycf(:,:)=0.d0
+        call compute_neighlist_and_coulomelec_ev(ycf,oldcoulforcems, &
+         timesub,yxx,yvl,yve)
+        myoldtime=timesub
+        nmulstepdone=nmulstepdone+1
+        lmscomputed=.false.
+      elseif(lcomputfder)then
+        dt=timesub-myoldtime
+        ycf(:,:)=0.d0
+        call compute_coulomelec_and_external(nstep,ycf, &
+         coulforcems,timesub,yxx)
+        if(dt/=0.d0)then
+          
+          lcomputfder=.false.
+!         compute first derivative of force
+          isub=0
+          do ipoint=inpjet+idrank,npjet,mxrank
+            if(jetfr(ipoint))cycle
+            isub=isub+1
+            dvcoulforcems(isub,1)=(coulforcems(isub,1)- &
+             oldcoulforcems(isub,1))/dt
+          enddo
+          
+!         compute time corresponding to the derivative
+          timemultistep=(timesub+myoldtime)/2.d0
+          
+!         compute relative forces
+          isub=0
+          do ipoint=inpjet+idrank,npjet,mxrank
+            if(jetfr(ipoint))cycle
+            isub=isub+1
+            coulforcems(isub,1)=(coulforcems(isub,1)+ &
+             oldcoulforcems(isub,1))/2.d0
+          enddo
+          
+          lmscomputed=.true.
+          
+        endif 
+      elseif(lmscomputed)then
+        
+        if(mod(nstep+1,nmulstep)==0)then
+          if(lcheckerr)then
+            lcheckerr=.false.
+            call compute_multistep_error_ev(nstep,lmultisteperror, &
+             meanerrms,timesub,ycf,oldcoulforcems,yxx,yvl,yve)
+            multisteperror=meanerrms+multisteperror
+            nmultisteperror=nmultisteperror+1
+          else
+            ycf(:,:)=0.d0
+            call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve)
+            call compute_outer_coulomelec(timesub,ycf,yxx)
+            imiomax=(ncoulforce+1)
+            call sum_world_darr(ycf,imiomax)
+          endif
+        else
+          ycf(:,:)=0.d0
+          call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve)
+          call compute_outer_coulomelec(timesub,ycf,yxx)
+          imiomax=(ncoulforce+1)
+          call sum_world_darr(ycf,imiomax) 
+        endif
+      else
+        call error(17)
+      endif
+      
+    case default
+      
+      call allocate_coularrays(mxnpjet,ycf,3,lneighlistdosub)
+      ldodirectsum=(mod(nstep,nmulstep)==0)
+      if(ldodirectsum)lcheckerr=.true.
+      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. ldodirectsum)
+      lneighlistdo=(lneighlistdo .and. (.not. lcomputfder))
+      call list_test(lneighlistdo,timesub,yxx,yyy,yzz)
+      if(lneighlistdo)then
+        
+        lneighlistdo=.false.
+        lcomputfder=.true.
+        ycf(:,:)=0.d0
+        call compute_neighlist_and_coulomelec_ev(ycf,oldcoulforcems, &
+         timesub,yxx,yvl,yve,yyy,yzz)
+        myoldtime=timesub
+        nmulstepdone=nmulstepdone+1
+        lmscomputed=.false.
+      elseif(lcomputfder)then
+        
+        dt=timesub-myoldtime
+        ycf(:,:)=0.d0
+        call compute_coulomelec_and_external(nstep,ycf, &
+         coulforcems,timesub,yxx,yyy,yzz)
+         
+        if(dt/=0.d0)then
+          lcomputfder=.false.
+!         compute first derivative of force
+          isub=0
+          do ipoint=inpjet+idrank,npjet,mxrank
+            if(jetfr(ipoint))cycle
+            isub=isub+1
+            dvcoulforcems(isub,1:3)=(coulforcems(isub,1:3)- &
+             oldcoulforcems(isub,1:3))/dt
+          enddo
+          
+!         compute time corresponding to the derivative
+          timemultistep=(timesub+myoldtime)/2.d0
+          
+!         compute relative forces
+          isub=0
+          do ipoint=inpjet+idrank,npjet,mxrank
+            if(jetfr(ipoint))cycle
+            isub=isub+1
+            coulforcems(isub,1:3)=(coulforcems(isub,1:3)+ &
+             oldcoulforcems(isub,1:3))/2.d0
+          enddo
+          
+          lmscomputed=.true.
+          
+        endif
+         
+      elseif(lmscomputed)then
+        
+        if(mod(nstep+1,nmulstep)==0)then
+          if(lcheckerr)then
+            lcheckerr=.false.
+            call compute_multistep_error_ev(nstep,lmultisteperror, &
+             meanerrms,timesub,ycf,oldcoulforcems,yxx,yvl,yve,yyy,yzz)
+            multisteperror=meanerrms+multisteperror
+            nmultisteperror=nmultisteperror+1
+          else
+            ycf(:,:)=0.d0
+            call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve, &
+             yyy,yzz)
+            call compute_outer_coulomelec(timesub,ycf,yxx,yyy,yzz)
+            imiomax=(ncoulforce+1)*3
+            call sum_world_darr(ycf,imiomax)
+          endif
+        else
+          ycf(:,:)=0.d0
+          call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve, &
+           yyy,yzz)
+          call compute_outer_coulomelec(timesub,ycf,yxx,yyy,yzz)
+          imiomax=(ncoulforce+1)*3
+          call sum_world_darr(ycf,imiomax)
+        endif
+      else
+        call error(17)
+      endif
+        
+  end select
+  
+  return
+  
+ end subroutine compute_coulomelec_multistep_ev
+ 
+ subroutine compute_multistep_error_ev(nstep,lmeanerrmssub, &
+  meanerrmssub,timesub,ycf,outerycf,yxx,yvl,yve,yyy,yzz)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the error introduced by the
+!     multiple step approach
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification January 2016
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: nstep
+  logical, intent(in) :: lmeanerrmssub
+  double precision, intent(out) :: meanerrmssub
+  double precision, intent(in) ::  timesub
+  double precision, allocatable, intent(inout) ::  ycf(:,:)
+  double precision, allocatable, intent(inout) :: outerycf(:,:)
+  double precision, allocatable, intent(in) ::  yxx(:)
+  double precision, allocatable, intent(in) ::  yvl(:)
+  double precision, allocatable, intent(in) ::  yve(:)
+  double precision, allocatable, intent(in), optional ::  yyy(:)
+  double precision, allocatable, intent(in), optional ::  yzz(:)
+  
+  double precision, save :: meanerrforce
+  
+  
+  double precision :: norma,normb,dtemp(1),myerr
+  
+  integer :: imiomax,ipoint,isub,mymax,mymaxmirr,jsub,jpoint
+  double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,dt
+  double precision, dimension(3) :: versor,utang
+  
+  integer, save :: icounter=0
+  
+  meanerrmssub=0.d0
+  
+  if(.not.(lmeanerrmssub .and. lmscomputed))return
+  if(msinpjet/=inpjet)return
+  if(msnpjet/=npjet)return
+  
+  ycf(:,:)=0.d0
+  outerycf(:,:)=0.d0
+  coulservicearr(:,:)=0.d0
+  
+  
+  select case(systype)
+    case(1)
+    
+!     compute the total Coulomb forces
+      call compute_coulomelec_ev(nstep,timesub,ycf,yxx,yvl,yve)
+      
+!     compute the inner Coulomb forces
+      call compute_inner_coulomelec_ev(timesub,coulservicearr,yxx,yvl, &
+       yve)
+        
+      imiomax=(ncoulforce+1)
+      call sum_world_darr(coulservicearr,imiomax)
+      
+!     compute the outer Coulomb forces as difference
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        outerycf(isub,1)=ycf(ipoint,1)-coulservicearr(ipoint,1)
+      enddo
+      
+      coulservicearr(:,:)=0.d0
+      
+      call compute_outer_coulomelec(timesub,coulservicearr,yxx)
+      
+      
+!     compute the error
+      dtemp(1)=0.d0
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        dtemp(1)=dtemp(1)+ &
+         dabs(coulservicearr(ipoint,1)-outerycf(isub,1))
+      enddo
+      call sum_world_darr(dtemp(1),1)
+      meanerrmssub=dtemp(1)/dble(npjet-inpjet+1)
+      
+    case default
+    
+!     compute the total Coulomb forces
+      call compute_coulomelec_ev(nstep,timesub,ycf,yxx,yvl,yve,yyy,yzz)
+      
+!     compute the inner Coulomb forces
+      call compute_inner_coulomelec_ev(timesub,coulservicearr,yxx,yvl, &
+       yve,yyy,yzz)
+        
+      imiomax=(ncoulforce+1)*3
+      call sum_world_darr(coulservicearr,imiomax)
+      
+!     compute the outer Coulomb forces as difference
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        outerycf(isub,1:3)=ycf(ipoint,1:3)-coulservicearr(ipoint,1:3)
+      enddo
+      
+      coulservicearr(:,:)=0.d0
+      
+      call compute_outer_coulomelec(timesub,coulservicearr,yxx,yyy,yzz)
+      
+      
+!     compute the error
+      dtemp(1)=0.d0
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        utang(1)=coulservicearr(ipoint,1)-outerycf(isub,1)
+        utang(2)=coulservicearr(ipoint,2)-outerycf(isub,2)
+        utang(3)=coulservicearr(ipoint,3)-outerycf(isub,3)
+        norm = modulvec(utang)
+        dtemp(1)=dtemp(1) + norm
+      enddo
+      call sum_world_darr(dtemp(1),1)
+      meanerrmssub=dtemp(1)/dble(npjet-inpjet+1)
+    
+  end select
+      
+      
+  return
+  
+ end subroutine compute_multistep_error_ev
  
  end module coulomb_force_mod
  

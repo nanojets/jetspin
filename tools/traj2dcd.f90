@@ -61,18 +61,21 @@
   double precision :: refinementthreshold
   
   integer, allocatable, dimension(:) :: jetin
-  logical, allocatable, dimension(:) :: jetbd
+  logical, allocatable, dimension(:) :: jetbd,jetbr
   double precision, allocatable, dimension(:) :: jetxx,jetyy,jetzz
   double precision, allocatable, dimension(:) :: jetst,jetvx,jetvy,jetvz
   double precision, allocatable, dimension(:) :: jetms,jetch
-  double precision, allocatable, dimension(:) :: jetvl
+  double precision, allocatable, dimension(:) :: jetvl,jetve
   
   logical ::lrefinement,ltagbeads,lrefinementthreshold, &
          lrefbeadstart,llenthresholdbead, &
          lrefinementevery,lrefinementstart,lmassavariable,limassadev, &
-         llencorrmassa,lfirstmass
+         llencorrmassa,lfirstmass,lmultiplestep
          
-  integer :: refinementcons,typemass
+  integer :: refinementcons,typemass,nmultisteperror
+  
+  double precision :: multisteperror,cp0,evairv,evtemp,evumidity, &
+   noisevar,noisediff
   
   
   inquire(file=trim(nfilein),exist=lexist)
@@ -203,7 +206,7 @@
   logical, intent(in), optional :: lsecond
   
   integer :: i,j,mioind
-  real(4) :: rtemp(10) 
+  real(4) :: rtemp(11) 
   
   logical :: lredo
   double precision :: dtemp(12)
@@ -250,41 +253,42 @@
     endif
   
     if(mioind>=3)then
-        read(fileout)addedcharge,removedcharge,countericurr, &
-         counterecurr,meanicurr,meanecurr,addedmass,removedmass, &
-         counterimass,counteremass,meanimass,meanemass
+        read(fileout)addedcharge,removedcharge,countericurr,counterecurr, &
+      meanicurr,meanecurr,addedmass,removedmass,counterimass, &
+      counteremass,meanimass,meanemass
     endif
     
     if(mioind>=4)then
         read(fileout)counterevel,counterevelrel,meanevel,meanevelrel, &
-         counterelen,counterecross,meanelen,meanecross,meancputime, &
-         counterivel,meanivel,counterlpath
+     counterelen,counterecross,meanelen,meanecross,meancputime, &
+     counterivel,meanivel,counterlpath
     endif
     
     if(mioind>=5)then
-        read(fileout)meanlpath,(dtemp(i),i=1,11)
+        read(fileout)meanlpath,multisteperror,cp0,evairv,evtemp,evumidity, &
+   noisevar,noisediff,(dtemp(i),i=1,4)
     endif
     
     if(mioind>=6)then
           read(fileout)ncounterevel,ncounterevelrel,ncountergeom, &
-       reprinttime,ncounterivel,ncounterlpath,irefinementdone, &
-         nmulstep,nmulstepdone,(itemp(i),i=1,3)
+     reprinttime,ncounterivel,ncounterlpath,irefinementdone,nmulstep, &
+     nmulstepdone,nmultisteperror,itemp(1),itemp(2)
     endif
     
     if(mioind>=7)then
         read(fileout)lrefinement,ltagbeads,lrefinementthreshold, &
          lrefbeadstart,llenthresholdbead, &
-         lrefinementevery,lrefinementstart,lmassavariable,limassadev, &
+         lrefinementevery,lrefinementstart,lmassavariable,lmultiplestep, &
          llencorrmassa,lmassavariable,lfirstmass
     endif
     
     if(mioind>=8)then
-          read(fileout)refinementcons,typemass,(itemp(i),i=1,10)
+          read(fileout)(itemp(i),i=1,12)
     endif
     
     if(mioind>=9)then
         read(fileout)refinementthreshold,refbeadstartfit,lencorrmassa, &
-         lenprobmassa,massratio,imassadev,oldgaussn,corr,radcorr, &
+         lenprobmassa,massratio,dtemp(1),oldgaussn,corr,radcorr, &
          lenthresholdbead,refinementevery,refinementstart
     endif
     
@@ -576,6 +580,164 @@
         jetvl(:)=jetvl(:)*lengthscale**3.d0
       endif
     end select
+  elseif(sprintdat==7)then
+    lredo=.false.
+    read(fileout)doreorder,addread,remread
+    select case(systype)
+    case (1:2)
+      do i=inpjet,npjet
+        read(fileout)(rtemp(j),j=1,6),jetbd(i),jetbr(i)
+        jetxx(i)=dble(rtemp(1))
+        jetst(i)=dble(rtemp(2))
+        jetvx(i)=dble(rtemp(3))
+        jetms(i)=dble(rtemp(4))
+        jetch(i)=dble(rtemp(5))
+        jetvl(i)=dble(rtemp(6))
+      end do
+      if(unscale)then
+        jetxx(:)=jetxx(:)*lengthscale
+        jetst(:)=jetst(:)*G
+        jetvx(:)=jetvx(:)*lengthscale/tao
+        jetms(:)=jetms(:)*massscale
+        jetch(:)=jetch(:)*chargescale
+        jetvl(:)=jetvl(:)*lengthscale**3.d0
+      endif
+    case default
+      do i=inpjet,npjet
+        read(fileout)(rtemp(j),j=1,10),jetbd(i),jetbr(i)
+        jetxx(i)=dble(rtemp(1))
+        jetyy(i)=dble(rtemp(2))
+        jetzz(i)=dble(rtemp(3))
+        jetst(i)=dble(rtemp(4))
+        jetvx(i)=dble(rtemp(5))
+        jetvy(i)=dble(rtemp(6))
+        jetvz(i)=dble(rtemp(7))
+        jetms(i)=dble(rtemp(8))
+        jetch(i)=dble(rtemp(9))
+        jetvl(i)=dble(rtemp(10))
+      end do
+      if(unscale)then
+        jetxx(:)=jetxx(:)*lengthscale
+        jetyy(:)=jetyy(:)*lengthscale
+        jetzz(:)=jetzz(:)*lengthscale
+        jetst(:)=jetst(:)*G
+        jetvx(:)=jetvx(:)*lengthscale/tao
+        jetvy(:)=jetvy(:)*lengthscale/tao
+        jetvz(:)=jetvz(:)*lengthscale/tao
+        jetms(:)=jetms(:)*massscale
+        jetch(:)=jetch(:)*chargescale
+        jetvl(:)=jetvl(:)*lengthscale**3.d0
+      endif
+    end select
+  elseif(sprintdat==8)then
+    lredo=.false.
+    read(fileout)doreorder,addread,remread
+    select case(systype)
+    case (1:2)
+      do i=inpjet,npjet
+        read(fileout)(rtemp(j),j=1,7)
+        jetxx(i)=dble(rtemp(1))
+        jetst(i)=dble(rtemp(2))
+        jetvx(i)=dble(rtemp(3))
+        jetms(i)=dble(rtemp(4))
+        jetch(i)=dble(rtemp(5))
+        jetvl(i)=dble(rtemp(6))
+        jetve(i)=dble(rtemp(7))
+      end do
+      if(unscale)then
+        jetxx(:)=jetxx(:)*lengthscale
+        jetst(:)=jetst(:)*G
+        jetvx(:)=jetvx(:)*lengthscale/tao
+        jetms(:)=jetms(:)*massscale
+        jetch(:)=jetch(:)*chargescale
+        jetvl(:)=jetvl(:)*lengthscale**3.d0
+        jetve(:)=jetve(:)*lengthscale**3.d0
+      endif
+    case default
+      do i=inpjet,npjet
+        read(fileout)(rtemp(j),j=1,11)
+        jetxx(i)=dble(rtemp(1))
+        jetyy(i)=dble(rtemp(2))
+        jetzz(i)=dble(rtemp(3))
+        jetst(i)=dble(rtemp(4))
+        jetvx(i)=dble(rtemp(5))
+        jetvy(i)=dble(rtemp(6))
+        jetvz(i)=dble(rtemp(7))
+        jetms(i)=dble(rtemp(8))
+        jetch(i)=dble(rtemp(9))
+        jetvl(i)=dble(rtemp(10))
+        jetve(i)=dble(rtemp(11))
+      end do
+      if(unscale)then
+        jetxx(:)=jetxx(:)*lengthscale
+        jetyy(:)=jetyy(:)*lengthscale
+        jetzz(:)=jetzz(:)*lengthscale
+        jetst(:)=jetst(:)*G
+        jetvx(:)=jetvx(:)*lengthscale/tao
+        jetvy(:)=jetvy(:)*lengthscale/tao
+        jetvz(:)=jetvz(:)*lengthscale/tao
+        jetms(:)=jetms(:)*massscale
+        jetch(:)=jetch(:)*chargescale
+        jetvl(:)=jetvl(:)*lengthscale**3.d0
+        jetve(:)=jetve(:)*lengthscale**3.d0
+      endif
+    end select
+  elseif(sprintdat==9)then
+    lredo=.false.
+    read(fileout)doreorder,addread,remread
+    select case(systype)
+    case (1:2)
+      do i=inpjet,npjet
+        read(fileout)(rtemp(j),j=1,7),jetbd(i)
+        jetxx(i)=dble(rtemp(1))
+        jetst(i)=dble(rtemp(2))
+        jetvx(i)=dble(rtemp(3))
+        jetms(i)=dble(rtemp(4))
+        jetch(i)=dble(rtemp(5))
+        jetvl(i)=dble(rtemp(6))
+        jetve(i)=dble(rtemp(7))
+      end do
+      if(unscale)then
+        jetxx(:)=jetxx(:)*lengthscale
+        jetst(:)=jetst(:)*G
+        jetvx(:)=jetvx(:)*lengthscale/tao
+        jetms(:)=jetms(:)*massscale
+        jetch(:)=jetch(:)*chargescale
+        jetvl(:)=jetvl(:)*lengthscale**3.d0
+        jetve(:)=jetve(:)*lengthscale**3.d0
+      endif
+    case default
+      do i=inpjet,npjet
+        read(fileout)(rtemp(j),j=1,11),jetbd(i)
+        jetxx(i)=dble(rtemp(1))
+        jetyy(i)=dble(rtemp(2))
+        jetzz(i)=dble(rtemp(3))
+        jetst(i)=dble(rtemp(4))
+        jetvx(i)=dble(rtemp(5))
+        jetvy(i)=dble(rtemp(6))
+        jetvz(i)=dble(rtemp(7))
+        jetms(i)=dble(rtemp(8))
+        jetch(i)=dble(rtemp(9))
+        jetvl(i)=dble(rtemp(10))
+        jetve(i)=dble(rtemp(11))
+      end do
+      if(unscale)then
+        jetxx(:)=jetxx(:)*lengthscale
+        jetyy(:)=jetyy(:)*lengthscale
+        jetzz(:)=jetzz(:)*lengthscale
+        jetst(:)=jetst(:)*G
+        jetvx(:)=jetvx(:)*lengthscale/tao
+        jetvy(:)=jetvy(:)*lengthscale/tao
+        jetvz(:)=jetvz(:)*lengthscale/tao
+        jetms(:)=jetms(:)*massscale
+        jetch(:)=jetch(:)*chargescale
+        jetvl(:)=jetvl(:)*lengthscale**3.d0
+        jetve(:)=jetve(:)*lengthscale**3.d0
+      endif
+    end select
+  else
+    write(6,'(a)')'sprintdat not found!'
+    goto 120
   endif
   
   return
@@ -767,6 +929,8 @@
       deallocate(jetch)
       deallocate(jetvl)
       deallocate(jetin)
+      if(sprintdat==7)deallocate(jetbr)
+      if(sprintdat==8 .or. sprintdat==9)deallocate(jetve)
       do while(npjetsub>=nmaxjet)
         nmaxjet=nmaxjet+jincrement
       enddo
@@ -782,6 +946,8 @@
       allocate(jetch(0:nmaxjet-1))
       allocate(jetvl(0:nmaxjet-1))
       allocate(jetin(0:nmaxjet-1))
+      if(sprintdat==7)allocate(jetbr(0:nmaxjet-1))
+      if(sprintdat==8 .or. sprintdat==9)allocate(jetve(0:nmaxjet-1))
     endif
   else 
     nmaxjet=npjetsub+jincrement
@@ -796,7 +962,9 @@
     allocate(jetms(0:nmaxjet-1))
     allocate(jetch(0:nmaxjet-1)) 
     allocate(jetvl(0:nmaxjet-1))
-    allocate(jetin(0:nmaxjet-1)) 
+    allocate(jetin(0:nmaxjet-1))
+    if(sprintdat==7)allocate(jetbr(0:nmaxjet-1))
+    if(sprintdat==8 .or. sprintdat==9)allocate(jetve(0:nmaxjet-1))
     lallocated=.true.
   endif
   

@@ -1,0 +1,32 @@
+% Evaporation directives, included in the JETSPIN Data Files chapter.
+
+\subsection{Evaporation directives\label{subsec:Evaporation-directives}}
+
+The evaporation directives listed in Table~\ref{tab:inputlist} activate
+and parameterize the model described in Section~\ref{sec:Evaporation}:
+\begin{description}
+ \item[\texttt{evaporation yes}] activate solvent evaporation and the
+ concentration-dependent rheology.
+ \item[\texttt{evaporation polymer frac} $f$] initial polymer mass
+ fraction $c_{p,0}$.
+ \item[\texttt{evaporation airviscosity} $f$] kinematic viscosity of
+ air $\nu_a$ in $\mathrm{cm^2/s}$.
+ \item[\texttt{evaporation temperature} $f$] temperature in kelvin.
+ \item[\texttt{evaporation umidity} $f$] relative humidity $RH$ in the
+ interval $[0,1]$. The historical spelling \texttt{umidity} is retained
+ for input-file compatibility.
+ \item[\texttt{evaporation diffusivity} $f$] vapour diffusion coefficient
+ $D_a$ in $\mathrm{cm^2/s}$. If omitted,
+ Eq.~\ref{eq:evap-default-diffusivity} is used at one atmosphere.
+ \item[\texttt{evaporation relumidity} $f$] optional value of the
+ saturation-vapour ratio $c_{s,\mathrm{eq}}(T)$. If omitted, it is
+ evaluated from \texttt{evaporation temperature}. The historical keyword
+ is retained for input-file compatibility.
+ \item[\texttt{evaporation bconstant} $f$] parameter $B$ in
+ Eq.~\ref{eq:evap-viscosity}.
+ \item[\texttt{evaporation mconstant} $f$] exponent $m$ in
+ Eq.~\ref{eq:evap-viscosity}.
+ \item[\texttt{evaporation tconstant} $f$] exponent
+ $t_{\mathrm{ev}}$ in the generalized relaxation-time law; use $f=1$
+ to reproduce Yarin et al. (2001).
+\end{description}

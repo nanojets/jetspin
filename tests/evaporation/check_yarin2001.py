@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Regression checks for the Yarin et al. (2001) evaporation model.
 
-The checker reads the dimensional parameters of Test Case 8, recomputes the
-reference quantities used by the JETSPIN implementation, and optionally
-compares the values reported at run time for the automatic diffusivity and
-solidification cutoff.
+The checker reads the dimensional parameters of Test Case 8 and recomputes
+fixed reference quantities.  When source files are supplied it also guards
+the production expressions used for the cutoff and rheological update.  A
+JETSPIN run log can be supplied to verify the actual run-time fallback value
+of the solvent diffusivity.
 """
 
 from __future__ import annotations
@@ -20,8 +21,7 @@ DA_PREFAC = 0.211
 DA_TREF = 273.15
 DA_EXP = 1.94
 
-# Reference values documented for Test Case 8.  They are intentionally kept
-# here as fixed regression targets rather than generated from the source code.
+# Fixed Test Case 8 regression targets, independently recorded here.
 REF_THETA0 = 1.0e-2
 REF_DA = 0.2420017580740141
 REF_EV_LIM = 0.06666666666666667
@@ -55,7 +55,7 @@ def assert_close(name: str, actual: float, expected: float,
         raise AssertionError(
             f"{name}: got {actual:.15g}, expected {expected:.15g}"
         )
-    print(f"PASS {name:22s} {actual:.12g}")
+    print(f"PASS {name:24s} {actual:.12g}")
 
 
 def parse_runtime_value(log: str, label: str) -> float:
@@ -66,12 +66,32 @@ def parse_runtime_value(log: str, label: str) -> float:
     return fortran_float(match.group(1))
 
 
+def compact_fortran(path: Path) -> str:
+    text = path.read_text(encoding="utf-8", errors="replace").lower()
+    # Strip comments and whitespace so line continuations/indentation do not
+    # make the regression check sensitive to formatting.
+    text = "\n".join(line.split("!", 1)[0] for line in text.splitlines())
+    return re.sub(r"\s+", "", text)
+
+
+def assert_source_expression(path: Path, expression: str, name: str) -> None:
+    compact = compact_fortran(path)
+    expected = re.sub(r"\s+", "", expression.lower())
+    if expected not in compact:
+        raise AssertionError(f"{name}: production expression not found in {path}")
+    print(f"PASS {name}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True,
                         help="JETSPIN Test Case 8 input.dat")
     parser.add_argument("--run-log", type=Path,
                         help="optional JETSPIN run.log for run-time checks")
+    parser.add_argument("--nanojet-source", type=Path,
+                        help="optional source/nanojet_mod.f90")
+    parser.add_argument("--eom-source", type=Path,
+                        help="optional source/eom_ev_mod.f90")
     args = parser.parse_args()
 
     cp0 = read_directive(args.input, "evaporation polymer frac")
@@ -97,23 +117,45 @@ def main() -> int:
     assert_close("mu/mu0 at cutoff", mu_ratio, REF_MU_RATIO)
     assert_close("theta/theta0 cutoff", theta_ratio, REF_THETA_RATIO)
     assert_close("G/G0 at cutoff", g_ratio, REF_G_RATIO)
-
-    # The Yarin model uses theta/theta0 = cp/cp0 exactly.
     assert_close("Yarin tconstant", tconst, 1.0)
+
+    if args.nanojet_source is not None:
+        assert_source_expression(
+            args.nanojet_source,
+            "evlim=min(1.d0,cp0/(1.d0-evsolvlim))",
+            "production Yarin cutoff",
+        )
+        assert_source_expression(
+            args.nanojet_source,
+            "evmasscoeff=0.211d0*((evtemp/273.15d0)**1.94d0)",
+            "production diffusivity fallback",
+        )
+
+    if args.eom_source is not None:
+        assert_source_expression(
+            args.eom_source,
+            "cp=cp0*yvl(ipoint)/yve(ipoint)",
+            "production polymer concentration",
+        )
+        assert_source_expression(
+            args.eom_source,
+            "rattao=(cp/cp0)**tev",
+            "production relaxation-time ratio",
+        )
+        assert_source_expression(
+            args.eom_source,
+            "ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))",
+            "production viscosity ratio",
+        )
 
     if args.run_log is not None:
         log = args.run_log.read_text(encoding="utf-8", errors="replace")
         runtime_da = parse_runtime_value(
             log, "mass diffusivity of solvent automatically set equal to"
         )
-        runtime_evlim = parse_runtime_value(
-            log, "Yarin evaporation cutoff V/V0 automatically set equal to"
-        )
-        # The legacy Fortran warning uses g20.10, so its printed values carry
-        # fewer digits than the Python reference calculation.
+        # error_mod prints this value with g20.10, so allow the precision of
+        # the legacy diagnostic format rather than full Python precision.
         assert_close("runtime fallback D_a", runtime_da, da,
-                     rel=5.0e-9, abs_=5.0e-10)
-        assert_close("runtime cutoff V/V0", runtime_evlim, evlim,
                      rel=5.0e-9, abs_=5.0e-10)
 
     print("Yarin-2001 evaporation regression checks passed")

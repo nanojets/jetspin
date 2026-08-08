@@ -47,6 +47,12 @@ Sauro Succi, JETSPIN: A specific-purpose open-source software for
 electrospinning simulations of nanofibers, Computer Physics             
 Communications, 197 (2015), pp. 227-238.                                
                                                                         
+The evaporation model introduced in Version 1.22 follows A. L. Yarin,   
+S. Koombhongse and D. H. Reneker, J. Appl. Phys. 89, 3018-3026 (2001), 
+using the standard JETSPIN nondimensionalization. Its equations,         
+rheological corrections and input directives are documented in          
+manual/evaporation.tex.                                                 
+                                                                        
 Compiling JETSPIN                                                       
                                                                         
 The build sub-directory stores a UNIX makefile that assembles the       
@@ -106,6 +112,9 @@ New features in JETSPIN Version 1.22
   - Oscillating electric fields added                                   
                                                                         
   - Evaporation effect added                                            
+                                                                        
+  - The Yarin-2001 evaporation cutoff and rheological model are         
+    documented in manual/evaporation.tex.                               
                                                                         
   - The job close directive was added to ensure a controlled close down 
     procedure when a job runs out of time.                              

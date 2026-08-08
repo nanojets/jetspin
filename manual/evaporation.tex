@@ -40,7 +40,15 @@ Eq.~\ref{eq:evap-volume-dimensional} is
 \end{equation}
 If $c_{s,\mathrm{eq}}(T)$ is not supplied explicitly, JETSPIN evaluates
 it from the temperature using the water-vapour correlation of Seaver,
-Galloway and Manuccia used by Yarin et al.
+Galloway and Manuccia used by Yarin et al.  If $D_a$ is not supplied,
+the same atmospheric-pressure parametrization is used,
+\begin{equation}
+ D_a=0.211\left(\frac{T}{273.15\,\mathrm{K}}\right)^{1.94}
+ \quad \mathrm{cm^2/s},
+ \label{eq:evap-default-diffusivity}
+\end{equation}
+corresponding to air at one atmosphere.  A different diffusivity can be
+specified explicitly in the input file.
 
 \subsection{JETSPIN nondimensionalization}
 
@@ -184,7 +192,8 @@ The following directives activate and parameterize evaporation:
  interval $[0,1]$.  The historical spelling \texttt{umidity} is retained
  for input-file compatibility.
  \item[\texttt{evaporation diffusivity} $f$] vapour diffusion coefficient
- $D_a$ in $\mathrm{cm^2/s}$.
+ $D_a$ in $\mathrm{cm^2/s}$.  If omitted, Eq.~\ref{eq:evap-default-diffusivity}
+ is used at one atmosphere.
  \item[\texttt{evaporation relumidity} $f$] optional value of the
  saturation-vapour ratio $c_{s,\mathrm{eq}}(T)$.  If omitted, it is
  evaluated from \texttt{evaporation temperature}.  The historical keyword

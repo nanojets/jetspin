@@ -34,6 +34,8 @@ simulation control, output, and numerical robustness.
 - Fixed Coulomb-force handling used by evaporation simulations.
 - Fixed removed-bead data output and related evaporation bookkeeping.
 - Improved restart handling.
+- Added GNU Fortran compatibility flags for legacy MPI argument conventions
+  on both older and current compiler releases.
 - Fixed out-of-bounds argument passing in the one-dimensional RK2 and RK4
   integrators, detected by the new runtime-checking smoke tests.
 - Retained the gfortran compatibility corrections for the parser and I/O

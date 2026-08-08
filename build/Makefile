@@ -10,6 +10,7 @@ TYPE=undefined
 EX=main.x
 EXE = $(BINROOT)/$(EX)
 SHELL=/bin/sh
+MPI_COMPAT_FLAG ?= -fallow-argument-mismatch
 
 
 OBJ_MOD = serial_version_mod.o parallel_version_mod.o parse_mod.o error_mod.o \
@@ -87,14 +88,14 @@ gfortran:
 	
 gfortran-mpi:
 	$(MAKE) FC=mpif90 \
-	FFLAGS="-O2 -c" \
+	FFLAGS="-O2 $(MPI_COMPAT_FLAG) -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
 gfortran-mpidebugger:
 	$(MAKE) FC=mpif90 \
-	FFLAGS="-O0 -g -fcheck=all -c" \
+	FFLAGS="-O0 -g -fcheck=all $(MPI_COMPAT_FLAG) -c" \
 	LDFLAGS="-O0 -g -fcheck=all -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
@@ -227,8 +228,6 @@ main.o:main.f90
 
 clean:
 	rm -rf $(OBJ_MOD) $(OBJ_SRC) *.mod
-
-
 
 
 

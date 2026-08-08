@@ -35,7 +35,18 @@ cp "$repo_root"/source/*.f90 "$work_dir/source/"
 cp "$repo_root/build/Makefile" "$work_dir/source/Makefile"
 
 echo "Building JETSPIN executable ($mode)"
-make -C "$work_dir/source" "$build_target" BINROOT="$work_dir/execute"
+if [ "$mode" = mpi ]; then
+    if printf 'end\n' | mpif90 -fallow-argument-mismatch -x f95 \
+        -c -o "$work_dir/mpi-flag-test.o" - >/dev/null 2>&1; then
+        mpi_compat_flag=-fallow-argument-mismatch
+    else
+        mpi_compat_flag=-Wno-argument-mismatch
+    fi
+    make -C "$work_dir/source" "$build_target" \
+        BINROOT="$work_dir/execute" MPI_COMPAT_FLAG="$mpi_compat_flag"
+else
+    make -C "$work_dir/source" "$build_target" BINROOT="$work_dir/execute"
+fi
 
 case_number=1
 while [ "$case_number" -le "$last_case" ]; do

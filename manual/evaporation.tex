@@ -212,6 +212,33 @@ solidification cutoff, $\dot V_i=\dot c_{p,i}=0$, so $r_\mu$ and $r_G$
 remain frozen.  Euler, Heun (RK2) and classical RK4 integrations are
 supported for the coupled Kelvin--Voigt/evaporation model.
 
+\subsection{Compatibility with dynamic refinement}
+
+Solvent evaporation can be combined with JETSPIN dynamic refinement for
+both Maxwell and Kelvin--Voigt rheology.  The refinement procedure treats
+the reference material volume \texttt{jetvl} and the instantaneous
+post-evaporation volume \texttt{jetve} independently.  Before an Akima
+remeshing their totals over the refined portion of the jet are stored;
+after interpolation the two volume fields are reconstructed and each is
+renormalized to its own pre-refinement total.  Thus refinement preserves
+both the reference material represented by the beads and the current
+volume after solvent loss.
+
+After remeshing the local polymer concentration continues to be evaluated
+from Eq.~\ref{eq:evap-cp}, using the newly remapped local ratio
+$V_i^0/V_i$.  Because the two fields are interpolated separately, the
+local concentration profile can be slightly smoothed by remeshing even
+though the corresponding total volumes are conserved.  Backup/restore
+and parallel broadcast operations likewise include the instantaneous
+volume whenever evaporation is active.
+
+Dynamic refinement may increase the maximum bead capacity during a run.
+The Kelvin--Voigt/evaporation integrator therefore resizes its Runge--Kutta
+workspace whenever the refinement changes the required bead or chunk
+capacity.  This keeps the three-way combination of evaporation,
+Kelvin--Voigt rheology and dynamic refinement valid after a remeshing that
+grows the discretization.
+
 Evaporation also reduces the mass represented by a material element.
 JETSPIN therefore uses
 \begin{equation}
@@ -302,8 +329,8 @@ specified in the dimensional parameter list of Ref.~\cite{yarin2001bending}.
 The initial bead spacing is similarly chosen for compatibility with the
 JETSPIN injection algorithm: the test uses $l_{step}=0.0325\,\mathrm{cm}$,
 the electrostatic cutoff length estimated in the same paper.  Therefore
-Test Case 8 is intended as a order-of-magnitude reference and regression test of
-the evaporation/rheology implementation, rather than as a pointwise
+Test Case 8 is intended as an order-of-magnitude reference and regression
+test of the evaporation/rheology implementation, rather than as a pointwise
 reproduction of the original discretized trajectory.
 
 The test intentionally omits the \texttt{evaporation diffusivity}
@@ -322,4 +349,3 @@ reference ratios are
 \end{equation}
 These values provide simple numerical targets for future regression
 checks of the evaporation cutoff and concentration-dependent rheology.
-

@@ -719,7 +719,10 @@
       call warning(102,evcsvapour)
     endif
     if(.not. levmasscoeff)then
-      evmasscoeff=0.211d0*((evtemp/273.15d0)**1.94d0)*(1.d0/evcsvapour) !cm^2/s
+      ! Water-vapour diffusivity in air at atmospheric pressure.
+      ! Seaver et al. (1989): D_a=0.211*(T/273.15)^1.94 cm^2/s.
+      ! The pressure correction is p0/p, not 1/(p_sat/p0).
+      evmasscoeff=0.211d0*((evtemp/273.15d0)**1.94d0)
       call warning(105,evmasscoeff)
     endif
     evumidity=evumidity*evcsvapour

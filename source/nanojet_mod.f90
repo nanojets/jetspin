@@ -154,7 +154,8 @@
  double precision, public, save :: Bev=0.d0
  double precision, public, save :: mev=0.d0
  double precision, public, save :: tev=1.d0
- double precision, public, parameter :: evlim=0.1d0
+ double precision, public, parameter :: evsolvlim=0.1d0
+ double precision, public, save :: evlim=0.1d0
  
  logical, allocatable, public, save :: jetbd(:)
  logical, allocatable, public, save :: jetbr(:)
@@ -702,6 +703,11 @@
   endif
   
   if(levaporation)then
+    ! Yarin, Koombhongse and Reneker, J. Appl. Phys. 89, 3018 (2001):
+    ! evaporation is stopped when the solvent mass fraction cs=0.1.
+    ! Since cp=cp0*V0/V and cs=1-cp, the corresponding volume ratio is
+    ! V/V0=cp0/(1-cs).  evlim is this dimensionless volume-ratio floor.
+    evlim=min(1.d0,cp0/(1.d0-evsolvlim))
     !M. Seaver, A. Galloway, and T. J. Manuccia, Rev. Sci. Instrum.,
     ! 60, 3452 (1989).
     mytemp=evtemp-273.15d0
@@ -1247,7 +1253,6 @@
   
   if(.not.lremove)return
   
-  
   if(strategysub==1)then
     lrem=.false.
     do ipoint=inpjet,npjet
@@ -1513,5 +1518,4 @@
  end function trackbeads_number
  
  end module nanojet_mod
-
 

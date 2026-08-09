@@ -1,0 +1,48 @@
+ !Example JETSPIN input file 12: 1000-bead Platen CPU/GPU benchmark
+ !Derived from Test Case 9 with stochastic air-drag parameters from Test 4.
+
+ system 4
+ integrator 4
+
+ timestep 1.d-8
+ final time 1.d-5
+ print time 2.d-6
+ seed 317
+
+ print list t x yz n rc
+ printstat list t x y z vx vy vz st n rc curn curc nref
+
+ multiple step no
+ dynamic refinement no
+
+ airdrag yes
+ airdrag airdensity     0.00121d0
+ airdrag airviscosity   0.1511d0
+ airdrag amplitude      1.d0
+ airdrag airvelocity    -1000.d0
+
+ inserting no
+ removing no
+ gravity yes
+
+ points 1000
+ initial length 16.d0
+ nozzle velocity 0.282942121d0
+ nozzle stress 0.d0
+ yield stress   0.d0
+ nozzle cross 0.005d0
+ density mass 0.839253525d0
+ density charge 44000.0d0
+ viscosity 20.d0
+ elastic modulus 50000.d0
+ collector distance 16.d0
+ surface tension 21.133d0
+
+ perturbation yes
+ perturbation frequency 1.d4
+ perturbation amplitude 1.d-3
+
+ external potential 30.02076857d0
+ evaporation no
+
+ Finish

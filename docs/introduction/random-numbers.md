@@ -43,6 +43,16 @@ until jet capacity changes. Its maximum storage is six double-precision
 values per allocated bead, rather than a very large simulation-wide random
 archive.
 
+## Fixed GPU benchmark history
+
+Test 12 deliberately uses a different storage policy because its topology and
+duration are fixed. Before timing, rank 0 generates all 1,000 timestep blocks
+in `step, bead, component, draw` order. CPU and GPU paths address this same
+history; the OpenACC build copies its 6,006,000 doubles to the device once.
+This guarantees identical Gaussian assignments without a per-step host/device
+transfer. General Platen simulations with dynamic topology continue to use the
+per-step block described above.
+
 ## Other random paths
 
 Nozzle perturbation draws are generated on rank 0 and broadcast as scalar

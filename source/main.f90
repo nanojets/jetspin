@@ -64,7 +64,8 @@
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
                                refbeadstartfit
-  use integrator_mod, only : initime,endtime,driver_integrator
+  use integrator_mod, only : initime,endtime,driver_integrator, &
+                            prepare_integrator_random_history
   use integrator_kv_ev_mod, only : driver_integrator_KV_ev
   use statistic_mod,  only : statistic_driver
   use io_mod,         only : iprintdat,iprintxyz,lprintdat,lprintxyz,&
@@ -189,6 +190,9 @@
 #ifdef _OPENACC
   call accelerator_prepare()
 #endif
+! Pre-generate fixed stochastic benchmark noise before loop timing. CPU and
+! GPU executions use the same step/bead/component-indexed history.
+  call prepare_integrator_random_history(tstep)
   call profiling_initialize()
   call profiling_reset()
   call get_sync_world()

@@ -17,14 +17,17 @@ module integrator_mod
                          set_chunk,set_mxchunk,idrank,mxrank
  use error_mod,         only : error,warning
  use utility_mod,       only : wiener_process1,wiener_process2, &
-                         prepare_gaussian_buffer,gaussian_buffer_value
+                         prepare_gaussian_buffer,gaussian_buffer_value, &
+                         prepare_gaussian_history,gaussian_history_value, &
+                         gaussianhistory
  use nanojet_mod,       only : doallocate,mxnpjet,npjet,inpjet,systype,&
                          jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetst, &
                          jetms,jetch,jetvl,compute_posnoinserted, &
                          jetpt,lKVfluid,levaporation,jetve,evlim,jetfr, &
                          linserted,liniperturb,lairdrag,lflorentz,luppot, &
                          pfreq,consistency,findex,yieldstress,att,fve,gr, &
-                         ks,li,v,velext,linserting,lmultiplestep
+                         ks,li,v,velext,linserting,lmultiplestep, &
+                         airdragamp,noisediff,noisefric
  use dynamic_refinement_mod, only : driver_dynamic_refinement
  use profiling_mod, only : profiling_start,profiling_stop,prof_eom, &
                          prof_rk_update
@@ -33,7 +36,11 @@ module integrator_mod
                          accelerator_set_persistent, &
                          accelerator_rk4_final_statistics, &
                          accelerator_euler_final_statistics, &
-                         accelerator_rk2_final_statistics
+                         accelerator_rk2_final_statistics, &
+                         accelerator_platen_predict, &
+                         accelerator_platen_velocity, &
+                         accelerator_platen_positions, &
+                         accelerator_platen_stress_statistics
  use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
                          maxstressposx
 #endif
@@ -57,16 +64,35 @@ module integrator_mod
  logical, public, save :: lendtime
  
  public :: driver_integrator
+ public :: prepare_integrator_random_history
 
 contains
 
+ subroutine prepare_integrator_random_history(h)
+  implicit none
+  double precision, intent(in) :: h
+  integer :: nsteps
+  if(integrator/=4 .or. systype/=4 .or. npjet/=1000)return
+  if(.not.fixed_accelerator_geometry())return
+  nsteps=nint((endtime-initime)/h)
+  call prepare_gaussian_history(inpjet,npjet,mxnpjet,3,nsteps)
+#ifdef _OPENACC
+!$acc enter data copyin(gaussianhistory(0:(mxnpjet+1)*6*nsteps-1))
+#endif
+ end subroutine prepare_integrator_random_history
+
+ logical function fixed_accelerator_geometry()
+  implicit none
+  fixed_accelerator_geometry=npjet.eq.1000 .and. mxrank.eq.1 .and. &
+   mystart.eq.0 .and. myend.eq.npjet .and. linserted .and. &
+   .not.linserting .and. .not.lmultiplestep .and. .not.levaporation &
+   .and. lairdrag .and. .not.lflorentz .and. .not.luppot .and. &
+   nfieldtype.eq.0
+ end function fixed_accelerator_geometry
+
  logical function fixed_accelerator_eligible()
   implicit none
-  fixed_accelerator_eligible=systype.eq.3 .and. npjet.eq.1000 .and. &
-   mxrank.eq.1 .and. mystart.eq.0 .and. myend.eq.npjet .and. &
-   linserted .and. .not.linserting .and. .not.lmultiplestep .and. &
-   .not.levaporation .and. lairdrag .and. .not.lflorentz .and. &
-   .not.luppot .and. nfieldtype.eq.0
+  fixed_accelerator_eligible=systype.eq.3 .and. fixed_accelerator_geometry()
  end function fixed_accelerator_eligible
   
  subroutine driver_integrator(timesub,h,k,dorefinment)
@@ -317,7 +343,7 @@ contains
        jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
        jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz,linserted, &
        liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
-       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext)
+       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -590,7 +616,7 @@ contains
        jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
        jetch,jetfr,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted, &
        liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
-       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext)
+       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -670,7 +696,7 @@ contains
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr, &
        f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
        lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
-       yieldstress,att,fve,gr,ks,li,v,velext)
+       yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1067,7 +1093,7 @@ contains
        jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
        jetch,jetfr,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted, &
        liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
-       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext)
+       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1133,7 +1159,7 @@ contains
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f2xx, &
        f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-       att,fve,gr,ks,li,v,velext)
+       att,fve,gr,ks,li,v,velext,.false.,0.d0)
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1206,7 +1232,7 @@ contains
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f3xx, &
        f3yy,f3zz,f3st,f3vx,f3vy,f3vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-       att,fve,gr,ks,li,v,velext)
+       att,fve,gr,ks,li,v,velext,.false.,0.d0)
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1279,7 +1305,7 @@ contains
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f4xx, &
        f4yy,f4zz,f4st,f4vx,f4vy,f4vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-       att,fve,gr,ks,li,v,velext)
+       att,fve,gr,ks,li,v,velext,.false.,0.d0)
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1397,6 +1423,8 @@ contains
   double precision, allocatable, dimension (:), save ::  y2vx
   double precision, allocatable, dimension (:), save ::  y2vy
   double precision, allocatable, dimension (:), save ::  y2vz
+  double precision, allocatable, dimension (:), save ::  d3xx,d3yy,d3zz
+  double precision, allocatable, dimension (:), save ::  d3st,d3vx,d3vy,d3vz
   
   integer, intent(in) :: k
   double precision, intent(inout) :: timesub
@@ -1407,6 +1435,8 @@ contains
   double precision, dimension(1:3) :: ww,zz,utang
   
   logical, save :: lfirstsub=.true.
+  logical, save :: persistent_acc=.false.
+  logical :: used_acc_eom
   
   double precision ::  fxx
   double precision ::  fyy
@@ -1495,6 +1525,7 @@ contains
         deallocate(y2vx)
         deallocate(y2vy)
         deallocate(y2vz)
+        deallocate(d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz)
       endif
       allocate(f1xx(0:mxnpjet))
       allocate(f1yy(0:mxnpjet))
@@ -1527,18 +1558,39 @@ contains
       allocate(y2vx(0:mxnpjet))
       allocate(y2vy(0:mxnpjet))
       allocate(y2vz(0:mxnpjet))
+      allocate(d3xx(0:mxnpjet),d3yy(0:mxnpjet),d3zz(0:mxnpjet))
+      allocate(d3st(0:mxnpjet),d3vx(0:mxnpjet),d3vy(0:mxnpjet),d3vz(0:mxnpjet))
     end select
     lfirstsub=.false.
   endif
+
+#ifdef _OPENACC
+  if(.not.persistent_acc .and. systype==4 .and. &
+   fixed_accelerator_geometry() .and. allocated(gaussianhistory))then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
+!$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
+!$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
+!$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetfr(0:mxnpjet))
+!$acc enter data create(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,d3xx,d3yy,d3zz,d3st, &
+!$acc& d3vx,d3vy,d3vz,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
+!$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
+    call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(.true.)
+    persistent_acc=.true.
+  endif
+#endif
   
   dsqrh=dsqrt(dabs(h))
   tsqh=dsqrh**3.d0
   prefactor1=0.5d0/dsqrh
 
-  if(systype==1)then
-    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,1)
-  else
-    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,3)
+  if(.not.allocated(gaussianhistory))then
+    if(systype==1)then
+      call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,1)
+    else
+      call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,3)
+    endif
   endif
   
 ! select the proper system type
@@ -1602,8 +1654,13 @@ contains
         call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,k, &
          f3stocvx,f3stocvy,f3stocvz)
-        u1=gaussian_buffer_value(ipoint,1,1)
-        u2=gaussian_buffer_value(ipoint,1,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,1,1)
+          u2=gaussian_history_value(k,ipoint,1,2)
+        else
+          u1=gaussian_buffer_value(ipoint,1,1)
+          u2=gaussian_buffer_value(ipoint,1,2)
+        endif
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
           
@@ -1657,6 +1714,49 @@ contains
       
       timesub=timesub+h
     case default
+#ifdef _OPENACC
+      if(persistent_acc)then
+        call smooth_charge(jetxx,jetyy,jetzz)
+        call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx,jetyy,jetzz)
+        used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx,jetyy, &
+         jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch,jetfr, &
+         f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+        call accelerator_platen_predict(mystart,myend,h,airdragamp(1), &
+         noisediff,jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+         f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,y1xx,y1yy,y1zz,y1st, &
+         y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
+        call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y1xx,y1yy,y1zz)
+        used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,y1xx,y1yy, &
+         y1zz,y1st,y1vx,y1vy,y1vz,jetvl,coulforce,jetms,jetch,jetfr, &
+         f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+        call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y2xx,y2yy,y2zz)
+        used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,y2xx,y2yy, &
+         y2zz,y2st,y2vx,y2vy,y2vz,jetvl,coulforce,jetms,jetch,jetfr, &
+         d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+        call accelerator_platen_velocity(mystart,myend,mxnpjet,k,h, &
+         airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
+         f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz)
+        call accelerator_platen_positions(mystart,myend,npjet,h,pfreq, &
+         liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz)
+        used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx,jetyy, &
+         jetzz,y1st,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch,jetfr, &
+         f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+        call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
+         jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
+         maxstressposx)
+        call restore_charge()
+        timesub=timesub+h
+        return
+      endif
+#endif
       call smooth_charge(jetxx,jetyy,jetzz)
       call compute_posnoinserted(jetxx,jetyy,jetzz)
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx, &
@@ -1754,16 +1854,31 @@ contains
         call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,k, &
          f3stocvx,f3stocvy,f3stocvz)
-        u1=gaussian_buffer_value(ipoint,1,1)
-        u2=gaussian_buffer_value(ipoint,1,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,1,1)
+          u2=gaussian_history_value(k,ipoint,1,2)
+        else
+          u1=gaussian_buffer_value(ipoint,1,1)
+          u2=gaussian_buffer_value(ipoint,1,2)
+        endif
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gaussian_buffer_value(ipoint,2,1)
-        u2=gaussian_buffer_value(ipoint,2,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,2,1)
+          u2=gaussian_history_value(k,ipoint,2,2)
+        else
+          u1=gaussian_buffer_value(ipoint,2,1)
+          u2=gaussian_buffer_value(ipoint,2,2)
+        endif
         ww(2)=(dsqrh*u1)
         zz(2)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gaussian_buffer_value(ipoint,3,1)
-        u2=gaussian_buffer_value(ipoint,3,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,3,1)
+          u2=gaussian_history_value(k,ipoint,3,2)
+        else
+          u1=gaussian_buffer_value(ipoint,3,1)
+          u2=gaussian_buffer_value(ipoint,3,2)
+        endif
         ww(3)=(dsqrh*u1)
         zz(3)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
 	    

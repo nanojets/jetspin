@@ -50,7 +50,7 @@ The implementation preserves the existing model conventions, including:
 - mirror-charge contributions and their three-dimensional cutoff.
 
 The three-dimensional equation-of-motion force assembly is also offloaded for
-the fixed Tests 9--11 configuration: insertion state fixed, air drag enabled,
+the fixed Tests 9--12 configuration: insertion state fixed, air drag enabled,
 constant axial field, and no Lorentz or upper-wall force. One kernel is
 launched per integrator stage. Its local three-point curvature calculation is also
 device-side: an iteration reads the current bead and its two neighbours. No
@@ -64,16 +64,23 @@ Coordinates, bead properties, cross sections, and the Coulomb force array are
 named explicitly in each OpenACC data region. No managed/unified-memory build
 mode is used.
 
-Configurations outside the fixed Tests 9--11 gate continue to use separate
+Configurations outside the fixed Tests 9--12 gate continue to use separate
 call-scoped Coulomb and EOM data regions. This remains safe when insertion,
 removal, or dynamic refinement changes `mxnpjet`: the next call maps the new
 host allocation and capacity.
 
-Tests 9--11 use an explicit persistent-data path. The primary jet state,
+Tests 9--12 use an explicit persistent-data path. The primary jet state,
 static bead properties, Coulomb force, EOM derivatives, and integrator scratch
 arrays are mapped once and remain resident across all timesteps.
 Each Coulomb stage computes its cross sections on the device; EOM consumes the
 device Coulomb force directly, and all integrator updates execute on the device.
+
+For stochastic Platen integration, the complete Gaussian history is generated
+on the CPU before loop timing in a fixed step/bead/component/draw order. Test
+12 requires 6,006,000 doubles (48,048,000 bytes). The OpenACC build transfers
+this history once during initialization and indexes it on the device; the CPU
+path indexes the same layout. No random generation or noise transfer occurs
+inside the measured loop.
 The host no longer receives stage intermediates or Coulomb forces.
 
 The per-step path-length and maximum-stress reductions are fused with each
@@ -107,8 +114,8 @@ tests/regression/run.sh openacc
 
 The standard 1,000-step regression validation on an NVIDIA A30 passed all
 eight normal regression cases; the written observables matched the NVFORTRAN
-CPU results at their output precision. The separate 1,000-bead RK4, Euler, and
-RK2 trajectories also pass their versioned A30 baselines with `rtol=1e-6` and
+CPU results at their output precision. The separate 1,000-bead RK4, Euler,
+RK2, and Platen trajectories also pass their A30 baselines with `rtol=1e-6` and
 `atol=1e-9`; see the [benchmark index](../examples/README.md) for their records.
 
 `nvfortran-openacc-host` is useful for checking the accelerated control path
@@ -121,7 +128,7 @@ regression above and cannot establish GPU performance.
 2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
 3. Extend persistent equation-of-motion and integrator support beyond the
-   fixed Tests 9--11 gate, then port the Platen stochastic integrator.
+   fixed Tests 9--12 gate.
 4. Add explicit device teardown/recreation hooks around capacity changes and
    synchronize only topology metadata and requested output fields.
 5. Port the local Akima coefficient loops, replace the interpolation interval

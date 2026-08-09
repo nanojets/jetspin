@@ -31,7 +31,9 @@ module utility_mod
   Pi=3.141592653589793238462643383279502884d0
  double precision, allocatable,save :: wienerlist(:)
  double precision, allocatable,save :: gaussianbuffer(:)
+ double precision, public, allocatable, save :: gaussianhistory(:)
  integer,save :: ngaussianbuffer=-1
+ integer,save :: ngaussianhistory=-1,nhistorysteps=-1
  double precision,save :: hwiener
  integer,save :: winenernodes
  
@@ -40,6 +42,7 @@ module utility_mod
  public :: allocate_array_buffservice
  public :: init_random_seed,gauss,wiener_process1,wiener_process2,wiener
  public :: prepare_gaussian_buffer,gaussian_buffer_value
+ public :: prepare_gaussian_history,gaussian_history_value
  public :: modulvec
  public :: dot
  public :: cross
@@ -286,6 +289,52 @@ module utility_mod
   return
 
  end function gaussian_buffer_value
+
+ subroutine prepare_gaussian_history(inpnt,npnt,mxpnt,ndim,nsteps)
+  implicit none
+  integer, intent(in) :: inpnt,npnt,mxpnt,ndim,nsteps
+  integer :: istep,ipoint,icomponent,idraw,nperstep,nvalues,index
+
+  if(mxpnt<0 .or. nsteps<1)stop "Invalid Gaussian-history extent"
+  if(ndim<1 .or. ndim>3)stop "Invalid Gaussian-history dimension"
+  nperstep=(mxpnt+1)*3*2
+  nvalues=nperstep*nsteps
+  if(allocated(gaussianhistory))deallocate(gaussianhistory)
+  allocate(gaussianhistory(0:nvalues-1))
+  gaussianhistory(:)=0.d0
+  if(idrank==0)then
+    do istep=1,nsteps
+      do ipoint=inpnt,npnt
+        do icomponent=1,ndim
+          do idraw=1,2
+            index=(istep-1)*nperstep+ipoint+(mxpnt+1)* &
+             ((icomponent-1)+3*(idraw-1))
+            gaussianhistory(index)=gauss()
+          enddo
+        enddo
+      enddo
+    enddo
+  endif
+  call bcast_world_darr(gaussianhistory,nvalues)
+  ngaussianhistory=mxpnt
+  nhistorysteps=nsteps
+ end subroutine prepare_gaussian_history
+
+ function gaussian_history_value(istep,ipoint,icomponent,idraw)
+  implicit none
+  integer, intent(in) :: istep,ipoint,icomponent,idraw
+  integer :: nperstep,index
+  double precision :: gaussian_history_value
+  if(.not.allocated(gaussianhistory))stop "Gaussian history is not prepared"
+  if(istep<1 .or. istep>nhistorysteps)stop "Invalid Gaussian-history step"
+  if(ipoint<0 .or. ipoint>ngaussianhistory)stop "Invalid Gaussian bead index"
+  if(icomponent<1 .or. icomponent>3)stop "Invalid Gaussian component"
+  if(idraw<1 .or. idraw>2)stop "Invalid Gaussian draw index"
+  nperstep=(ngaussianhistory+1)*3*2
+  index=(istep-1)*nperstep+ipoint+(ngaussianhistory+1)* &
+   ((icomponent-1)+3*(idraw-1))
+  gaussian_history_value=gaussianhistory(index)
+ end function gaussian_history_value
   
   subroutine wiener_process1(inpnt,npnt,nvar,ndim,h,fwienersub1)
   

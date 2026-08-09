@@ -23,8 +23,185 @@ module accelerator_mod
  public :: accelerator_rk4_final_statistics
  public :: accelerator_euler_final_statistics
  public :: accelerator_rk2_final_statistics
+ public :: accelerator_platen_predict
+ public :: accelerator_platen_velocity
+ public :: accelerator_platen_positions
+ public :: accelerator_platen_stress_statistics
 
 contains
+
+ subroutine accelerator_platen_predict(firstpoint,lastpoint,h,airamp,noisediff, &
+   jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+   f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+   y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
+   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint
+  double precision, intent(in) :: h,airamp,noisediff,jetms(0:)
+  double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(in) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1st(0:)
+  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
+  double precision, intent(out) :: y1xx(0:),y1yy(0:),y1zz(0:),y1st(0:)
+  double precision, intent(out) :: y1vx(0:),y1vy(0:),y1vz(0:)
+  double precision, intent(out) :: y2xx(0:),y2yy(0:),y2zz(0:),y2st(0:)
+  double precision, intent(out) :: y2vx(0:),y2vy(0:),y2vz(0:)
+  integer :: ipoint,j
+  double precision :: dsqrh,stoc
+  dsqrh=dsqrt(dabs(h))
+#ifdef _OPENACC
+!$acc parallel loop gang vector present(jetms,jetxx,jetyy,jetzz,jetst, &
+!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+!$acc& y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st, &
+!$acc& y2vx,y2vy,y2vz) private(j,stoc)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
+    if(ipoint==lastpoint)stoc=0.d0
+    y1xx(ipoint)=jetxx(ipoint)+h*f1xx(j)
+    y1yy(ipoint)=jetyy(ipoint)+h*f1yy(j)
+    y1zz(ipoint)=jetzz(ipoint)+h*f1zz(j)
+    y1st(ipoint)=jetst(ipoint)+h*f1st(j)
+    y1vx(ipoint)=jetvx(ipoint)+h*f1vx(j)+dsqrh*stoc
+    y1vy(ipoint)=jetvy(ipoint)+h*f1vy(j)+dsqrh*stoc
+    y1vz(ipoint)=jetvz(ipoint)+h*f1vz(j)+dsqrh*stoc
+    y2xx(ipoint)=y1xx(ipoint)
+    y2yy(ipoint)=y1yy(ipoint)
+    y2zz(ipoint)=y1zz(ipoint)
+    y2st(ipoint)=y1st(ipoint)
+    y2vx(ipoint)=jetvx(ipoint)+h*f1vx(j)-dsqrh*stoc
+    y2vy(ipoint)=jetvy(ipoint)+h*f1vy(j)-dsqrh*stoc
+    y2vz(ipoint)=jetvz(ipoint)+h*f1vz(j)-dsqrh*stoc
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+ end subroutine accelerator_platen_predict
+
+ subroutine accelerator_platen_velocity(firstpoint,lastpoint,mxnpjet,k,h, &
+   airamp,noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
+   f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint,mxnpjet,k
+  double precision, intent(in) :: h,airamp,noisediff,jetms(0:)
+  double precision, intent(in) :: gaussianhistory(0:)
+  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
+  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
+  double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
+  integer :: ipoint,j,component,nperstep,index1,index2
+  double precision :: dsqrh,tsqh,prefactor,stoc,u1,u2,ww,zz
+  dsqrh=dsqrt(dabs(h)); tsqh=dsqrh**3.d0; prefactor=0.5d0/dsqrh
+  nperstep=(mxnpjet+1)*6
+#ifdef _OPENACC
+!$acc parallel loop gang vector present(jetms,gaussianhistory,jetvx,jetvy, &
+!$acc& jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz) &
+!$acc& private(j,component,index1,index2,stoc,u1,u2,ww,zz)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
+    if(ipoint==lastpoint)stoc=0.d0
+    component=1
+    index1=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
+    index2=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
+    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
+    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
+    jetvx(ipoint)=jetvx(ipoint)+stoc*ww+prefactor*(f2vx(j)-f3vx(j))*zz+ &
+     0.25d0*h*(f2vx(j)+2.d0*f1vx(j)+f3vx(j))
+    component=2
+    index1=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
+    index2=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
+    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
+    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
+    jetvy(ipoint)=jetvy(ipoint)+stoc*ww+prefactor*(f2vy(j)-f3vy(j))*zz+ &
+     0.25d0*h*(f2vy(j)+2.d0*f1vy(j)+f3vy(j))
+    component=3
+    index1=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
+    index2=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
+    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
+    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
+    jetvz(ipoint)=jetvz(ipoint)+stoc*ww+prefactor*(f2vz(j)-f3vz(j))*zz+ &
+     0.25d0*h*(f2vz(j)+2.d0*f1vz(j)+f3vz(j))
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+ end subroutine accelerator_platen_velocity
+
+ subroutine accelerator_platen_positions(firstpoint,lastpoint,npjet,h,pfreq, &
+   liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint,npjet
+  logical, intent(in) :: liniperturb
+  double precision, intent(in) :: h,pfreq,jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
+  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:)
+  integer :: ipoint,j
+  double precision :: f2x,f2y,f2z,y1y,y1z
+#ifdef _OPENACC
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
+!$acc& jetvz,f1xx,f1yy,f1zz) private(j,f2x,f2y,f2z,y1y,y1z)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    f2x=jetvx(ipoint); f2y=jetvy(ipoint); f2z=jetvz(ipoint)
+    if(ipoint==npjet)then
+      f2x=0.d0
+      if(liniperturb)then
+        y1y=jetyy(ipoint)+h*f1yy(j)
+        y1z=jetzz(ipoint)+h*f1zz(j)
+        f2y=-pfreq*y1z; f2z=pfreq*y1y
+      else
+        f2y=0.d0; f2z=0.d0
+      endif
+    endif
+    jetxx(ipoint)=jetxx(ipoint)+0.5d0*h*(f1xx(j)+f2x)
+    jetyy(ipoint)=jetyy(ipoint)+0.5d0*h*(f1yy(j)+f2y)
+    jetzz(ipoint)=jetzz(ipoint)+0.5d0*h*(f1zz(j)+f2z)
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+ end subroutine accelerator_platen_positions
+
+ subroutine accelerator_platen_stress_statistics(firstpoint,lastpoint,h, &
+   jetxx,jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath, &
+   maxstress,maxstressposx)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint
+  integer, intent(inout) :: ncounterlpath
+  double precision, intent(in) :: h,jetxx(0:),jetyy(0:),jetzz(0:)
+  double precision, intent(inout) :: jetst(0:)
+  double precision, intent(in) :: f1st(0:),f2st(0:)
+  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
+  integer :: ipoint,j
+  double precision :: newst,dx,dy,dz
+  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress,maxstressposx)
+#ifdef _OPENACC
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst,f1st,f2st, &
+!$acc& counterlpath,statistics_step_max) private(j,newst,dx,dy,dz) &
+!$acc& reduction(+:counterlpath) reduction(max:statistics_step_max)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    newst=jetst(ipoint)+0.5d0*h*(f1st(j)+f2st(j))
+    if(ipoint<lastpoint)then
+      dx=jetxx(ipoint)-jetxx(ipoint+1)
+      dy=jetyy(ipoint)-jetyy(ipoint+1)
+      dz=jetzz(ipoint)-jetzz(ipoint+1)
+      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
+    endif
+    jetst(ipoint)=newst
+    statistics_step_max=max(statistics_step_max,newst)
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+  call accelerator_store_statistics(firstpoint,lastpoint,jetxx,jetyy, &
+   jetzz,jetst,counterlpath,ncounterlpath,maxstress,maxstressposx)
+ end subroutine accelerator_platen_stress_statistics
 
  subroutine accelerator_euler_final_statistics(firstpoint,lastpoint,h, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
@@ -361,12 +538,13 @@ contains
    yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr, &
    fxx,fyy,fzz,fst,fvx,fvy,fvz,linserted,liniperturb,lairdrag, &
    lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-   att,fve,gr,ks,li,vfield,velext)
+   att,fve,gr,ks,li,vfield,velext,stochastic_model,noisefric)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,npjet,nfieldtype
   logical, intent(in) :: linserted,liniperturb,lairdrag,lflorentz,luppot
+  logical, intent(in) :: stochastic_model
   double precision, intent(in) :: pfreq,consistency,findex,yieldstress
-  double precision, intent(in) :: att,fve,gr,ks,li,vfield,velext
+  double precision, intent(in) :: att,fve,gr,ks,li,vfield,velext,noisefric
   double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yst(0:)
   double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:),yvl(0:)
   double precision, intent(in) :: ycf(0:,1:),jetms(0:),jetch(0:)
@@ -434,7 +612,11 @@ contains
      (yvy(ipoint)-yvy(ipoint+1))*tuy+ &
      (yvz(ipoint)-yvz(ipoint+1))*tuz
     fvet=fve/jetms(ipoint)
-    factor1=fvet*yvl(ipoint)*(yst(ipoint)/lup)
+    if(stochastic_model .and. yst(ipoint)<=0.d0)then
+      factor1=0.d0
+    else
+      factor1=fvet*yvl(ipoint)*(yst(ipoint)/lup)
+    endif
 
     fxx(j)=yvx(ipoint)
     fyy(j)=yvy(ipoint)
@@ -452,6 +634,11 @@ contains
     fvx(j)=fvx(j)-factor4*tux
     fvy(j)=fvy(j)-factor4*tuy
     fvz(j)=fvz(j)-factor4*tuz
+    if(stochastic_model)then
+      fvx(j)=fvx(j)-noisefric*yvx(ipoint)
+      fvy(j)=fvy(j)-noisefric*yvy(ipoint)
+      fvz(j)=fvz(j)-noisefric*yvz(ipoint)
+    endif
 
     if(ipoint==firstpoint)cycle
 
@@ -462,7 +649,11 @@ contains
     tdx=dxd/ldown
     tdy=dyd/ldown
     tdz=dzd/ldown
-    factor2=fvet*yvl(ipoint-1)*(yst(ipoint-1)/ldown)
+    if(stochastic_model .and. yst(ipoint-1)<=0.d0)then
+      factor2=0.d0
+    else
+      factor2=fvet*yvl(ipoint-1)*(yst(ipoint-1)/ldown)
+    endif
 
 ! Local three-point curvature calculation. Each iteration reads only the
 ! current bead and its two neighbours.

@@ -70,9 +70,9 @@ tests/smoke/run.sh mpi
 The same modes run in GitHub Actions, together with compilation of the
 LaTeX manual.
 
-The longer [Test Cases 9--11](docs/examples/README.md) are intentionally
+The longer [Test Cases 9--12](docs/examples/README.md) are intentionally
 excluded from the smoke and numerical-regression suites. They provide fixed
-1,000-bead RK4, Euler, and RK2 workloads for CPU/GPU performance measurements
+1,000-bead RK4, Euler, RK2, and Platen workloads for CPU/GPU measurements
 and optional region-level profiling during OpenACC development. The current
 single-GPU milestone offloads direct Coulomb interactions and, for these fixed
 configurations, the three-dimensional equation-of-motion assembly including

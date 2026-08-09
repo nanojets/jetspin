@@ -2,13 +2,14 @@
 set -euo pipefail
 
 if [[ $# -lt 2 || $# -gt 3 ]]; then
-  echo "Usage: $0 {euler|rk2} CPU_STATOUT [GPU_STATOUT]" >&2
+  echo "Usage: $0 {euler|rk2|platen} CPU_STATOUT [GPU_STATOUT]" >&2
   exit 2
 fi
 
 case "$1" in
   euler) prefix=euler ;;
   rk2) prefix=rk2 ;;
+  platen) prefix=platen ;;
   *) echo "Unknown integrator: $1" >&2; exit 2 ;;
 esac
 

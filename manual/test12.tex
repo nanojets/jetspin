@@ -1,0 +1,23 @@
+\section{Test Case 12: Platen stochastic GPU benchmark}
+
+Test Case 12 combines the fixed 1,000-bead geometry and constant axial field
+of Test Case 9 with the Platen integrator and stochastic air-drag parameters
+of Test Case 4. Insertion, removal, evaporation, dynamic refinement, and
+multiple-step Coulomb summation are disabled. The input is stored in
+\texttt{examples/input-12/input.dat}.
+
+Before timing begins, rank zero generates the complete Gaussian history in a
+fixed step, bead, component, and draw order. For 1,000 steps the history
+contains 6,006,000 double precision values, or 48,048,000 bytes. CPU
+integration reads this layout directly and the OpenACC build copies it to the
+accelerator once during initialization. Random values are neither generated
+nor transferred during the temporal loop.
+
+The persistent accelerator path performs the three Platen force evaluations,
+the positive and negative predictors, stochastic velocity update, Heun
+position and stress updates, and statistics on the device. An initial paired
+measurement with NVFORTRAN 24.3 and one NVIDIA A30 required 29.050473 s on the
+CPU and 1.874810 s with OpenACC, a speedup of 15.50. All six rows and fourteen
+columns of the two sampled outputs were identical at the written precision.
+The versioned results and comparison helper are stored in
+\texttt{tests/performance/integrators/}.

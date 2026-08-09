@@ -29,6 +29,48 @@ with
 and the corresponding Open MPI build with target
 \texttt{gfortran-mpi}. Build products can be removed with target
 \texttt{clean} using the same command form.
+
+NVIDIA HPC SDK provides separate CPU-only and OpenACC build targets. On a
+module-based installation, first load the SDK and verify that its MPI wrapper
+uses NVFORTRAN:
+
+\begin{verbatim}
+module purge
+module use /opt/nvidia/hpc_sdk/modulefiles
+module load nvhpc/24.3
+nvfortran --version
+mpif90 --showme:command
+\end{verbatim}
+
+The serial and MPI CPU-only builds are selected respectively with
+\texttt{nvfortran} and \texttt{nvfortran-mpi}. The latter requires
+\texttt{mpif90 --showme:command} to report \texttt{nvfortran}.
+Neither target enables OpenACC offloading.
+
+The \texttt{nvfortran-openacc} target enables single-GPU OpenACC
+offloading. Its default values target compute capability 8.0, including
+NVIDIA A30 and A100 GPUs, and the CUDA 12.3 toolkit distributed with HPC SDK
+24.3:
+
+\begin{verbatim}
+make -C source -f ../build/Makefile nvfortran-openacc
+\end{verbatim}
+
+Another device architecture or installed CUDA toolkit can be selected through
+the \texttt{GPUCC} and \texttt{CUDA\_VERSION} Make variables. The
+compute capability is passed without the \texttt{cc} prefix; for example:
+
+\begin{verbatim}
+make -C source -f ../build/Makefile nvfortran-openacc \
+  GPUCC=90 CUDA_VERSION=12.3
+\end{verbatim}
+
+Target \texttt{nvfortran-openacc-host} compiles the OpenACC control path
+for host execution. It is intended for compiler and numerical validation when
+an NVIDIA device is unavailable and is not a GPU performance build. Before a
+device run, \texttt{nvidia-smi} and \texttt{nvaccelinfo} should both
+confirm that the selected GPU is visible.
+
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
 binary executable file can be run in the \textit{execute} sub-directory.
@@ -41,7 +83,7 @@ we suggest to use that provided by the Open MPI Project.
 
 \begin{table}[H]
 \begin{centering}
-\begin{tabular}{ll}
+\begin{tabular}{p{0.29\textwidth}p{0.65\textwidth}}
 \hline
 \textbf{target:}  & \textbf{meaning:}\tabularnewline
 \hline
@@ -60,6 +102,13 @@ intel-mpi  & compile in parallel mode using the Intel compiler and the Intel Mpi
 library.\tabularnewline
 intel-openmpi  & compile in parallel mode using the Intel compiler and the Open Mpi
 library.\tabularnewline
+nvfortran & compile in serial CPU mode using NVIDIA Fortran; OpenACC offloading
+is disabled.\tabularnewline
+nvfortran-mpi & compile in parallel CPU mode using an MPI wrapper configured
+with NVIDIA Fortran; OpenACC offloading is disabled.\tabularnewline
+nvfortran-openacc & compile a single-GPU OpenACC executable; configure the
+device with \texttt{GPUCC} and \texttt{CUDA\_VERSION}.\tabularnewline
+nvfortran-openacc-host & compile the OpenACC code path for host-only validation.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
 \hline
 \end{tabular}

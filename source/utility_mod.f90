@@ -1,5 +1,7 @@
  
- module utility_mod
+module utility_mod
+
+ use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
  
 !***********************************************************************
 !     
@@ -216,7 +218,7 @@
     lredo=.false.
 !   Box-Muller transformation
     gauss=dsqrt(-2.d0*dlog(dtemp1))*dcos(2*pi*dtemp2)
-    if(isnan(dcos(gauss)))lredo=.true.
+    if(ieee_is_nan(dcos(gauss)))lredo=.true.
   enddo
   
  end function gauss

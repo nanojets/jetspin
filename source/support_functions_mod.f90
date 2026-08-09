@@ -1,5 +1,7 @@
  
- module support_functions_mod
+module support_functions_mod
+
+ use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
  
 !***********************************************************************
 !     
@@ -668,8 +670,8 @@
   
   
 ! check if the curve center is not infinity 
-  if(isnan(curvcentersub(1)).or.isnan(curvcentersub(2)).or. &
-   isnan(curvcentersub(3)))then
+  if(ieee_is_nan(curvcentersub(1)).or.ieee_is_nan(curvcentersub(2)).or. &
+   ieee_is_nan(curvcentersub(3)))then
 !   if yes the segment is straight
     lstraightsub=.true.
     curvcentersub(:) = 0.d0
@@ -1077,5 +1079,4 @@
  end function upwall
  
  end module support_functions_mod
-
 

@@ -1,5 +1,7 @@
 module integrator_kv_ev_mod
 
+ use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
+
 !***********************************************************************
 ! Kelvin-Voigt integration with solvent evaporation.
 !
@@ -76,14 +78,14 @@ module integrator_kv_ev_mod
 
   ltestinst=.false.
   do i=inpjet,npjet
-    if(isnan(dcos(jetxx(i))))ltestinst=.true.
-    if(isnan(dcos(jetyy(i))))ltestinst=.true.
-    if(isnan(dcos(jetzz(i))))ltestinst=.true.
-    if(isnan(dcos(jetst(i))))ltestinst=.true.
-    if(isnan(dcos(jetvx(i))))ltestinst=.true.
-    if(isnan(dcos(jetvy(i))))ltestinst=.true.
-    if(isnan(dcos(jetvz(i))))ltestinst=.true.
-    if(isnan(dcos(jetve(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetxx(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetyy(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetzz(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetst(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetvx(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetvy(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetvz(i))))ltestinst=.true.
+    if(ieee_is_nan(dcos(jetve(i))))ltestinst=.true.
   enddo
   if(ltestinst)call error(14)
 

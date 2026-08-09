@@ -1,5 +1,7 @@
 
- module statistic_mod
+module statistic_mod
+
+ use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
  
 !***********************************************************************
 !     
@@ -208,7 +210,8 @@
   statdata(12)=dble(npjet)
   statdata(13)=meanicurr*chargescale/tao
   statdata(15)=meanimass*massscale/tao
-  if(isnan(meanemass) .or. isnan(meanecross) .or. isnan(meanecurr))then
+  if(ieee_is_nan(meanemass) .or. ieee_is_nan(meanecross) .or. &
+   ieee_is_nan(meanecurr))then
     statdata(14)=0.d0 
     statdata(16)=0.d0
     statdata(17)=0.d0
@@ -268,23 +271,23 @@
   call actual_form_electric_field(timesub,vext)
   statdata(45)=vext(1)*V0
   !viscosity at the collector
-  if(isnan(meanevisc))then
+  if(ieee_is_nan(meanevisc))then
     statdata(46)=0.d0
   else
     statdata(46)=meanevisc
   endif
   !elastic mod at the collector
-  if(isnan(meaneG))then
+  if(ieee_is_nan(meaneG))then
     statdata(47)=0.d0
   else
     statdata(47)=meaneG
   endif
-  if(isnan(meanemass) .or. isnan(meanevrat))then
+  if(ieee_is_nan(meanemass) .or. ieee_is_nan(meanevrat))then
     statdata(48)=0.d0
   else
     statdata(48)=(meanemass*(1.d0-meanevrat))*massscale/tao
   endif
-  if(isnan(meanevrat))then
+  if(ieee_is_nan(meanevrat))then
     statdata(49)=0.d0
   else
     statdata(49)=(1.d0-meanevrat)
@@ -1274,5 +1277,4 @@
  end subroutine compute_evrat_end
   
  end module statistic_mod
-
 

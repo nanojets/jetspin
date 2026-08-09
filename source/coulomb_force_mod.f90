@@ -12,6 +12,7 @@
 !***********************************************************************
  use version_mod,           only : idrank,mxrank,sum_world_darr, &
                              max_world_darr,sum_world_iarr
+ use accelerator_mod,       only : accelerator_enabled
  use error_mod
  use utility_mod,           only : Pi,modulvec,cross,dot,sig
  use nanojet_mod,           only : jetch,jetfr,h,inpjet,npjet,q,&
@@ -270,6 +271,11 @@
       endif
   
       ycf(0:ncoulforce,1:1)=0.d0
+
+      if(accelerator_enabled .and. mxrank==1)then
+        call compute_coulomelec_openacc_1d(ycf,yxx)
+        return
+      endif
       
 !     compute the Coulomb forces
       do ipoint=inpjet+idrank,npjet,mxrank
@@ -321,6 +327,11 @@
       endif
       
       ycf(0:ncoulforce,1:3)=0.d0
+
+      if(accelerator_enabled .and. mxrank==1)then
+        call compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz)
+        return
+      endif
       
 !     compute the Coulomb forces
       do ipoint=inpjet+idrank,npjet,mxrank
@@ -380,6 +391,126 @@
   return
   
  end subroutine compute_coulomelec
+
+ subroutine compute_coulomelec_openacc_1d(ycf,yxx)
+
+  implicit none
+
+  double precision, allocatable, intent(inout) :: ycf(:,:)
+  double precision, allocatable, intent(in) :: yxx(:)
+
+  integer :: ipoint,jpoint,ihigh
+  double precision :: distance,denominator,forcei,xmirror
+
+! The data region is deliberately explicit. During this first porting stage
+! the time integrator remains on the host, so coordinates enter and forces
+! leave the device at every force evaluation. Allocations remain present for
+! the complete kernel and are safe when the host capacity changes.
+!$acc data copyin(yxx(0:ncoulforce),jetch(0:ncoulforce), &
+!$acc& jetms(0:ncoulforce),jetfr(0:ncoulforce), &
+!$acc& coulcrossec(0:ncoulforce)) copy(ycf(0:ncoulforce,1:1))
+!$acc parallel loop gang vector private(distance,denominator,forcei,ihigh,xmirror)
+  do ipoint=inpjet,npjet
+    forcei=0.d0
+    if(.not.jetfr(ipoint))then
+      do jpoint=inpjet,npjet
+        if(jpoint==ipoint .or. jetfr(jpoint))cycle
+        distance=dabs(yxx(jpoint)-yxx(ipoint))
+        if(ldcutoff .and. distance>dcutoff)cycle
+        ihigh=max(ipoint,jpoint)
+        denominator=(distance+coulcrossec(ihigh))**2.d0
+        if(ipoint<jpoint)then
+          forcei=forcei+jetch(ipoint)*jetch(jpoint)*Q/ &
+           (jetms(ipoint)*denominator)
+        else
+          forcei=forcei-jetch(ipoint)*jetch(jpoint)*Q/ &
+           (jetms(ipoint)*denominator)
+        endif
+      enddo
+      if(lmirror)then
+        do jpoint=inpjet,npjet
+          if(jetfr(jpoint))cycle
+          xmirror=dabs(yxx(jpoint)-h)+h
+          distance=dabs(xmirror-yxx(ipoint))
+          denominator=(distance+coulcrossec(jpoint))**2.d0
+          forcei=forcei+jetch(ipoint)*jetch(jpoint)*Q/ &
+           (jetms(ipoint)*denominator)
+        enddo
+      endif
+    endif
+    ycf(ipoint,1)=forcei
+  enddo
+!$acc end parallel loop
+!$acc end data
+
+ end subroutine compute_coulomelec_openacc_1d
+
+ subroutine compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz)
+
+  implicit none
+
+  double precision, allocatable, intent(inout) :: ycf(:,:)
+  double precision, allocatable, intent(in) :: yxx(:),yyy(:),yzz(:)
+
+  integer :: ipoint,jpoint,ihigh
+  double precision :: dx,dy,dz,distance,denominator,coefficient
+  double precision :: forcex,forcey,forcez,xmirror
+
+!$acc data copyin(yxx(0:ncoulforce),yyy(0:ncoulforce), &
+!$acc& yzz(0:ncoulforce),jetch(0:ncoulforce),jetms(0:ncoulforce), &
+!$acc& jetfr(0:ncoulforce),coulcrossec(0:ncoulforce)) &
+!$acc& copy(ycf(0:ncoulforce,1:3))
+!$acc parallel loop gang vector private(dx,dy,dz,distance,denominator, &
+!$acc& coefficient,forcex,forcey,forcez,ihigh,xmirror)
+  do ipoint=inpjet,npjet
+    forcex=0.d0
+    forcey=0.d0
+    forcez=0.d0
+    if(.not.jetfr(ipoint))then
+      do jpoint=inpjet,npjet
+        if(jpoint==ipoint .or. jetfr(jpoint))cycle
+        dx=yxx(ipoint)-yxx(jpoint)
+        dy=yyy(ipoint)-yyy(jpoint)
+        dz=yzz(ipoint)-yzz(jpoint)
+        distance=dsqrt(dx*dx+dy*dy+dz*dz)
+        if(distance>1.d-30)then
+          ihigh=max(ipoint,jpoint)
+          denominator=(distance+coulcrossec(ihigh))**2.d0
+          coefficient=jetch(ipoint)*jetch(jpoint)*Q/ &
+           (jetms(ipoint)*denominator*distance)
+          forcex=forcex+coefficient*dx
+          forcey=forcey+coefficient*dy
+          forcez=forcez+coefficient*dz
+        endif
+      enddo
+      if(lmirror)then
+        do jpoint=inpjet,npjet
+          if(jetfr(jpoint))cycle
+          xmirror=dabs(yxx(jpoint)-h)+h
+          dx=yxx(ipoint)-xmirror
+          dy=yyy(ipoint)-yyy(jpoint)
+          dz=yzz(ipoint)-yzz(jpoint)
+          distance=dsqrt(dx*dx+dy*dy+dz*dz)
+          if(ldcutoff .and. distance>dcutoff)cycle
+          if(distance>1.d-30)then
+            denominator=(distance+coulcrossec(jpoint))**2.d0
+            coefficient=-jetch(ipoint)*jetch(jpoint)*Q/ &
+             (jetms(ipoint)*denominator*distance)
+            forcex=forcex+coefficient*dx
+            forcey=forcey+coefficient*dy
+            forcez=forcez+coefficient*dz
+          endif
+        enddo
+      endif
+    endif
+    ycf(ipoint,1)=forcex
+    ycf(ipoint,2)=forcey
+    ycf(ipoint,3)=forcez
+  enddo
+!$acc end parallel loop
+!$acc end data
+
+ end subroutine compute_coulomelec_openacc_3d
  
  subroutine compute_coulomelec_multistep(nstep,timesub,ycf,yxx,yyy,yzz)
   

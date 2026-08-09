@@ -12,10 +12,16 @@ EXE = $(BINROOT)/$(EX)
 SHELL=/bin/sh
 MPI_COMPAT_FLAG ?= -fallow-argument-mismatch
 MPIFC ?= mpif90
+NVFORTRAN ?= nvfortran
+GPUCC ?= 80
+CUDA_VERSION ?= 12.3
+OPENACC_GPU_FLAGS = -gpu=cc$(GPUCC),cuda$(CUDA_VERSION)
+ACCOBJ ?= host_accelerator_mod.o
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
 
-OBJ_MOD = serial_version_mod.o parallel_version_mod.o parse_mod.o error_mod.o \
+OBJ_MOD = serial_version_mod.o parallel_version_mod.o host_accelerator_mod.o \
+	openacc_accelerator_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
@@ -36,6 +42,10 @@ all:
 	@echo "intel                              "
 	@echo "intel-mpi                          "
 	@echo "intel-openmpi                      "
+	@echo "nvfortran                          "
+	@echo "nvfortran-mpi                      "
+	@echo "nvfortran-openacc                  "
+	@echo "nvfortran-openacc-host             "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -57,6 +67,10 @@ help:
 	@echo "intel                              "
 	@echo "intel-mpi                          "
 	@echo "intel-openmpi                      "
+	@echo "nvfortran                          "
+	@echo "nvfortran-mpi                      "
+	@echo "nvfortran-openacc                  "
+	@echo "nvfortran-openacc-host             "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -94,6 +108,34 @@ gfortran-mpi:
 	LDFLAGS="-O2 -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
+
+nvfortran:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O3 -c" \
+	LDFLAGS="-O3 -o" \
+	ACCOBJ=host_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
+
+nvfortran-mpi:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(MPIFC) \
+	FFLAGS="-O3 -c" \
+	LDFLAGS="-O3 -o" \
+	ACCOBJ=host_accelerator_mod.o TYPE=mpi \
+	EX=$(EX) BINROOT=$(BINROOT) mpi
+
+nvfortran-openacc:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
+	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
+	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
+
+nvfortran-openacc-host:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O2 -acc=host -Minfo=accel -c" \
+	LDFLAGS="-O2 -acc=host -o" \
+	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
 
 gfortran-mpidebugger:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(MPIFC) \
@@ -144,24 +186,24 @@ intel-mpidebugger:
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
-seq:serial_version_mod.o parse_mod.o error_mod.o utility_mod.o \
+seq:serial_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
-	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o parse_mod.o error_mod.o \
+	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
 	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 	
-mpi:parallel_version_mod.o parse_mod.o error_mod.o utility_mod.o \
+mpi:parallel_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
-	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o parse_mod.o error_mod.o \
+	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
@@ -173,6 +215,12 @@ serial_version_mod.o:serial_version_mod.f90
 	
 parallel_version_mod.o:parallel_version_mod.f90
 	$(FC) $(FFLAGS) parallel_version_mod.f90
+
+host_accelerator_mod.o:host_accelerator_mod.f90
+	$(FC) $(FFLAGS) host_accelerator_mod.f90
+
+openacc_accelerator_mod.o:openacc_accelerator_mod.f90
+	$(FC) $(FFLAGS) openacc_accelerator_mod.f90
 	
 parse_mod.o:parse_mod.f90
 	$(FC) $(FFLAGS) parse_mod.f90
@@ -233,5 +281,3 @@ main.o:main.f90
 
 clean:
 	rm -rf $(OBJ_MOD) $(OBJ_SRC) *.mod
-
-

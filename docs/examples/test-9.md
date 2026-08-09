@@ -204,8 +204,23 @@ A representative A30 run took `2.468580 s` for the complete loop. Statistics
 took `0.056676 s`; this is mostly the launch overhead of the small reduction
 kernels rather than data transfer. The trajectory passed the unchanged A30
 baseline with `rtol=1e-6` and `atol=1e-9`; the worst normalized difference was
-`7.97e-5`. A future optimization can fuse these reductions with the final RK
-kernel to avoid separate launches.
+`7.97e-5`. This measurement is the reference for the following fusion step.
+
+## Fused RK-statistics milestone
+
+The path-length and maximum-stress reductions are subsequently fused with the
+final RK4 state update. Each thread reconstructs the updated position of its
+next bead from the same RK coefficients, avoiding a neighbour race without an
+extra state-update kernel. Two small follow-up kernels retain the deterministic
+last-index rule for equal maximum stresses.
+
+In a representative A30 run, the statistics region decreased from
+`0.056676 s` to `0.036373 s`, and the complete loop took `2.457896 s`. An
+extended comparison that also printed `lp`, `mxst`, and `mxsx` matched the
+preceding commit exactly for maximum stress and its position. Path length
+differed by at most `2e-8 cm` because of reduction ordering. The standard Test
+9 trajectory still passed the A30 baseline with a worst normalized difference
+of `7.97e-5`.
 
 ## Versioned numerical records
 

@@ -120,3 +120,13 @@ restart, rather than after every timestep. A representative A30 run took
 small statistic kernels. The trajectory passed the unchanged A30 baseline
 with relative tolerance $10^{-6}$ and absolute tolerance $10^{-9}$; the worst
 normalized difference was $7.97\,10^{-5}$.
+
+The next milestone fuses the path-length and maximum-stress reductions with
+the final Runge--Kutta state update. Each device thread reconstructs the
+updated position of the next bead from the same Runge--Kutta coefficients,
+avoiding a neighbour race. Two small follow-up kernels preserve the rule that
+the last bead index wins when maximum stresses are equal. In a representative
+A30 run, the statistics region decreased from 0.056676 s to 0.036373 s, and
+the complete loop took 2.457896 s. An extended comparison matched maximum
+stress and its position exactly; path length differed by at most
+$2\,10^{-8}$ cm because of reduction ordering.

@@ -30,7 +30,10 @@ module integrator_mod
                          prof_rk_update
 #ifdef _OPENACC
  use accelerator_mod, only : accelerator_eom3_stage, &
-                         accelerator_set_persistent
+                         accelerator_set_persistent, &
+                         accelerator_rk4_final_statistics
+ use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
+                         maxstressposx
 #endif
  use electric_field_mod, only : nfieldtype
  use coulomb_force_mod, only : smooth_charge,restore_charge, &
@@ -1160,29 +1163,13 @@ module integrator_mod
       call profiling_start(prof_rk_update)
       if(persistent_acc)then
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
-!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f3xx,f3yy,f3zz, &
-!$acc& f3st,f3vx,f3vy,f3vz,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz) &
-!$acc& private(j)
-        do ipoint=mystart,myend
-          j=ipoint-mystart
-          jetxx(ipoint) = jetxx(ipoint) + (h/6.d0)*(f1xx(j)+ &
-           2.d0*(f2xx(j)+f3xx(j))+f4xx(j))
-          jetyy(ipoint) = jetyy(ipoint) + (h/6.d0)*(f1yy(j)+ &
-           2.d0*(f2yy(j)+f3yy(j))+f4yy(j))
-          jetzz(ipoint) = jetzz(ipoint) + (h/6.d0)*(f1zz(j)+ &
-           2.d0*(f2zz(j)+f3zz(j))+f4zz(j))
-          jetst(ipoint) = jetst(ipoint) + (h/6.d0)*(f1st(j)+ &
-           2.d0*(f2st(j)+f3st(j))+f4st(j))
-          jetvx(ipoint) = jetvx(ipoint) + (h/6.d0)*(f1vx(j)+ &
-           2.d0*(f2vx(j)+f3vx(j))+f4vx(j))
-          jetvy(ipoint) = jetvy(ipoint) + (h/6.d0)*(f1vy(j)+ &
-           2.d0*(f2vy(j)+f3vy(j))+f4vy(j))
-          jetvz(ipoint) = jetvz(ipoint) + (h/6.d0)*(f1vz(j)+ &
-           2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
-        enddo
-!$acc end parallel loop
+        call accelerator_rk4_final_statistics(mystart,myend,h, &
+         jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+         f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+         f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+         f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz, &
+         f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz, &
+         counterlpath,ncounterlpath,maxstress,maxstressposx)
 #endif
       else
         do ipoint=mystart,myend

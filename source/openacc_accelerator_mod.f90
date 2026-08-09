@@ -17,8 +17,89 @@ module accelerator_mod
  public :: accelerator_store_statistics
  public :: accelerator_update_host_statistics
  public :: accelerator_update_device_statistics
+ public :: accelerator_rk4_final_statistics
 
 contains
+
+ subroutine accelerator_rk4_final_statistics(firstpoint,lastpoint,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+   f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+   f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+   f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz, &
+   f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz, &
+   counterlpath,ncounterlpath,maxstress,maxstressposx)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint
+  integer, intent(inout) :: ncounterlpath
+  double precision, intent(in) :: h
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
+  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1st(0:)
+  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
+  double precision, intent(in) :: f2xx(0:),f2yy(0:),f2zz(0:),f2st(0:)
+  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
+  double precision, intent(in) :: f3xx(0:),f3yy(0:),f3zz(0:),f3st(0:)
+  double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
+  double precision, intent(in) :: f4xx(0:),f4yy(0:),f4zz(0:),f4st(0:)
+  double precision, intent(in) :: f4vx(0:),f4vy(0:),f4vz(0:)
+  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
+  integer :: ipoint,j,jn
+  double precision :: scale,newxx,newyy,newzz,newst,nextxx,nextyy,nextzz
+  double precision :: dx,dy,dz
+
+  if(.not.accelerator_persistent)return
+#ifdef _OPENACC
+  if(.not.accelerator_statistics_mapped)then
+!$acc enter data copyin(counterlpath,ncounterlpath,maxstress, &
+!$acc& maxstressposx,statistics_step_max,statistics_step_index)
+    accelerator_statistics_mapped=.true.
+  endif
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
+!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f3xx,f3yy,f3zz, &
+!$acc& f3st,f3vx,f3vy,f3vz,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz, &
+!$acc& counterlpath,statistics_step_max) &
+!$acc& private(j,jn,scale,newxx,newyy,newzz,newst,nextxx,nextyy, &
+!$acc& nextzz,dx,dy,dz) reduction(+:counterlpath) &
+!$acc& reduction(max:statistics_step_max)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    scale=h/6.d0
+    newxx=jetxx(ipoint)+scale*(f1xx(j)+2.d0*(f2xx(j)+f3xx(j))+f4xx(j))
+    newyy=jetyy(ipoint)+scale*(f1yy(j)+2.d0*(f2yy(j)+f3yy(j))+f4yy(j))
+    newzz=jetzz(ipoint)+scale*(f1zz(j)+2.d0*(f2zz(j)+f3zz(j))+f4zz(j))
+    newst=jetst(ipoint)+scale*(f1st(j)+2.d0*(f2st(j)+f3st(j))+f4st(j))
+    if(ipoint<lastpoint)then
+      jn=j+1
+      nextxx=jetxx(ipoint+1)+scale*(f1xx(jn)+ &
+       2.d0*(f2xx(jn)+f3xx(jn))+f4xx(jn))
+      nextyy=jetyy(ipoint+1)+scale*(f1yy(jn)+ &
+       2.d0*(f2yy(jn)+f3yy(jn))+f4yy(jn))
+      nextzz=jetzz(ipoint+1)+scale*(f1zz(jn)+ &
+       2.d0*(f2zz(jn)+f3zz(jn))+f4zz(jn))
+      dx=newxx-nextxx
+      dy=newyy-nextyy
+      dz=newzz-nextzz
+      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
+    endif
+    statistics_step_max=max(statistics_step_max,newst)
+    jetxx(ipoint)=newxx
+    jetyy(ipoint)=newyy
+    jetzz(ipoint)=newzz
+    jetst(ipoint)=newst
+    jetvx(ipoint)=jetvx(ipoint)+scale*(f1vx(j)+ &
+     2.d0*(f2vx(j)+f3vx(j))+f4vx(j))
+    jetvy(ipoint)=jetvy(ipoint)+scale*(f1vy(j)+ &
+     2.d0*(f2vy(j)+f3vy(j))+f4vy(j))
+    jetvz(ipoint)=jetvz(ipoint)+scale*(f1vz(j)+ &
+     2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+  return
+ end subroutine accelerator_rk4_final_statistics
 
  subroutine accelerator_set_persistent(enabled)
   implicit none
@@ -54,30 +135,9 @@ contains
   double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
   double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
   integer :: ipoint
-  double precision :: dx,dy,dz
 
   if(.not.accelerator_persistent)return
 #ifdef _OPENACC
-  if(.not.accelerator_statistics_mapped)then
-!$acc enter data copyin(counterlpath,ncounterlpath,maxstress, &
-!$acc& maxstressposx,statistics_step_max,statistics_step_index)
-    accelerator_statistics_mapped=.true.
-  endif
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
-!$acc& counterlpath,statistics_step_max) private(dx,dy,dz) &
-!$acc& reduction(+:counterlpath) reduction(max:statistics_step_max)
-#endif
-  do ipoint=inpjet,npjet
-    if(ipoint<npjet)then
-      dx=jetxx(ipoint)-jetxx(ipoint+1)
-      dy=jetyy(ipoint)-jetyy(ipoint+1)
-      dz=jetzz(ipoint)-jetzz(ipoint+1)
-      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
-    endif
-    statistics_step_max=max(statistics_step_max,jetst(ipoint))
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
 !$acc parallel loop gang vector present(jetst,statistics_step_max, &
 !$acc& statistics_step_index) reduction(max:statistics_step_index)
 #endif

@@ -76,8 +76,10 @@ Each Coulomb stage computes its cross sections on the device; EOM consumes the
 device Coulomb force directly, and all four RK updates execute on the device.
 The host no longer receives stage intermediates or Coulomb forces.
 
-The per-step path-length and maximum-stress statistics are accumulated on the
-device. Their scalar accumulators also remain device resident. The seven
+The per-step path-length and maximum-stress reductions are fused with the
+final RK4 state-update kernel. Their scalar accumulators also remain device
+resident. A small follow-up kernel preserves the CPU rule that the last bead
+index wins when several beads share the maximum stress. The seven
 coordinate, stress, and velocity arrays are now updated on the host only when
 `compute_statistic` produces scheduled output and once before the final
 restart. With the Test 9 cadence this reduces full-state synchronization from
@@ -115,8 +117,8 @@ regression above and cannot establish GPU performance.
 ## Next porting stages
 
 1. Port the evaporation-specific direct Coulomb kernel.
-2. Fuse the Test 9 statistic reductions with an existing integration kernel
-   to remove their small-kernel launch overhead.
+2. Investigate packing the maximum stress and bead index into one deterministic
+   reduction so that its two follow-up kernels can also be removed.
 3. Extend persistent equation-of-motion and RK support beyond the fixed Test
    9 gate.
 4. Add explicit device teardown/recreation hooks around capacity changes and

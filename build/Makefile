@@ -277,7 +277,7 @@ eom_ev_mod.o: eom_ev_mod.f90
 driver_eom_mod.o: driver_eom_mod.f90
 	$(FC) $(FFLAGS) driver_eom_mod.f90
 
-integrator_mod.o:integrator_mod.f90
+integrator_mod.o:integrator_mod.f90 statistic_mod.o
 	$(FC) $(FFLAGS) $(FPPFLAGS) integrator_mod.f90
 
 integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90

@@ -12,7 +12,7 @@
 !     
 !***********************************************************************
  
- use version_mod, only : idrank
+ use version_mod, only : idrank,bcast_world_darr
  
  implicit none
  
@@ -28,6 +28,8 @@
  double precision, public, parameter :: & 
   Pi=3.141592653589793238462643383279502884d0
  double precision, allocatable,save :: wienerlist(:)
+ double precision, allocatable,save :: gaussianbuffer(:)
+ integer,save :: ngaussianbuffer=-1
  double precision,save :: hwiener
  integer,save :: winenernodes
  
@@ -35,6 +37,7 @@
  public :: allocate_array_ibuffservice
  public :: allocate_array_buffservice
  public :: init_random_seed,gauss,wiener_process1,wiener_process2,wiener
+ public :: prepare_gaussian_buffer,gaussian_buffer_value
  public :: modulvec
  public :: dot
  public :: cross
@@ -216,7 +219,71 @@
     if(isnan(dcos(gauss)))lredo=.true.
   enddo
   
-  end function gauss
+ end function gauss
+
+ subroutine prepare_gaussian_buffer(inpnt,npnt,mxpnt,ndim)
+
+!***********************************************************************
+!
+!     Generate one rank-independent block of Gaussian random numbers.
+!     Rank 0 advances the pseudo-random sequence in global bead order and
+!     broadcasts the complete block.  Every rank can consequently address
+!     a value by global bead index, component, and draw number without the
+!     result depending on the MPI domain decomposition.
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: inpnt,npnt,mxpnt,ndim
+  integer :: ipoint,icomponent,idraw,nvalues
+
+  if(mxpnt<0)stop "Invalid Gaussian-buffer capacity"
+  if(ndim<1 .or. ndim>3)stop "Invalid Gaussian-buffer dimension"
+
+  if((.not.allocated(gaussianbuffer)) .or. mxpnt/=ngaussianbuffer)then
+    if(allocated(gaussianbuffer))deallocate(gaussianbuffer)
+    allocate(gaussianbuffer(0:(mxpnt+1)*3*2-1))
+    ngaussianbuffer=mxpnt
+  endif
+
+  gaussianbuffer(:)=0.d0
+  if(idrank==0)then
+    do ipoint=inpnt,npnt
+      do icomponent=1,ndim
+        do idraw=1,2
+          gaussianbuffer(ipoint+(mxpnt+1)*((icomponent-1)+ &
+           3*(idraw-1)))=gauss()
+        enddo
+      enddo
+    enddo
+  endif
+
+  nvalues=(mxpnt+1)*3*2
+  call bcast_world_darr(gaussianbuffer,nvalues)
+
+  return
+
+ end subroutine prepare_gaussian_buffer
+
+ function gaussian_buffer_value(ipoint,icomponent,idraw)
+
+  implicit none
+
+  integer, intent(in) :: ipoint,icomponent,idraw
+  double precision :: gaussian_buffer_value
+
+  if(.not.allocated(gaussianbuffer))stop "Gaussian buffer is not prepared"
+  if(ipoint<0 .or. ipoint>ngaussianbuffer)stop "Invalid Gaussian bead index"
+  if(icomponent<1 .or. icomponent>3)stop "Invalid Gaussian component"
+  if(idraw<1 .or. idraw>2)stop "Invalid Gaussian draw index"
+
+  gaussian_buffer_value=gaussianbuffer(ipoint+(ngaussianbuffer+1)* &
+   ((icomponent-1)+3*(idraw-1)))
+
+  return
+
+ end function gaussian_buffer_value
   
   subroutine wiener_process1(inpnt,npnt,nvar,ndim,h,fwienersub1)
   
@@ -530,5 +597,3 @@
  end subroutine get_prntime
  
  end module utility_mod
-
-

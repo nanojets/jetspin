@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Regression guard for the concentration-dependent Kelvin-Voigt extension."""
-from __future__ import annotations
 import argparse
 import math
 import re

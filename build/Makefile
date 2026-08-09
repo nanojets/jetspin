@@ -11,6 +11,7 @@ EX=main.x
 EXE = $(BINROOT)/$(EX)
 SHELL=/bin/sh
 MPI_COMPAT_FLAG ?= -fallow-argument-mismatch
+MPIFC ?= mpif90
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
 
@@ -88,14 +89,14 @@ gfortran:
 	EX=$(EX) BINROOT=$(BINROOT) seq
 	
 gfortran-mpi:
-	$(MAKE) -f $(MAKEFILE_PATH) FC=mpif90 \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(MPIFC) \
 	FFLAGS="-O2 $(MPI_COMPAT_FLAG) -c" \
 	LDFLAGS="-O2 -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
 gfortran-mpidebugger:
-	$(MAKE) -f $(MAKEFILE_PATH) FC=mpif90 \
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(MPIFC) \
 	FFLAGS="-O0 -g -fcheck=all $(MPI_COMPAT_FLAG) -c" \
 	LDFLAGS="-O0 -g -fcheck=all -o" \
 	TYPE=mpi \
@@ -232,6 +233,5 @@ main.o:main.f90
 
 clean:
 	rm -rf $(OBJ_MOD) $(OBJ_SRC) *.mod
-
 
 

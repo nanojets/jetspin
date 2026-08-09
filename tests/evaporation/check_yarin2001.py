@@ -8,8 +8,6 @@ JETSPIN run log can be supplied to verify the actual run-time fallback value
 of the solvent diffusivity.
 """
 
-from __future__ import annotations
-
 import argparse
 import math
 import re

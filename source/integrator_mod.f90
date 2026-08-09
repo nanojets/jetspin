@@ -14,7 +14,8 @@
  use version_mod,       only : mystart,myend,mxchunk,sum_world_darr, &
                          set_chunk,set_mxchunk,idrank
  use error_mod,         only : error,warning
- use utility_mod,       only : gauss,wiener_process1,wiener_process2
+ use utility_mod,       only : wiener_process1,wiener_process2, &
+                         prepare_gaussian_buffer,gaussian_buffer_value
  use nanojet_mod,       only : doallocate,mxnpjet,npjet,inpjet,systype,&
                          jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetst, &
                          jetms,jetch,jetvl,compute_posnoinserted, &
@@ -1215,6 +1216,12 @@
   dsqrh=dsqrt(dabs(h))
   tsqh=dsqrh**3.d0
   prefactor1=0.5d0/dsqrh
+
+  if(systype==1)then
+    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,1)
+  else
+    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,3)
+  endif
   
 ! select the proper system type
   select case(systype)
@@ -1277,8 +1284,8 @@
         call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,k, &
          f3stocvx,f3stocvy,f3stocvz)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,1,1)
+        u2=gaussian_buffer_value(ipoint,1,2)
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
           
@@ -1429,16 +1436,16 @@
         call xpsys(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,timesub,k, &
          f3stocvx,f3stocvy,f3stocvz)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,1,1)
+        u2=gaussian_buffer_value(ipoint,1,2)
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,2,1)
+        u2=gaussian_buffer_value(ipoint,2,2)
         ww(2)=(dsqrh*u1)
         zz(2)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,3,1)
+        u2=gaussian_buffer_value(ipoint,3,2)
         ww(3)=(dsqrh*u1)
         zz(3)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
 	    
@@ -3818,7 +3825,13 @@
   dsqrh=dsqrt(dabs(h))
   tsqh=dsqrh**3.d0
   prefactor1=0.5d0/dsqrh
-  
+
+  if(systype==1)then
+    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,1)
+  else
+    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,3)
+  endif
+
 ! select the proper system type
   select case(systype)
     case(1)
@@ -3893,8 +3906,8 @@
         call xpsys_ev(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          y2ev,coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
          timesub,k,f3stocvx,f3stocvy,f3stocvz)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,1,1)
+        u2=gaussian_buffer_value(ipoint,1,2)
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
           
@@ -4072,16 +4085,16 @@
         call xpsys_ev(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          y2ev,coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
          timesub,k,f3stocvx,f3stocvy,f3stocvz)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,1,1)
+        u2=gaussian_buffer_value(ipoint,1,2)
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,2,1)
+        u2=gaussian_buffer_value(ipoint,2,2)
         ww(2)=(dsqrh*u1)
         zz(2)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gauss()
-        u2=gauss()
+        u1=gaussian_buffer_value(ipoint,3,1)
+        u2=gaussian_buffer_value(ipoint,3,2)
         ww(3)=(dsqrh*u1)
         zz(3)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
 	    

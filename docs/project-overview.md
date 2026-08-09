@@ -64,6 +64,9 @@ workspace-resizing invariants, see
 The adaptive remeshing algorithm, conservation rules, anchors, and
 refinement-specific validation are covered by the
 [dynamic-refinement guide](introduction/dynamic-refinement.md).
+Stochastic stream ownership, Gaussian broadcasts, and reproducibility limits
+are documented in
+[random numbers and MPI reproducibility](introduction/random-numbers.md).
 
 ## Repository map
 
@@ -74,6 +77,7 @@ refinement-specific validation are covered by the
 | `execute/` | Default runtime working directory |
 | `examples/` | Eight reference `input.dat` cases |
 | `tests/smoke/` | Serial, runtime-debug, and MPI smoke suite |
+| `tests/regression/` | Eight-case numerical baselines and serial/MPI comparisons |
 | `tests/evaporation/` | Yarin and Kelvin–Voigt evaporation checks |
 | `docs/` | Concise operational Markdown documentation |
 | `manual/` | Scientific LaTeX sources and tracked PDF |
@@ -106,13 +110,19 @@ scope. The standard pre-merge set is:
 tests/smoke/run.sh serial
 tests/smoke/run.sh debug
 tests/smoke/run.sh mpi
+tests/regression/run.sh
 make -C manual
 ```
 
 The serial and debug suites exercise all eight examples plus evaporation,
 Kelvin–Voigt, and dynamic-refinement regression paths. MPI mode builds the
 parallel implementation and runs a representative case on two processes.
-GitHub Actions mirrors these checks.
+The numerical regression suite compares 1,000-step serial runs of all eight
+cases with versioned baselines, then compares two-rank MPI output with the
+matching serial run. Its baselines, tolerances, stochastic coverage, and
+failure workflow are described in the
+[numerical-regression guide](introduction/numerical-regression.md). GitHub
+Actions mirrors the smoke checks.
 
 ## Documentation policy
 

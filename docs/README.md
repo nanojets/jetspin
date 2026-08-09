@@ -18,9 +18,11 @@ and documentation-maintenance rules, see the
 2. [Understand MPI parallelization](introduction/parallelization.md)
 3. [Understand dynamic allocation and bead indexing](introduction/dynamic-allocation.md)
 4. [Understand dynamic refinement](introduction/dynamic-refinement.md)
-5. [Run JETSPIN](introduction/running.md)
-6. [Prepare an input file](data/input.md)
-7. [Read the output files](data/output.md)
+5. [Understand random numbers and MPI reproducibility](introduction/random-numbers.md)
+6. [Run numerical regression tests](introduction/numerical-regression.md)
+7. [Run JETSPIN](introduction/running.md)
+8. [Prepare an input file](data/input.md)
+9. [Read the output files](data/output.md)
 
 ## Example simulations
 

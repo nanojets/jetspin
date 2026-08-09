@@ -14,7 +14,7 @@ tests/smoke/run.sh mpi
 ```
 
 The script builds the serial executable with `gfortran` in a temporary
-directory, then runs shortened copies of all seven example inputs. Each
+directory, then runs shortened copies of all eight example inputs. Each
 simulation executes 1,000 integration steps while retaining its original
 case-specific directives.
 

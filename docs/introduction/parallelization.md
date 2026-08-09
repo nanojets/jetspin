@@ -159,6 +159,9 @@ Changes to MPI-sensitive code should preserve the following rules:
   separate output buffer.
 - Fundamental state must be identical on all ranks before a calculation that
   reads non-local bead data.
+- Random values that affect replicated state must be generated in a global
+  order and addressed independently of rank ownership; see
+  [random numbers and MPI reproducibility](random-numbers.md).
 - Changes to bead count or capacity must update chunk metadata and all local
   workspaces.
 - New replicated state variables must be included in restart, refinement,

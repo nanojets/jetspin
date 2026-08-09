@@ -21,8 +21,143 @@ module accelerator_mod
  public :: accelerator_update_host_statistics
  public :: accelerator_update_device_statistics
  public :: accelerator_rk4_final_statistics
+ public :: accelerator_euler_final_statistics
+ public :: accelerator_rk2_final_statistics
 
 contains
+
+ subroutine accelerator_euler_final_statistics(firstpoint,lastpoint,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,counterlpath,ncounterlpath, &
+   maxstress,maxstressposx)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint
+  integer, intent(inout) :: ncounterlpath
+  double precision, intent(in) :: h
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
+  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(in) :: fxx(0:),fyy(0:),fzz(0:),fst(0:)
+  double precision, intent(in) :: fvx(0:),fvy(0:),fvz(0:)
+  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
+  integer :: ipoint,j,jn
+  double precision :: newxx,newyy,newzz,newst,nextxx,nextyy,nextzz,dx,dy,dz
+
+  if(.not.accelerator_persistent)return
+  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress, &
+   maxstressposx)
+#ifdef _OPENACC
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
+!$acc& jetvx,jetvy,jetvz,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
+!$acc& counterlpath,statistics_step_max) &
+!$acc& private(j,jn,newxx,newyy,newzz,newst,nextxx,nextyy,nextzz, &
+!$acc& dx,dy,dz) reduction(+:counterlpath) &
+!$acc& reduction(max:statistics_step_max)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    newxx=jetxx(ipoint)+h*fxx(j)
+    newyy=jetyy(ipoint)+h*fyy(j)
+    newzz=jetzz(ipoint)+h*fzz(j)
+    newst=jetst(ipoint)+h*fst(j)
+    if(ipoint<lastpoint)then
+      jn=j+1
+      nextxx=jetxx(ipoint+1)+h*fxx(jn)
+      nextyy=jetyy(ipoint+1)+h*fyy(jn)
+      nextzz=jetzz(ipoint+1)+h*fzz(jn)
+      dx=newxx-nextxx
+      dy=newyy-nextyy
+      dz=newzz-nextzz
+      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
+    endif
+    statistics_step_max=max(statistics_step_max,newst)
+    jetxx(ipoint)=newxx
+    jetyy(ipoint)=newyy
+    jetzz(ipoint)=newzz
+    jetst(ipoint)=newst
+    jetvx(ipoint)=jetvx(ipoint)+h*fvx(j)
+    jetvy(ipoint)=jetvy(ipoint)+h*fvy(j)
+    jetvz(ipoint)=jetvz(ipoint)+h*fvz(j)
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+ end subroutine accelerator_euler_final_statistics
+
+ subroutine accelerator_rk2_final_statistics(firstpoint,lastpoint,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+   f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+   f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+   counterlpath,ncounterlpath,maxstress,maxstressposx)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint
+  integer, intent(inout) :: ncounterlpath
+  double precision, intent(in) :: h
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
+  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1st(0:)
+  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
+  double precision, intent(in) :: f2xx(0:),f2yy(0:),f2zz(0:),f2st(0:)
+  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
+  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
+  integer :: ipoint,j,jn
+  double precision :: scale,newxx,newyy,newzz,newst,nextxx,nextyy,nextzz
+  double precision :: dx,dy,dz
+
+  if(.not.accelerator_persistent)return
+  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress, &
+   maxstressposx)
+#ifdef _OPENACC
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
+!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,counterlpath, &
+!$acc& statistics_step_max) private(j,jn,scale,newxx,newyy,newzz, &
+!$acc& newst,nextxx,nextyy,nextzz,dx,dy,dz) &
+!$acc& reduction(+:counterlpath) reduction(max:statistics_step_max)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    scale=h/2.d0
+    newxx=jetxx(ipoint)+scale*(f1xx(j)+f2xx(j))
+    newyy=jetyy(ipoint)+scale*(f1yy(j)+f2yy(j))
+    newzz=jetzz(ipoint)+scale*(f1zz(j)+f2zz(j))
+    newst=jetst(ipoint)+scale*(f1st(j)+f2st(j))
+    if(ipoint<lastpoint)then
+      jn=j+1
+      nextxx=jetxx(ipoint+1)+scale*(f1xx(jn)+f2xx(jn))
+      nextyy=jetyy(ipoint+1)+scale*(f1yy(jn)+f2yy(jn))
+      nextzz=jetzz(ipoint+1)+scale*(f1zz(jn)+f2zz(jn))
+      dx=newxx-nextxx
+      dy=newyy-nextyy
+      dz=newzz-nextzz
+      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
+    endif
+    statistics_step_max=max(statistics_step_max,newst)
+    jetxx(ipoint)=newxx
+    jetyy(ipoint)=newyy
+    jetzz(ipoint)=newzz
+    jetst(ipoint)=newst
+    jetvx(ipoint)=jetvx(ipoint)+scale*(f1vx(j)+f2vx(j))
+    jetvy(ipoint)=jetvy(ipoint)+scale*(f1vy(j)+f2vy(j))
+    jetvz(ipoint)=jetvz(ipoint)+scale*(f1vz(j)+f2vz(j))
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+ end subroutine accelerator_rk2_final_statistics
+
+ subroutine accelerator_map_statistics(counterlpath,ncounterlpath, &
+   maxstress,maxstressposx)
+  implicit none
+  integer, intent(in) :: ncounterlpath
+  double precision, intent(in) :: counterlpath,maxstress,maxstressposx
+#ifdef _OPENACC
+  if(.not.accelerator_statistics_mapped)then
+!$acc enter data copyin(counterlpath,ncounterlpath,maxstress, &
+!$acc& maxstressposx,statistics_step_max,statistics_step_index)
+    accelerator_statistics_mapped=.true.
+  endif
+#endif
+ end subroutine accelerator_map_statistics
 
  subroutine accelerator_rk4_final_statistics(firstpoint,lastpoint,h, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
@@ -51,12 +186,9 @@ contains
   double precision :: dx,dy,dz
 
   if(.not.accelerator_persistent)return
+  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress, &
+   maxstressposx)
 #ifdef _OPENACC
-  if(.not.accelerator_statistics_mapped)then
-!$acc enter data copyin(counterlpath,ncounterlpath,maxstress, &
-!$acc& maxstressposx,statistics_step_max,statistics_step_index)
-    accelerator_statistics_mapped=.true.
-  endif
 !$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
 !$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
 !$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f3xx,f3yy,f3zz, &

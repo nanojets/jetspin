@@ -49,10 +49,10 @@ The implementation preserves the existing model conventions, including:
 - the one-dimensional distance cutoff;
 - mirror-charge contributions and their three-dimensional cutoff.
 
-The three-dimensional RK4 equation-of-motion force assembly is also offloaded
-for the fixed Test 9 configuration: insertion state fixed, air drag enabled,
+The three-dimensional equation-of-motion force assembly is also offloaded for
+the fixed Tests 9--11 configuration: insertion state fixed, air drag enabled,
 constant axial field, and no Lorentz or upper-wall force. One kernel is
-launched per RK stage. Its local three-point curvature calculation is also
+launched per integrator stage. Its local three-point curvature calculation is also
 device-side: an iteration reads the current bead and its two neighbours. No
 host curvature array is built or transferred. Disabling fused multiply-add
 preserves the accepted trajectory for the initially straight geometry. Any
@@ -64,20 +64,20 @@ Coordinates, bead properties, cross sections, and the Coulomb force array are
 named explicitly in each OpenACC data region. No managed/unified-memory build
 mode is used.
 
-Configurations outside the fixed Test 9 gate continue to use separate
+Configurations outside the fixed Tests 9--11 gate continue to use separate
 call-scoped Coulomb and EOM data regions. This remains safe when insertion,
 removal, or dynamic refinement changes `mxnpjet`: the next call maps the new
 host allocation and capacity.
 
-Test 9 now uses an explicit persistent-data path. The primary jet state,
-static bead properties, Coulomb force, four sets of EOM derivatives, and RK4
-intermediate arrays are mapped once and remain resident across all timesteps.
+Tests 9--11 use an explicit persistent-data path. The primary jet state,
+static bead properties, Coulomb force, EOM derivatives, and integrator scratch
+arrays are mapped once and remain resident across all timesteps.
 Each Coulomb stage computes its cross sections on the device; EOM consumes the
-device Coulomb force directly, and all four RK updates execute on the device.
+device Coulomb force directly, and all integrator updates execute on the device.
 The host no longer receives stage intermediates or Coulomb forces.
 
-The per-step path-length and maximum-stress reductions are fused with the
-final RK4 state-update kernel. Their scalar accumulators also remain device
+The per-step path-length and maximum-stress reductions are fused with each
+integrator's final state-update kernel. Their scalar accumulators also remain device
 resident. A small follow-up kernel preserves the CPU rule that the last bead
 index wins when several beads share the maximum stress. For ordinary
 statistical output, only the seven state values of the selected bead and four
@@ -107,10 +107,9 @@ tests/regression/run.sh openacc
 
 The standard 1,000-step regression validation on an NVIDIA A30 passed all
 eight normal regression cases; the written observables matched the NVFORTRAN
-CPU results at their output precision. The separate 1,000-bead Test 9
-trajectory also passes its versioned A30 baseline with `rtol=1e-6` and
-`atol=1e-9`; see the [Test 9 benchmark record](../examples/test-9.md) for the
-measured timings and worst observed difference.
+CPU results at their output precision. The separate 1,000-bead RK4, Euler, and
+RK2 trajectories also pass their versioned A30 baselines with `rtol=1e-6` and
+`atol=1e-9`; see the [benchmark index](../examples/README.md) for their records.
 
 `nvfortran-openacc-host` is useful for checking the accelerated control path
 and dynamic allocation without a GPU. It does not replace the real-device
@@ -121,8 +120,8 @@ regression above and cannot establish GPU performance.
 1. Port the evaporation-specific direct Coulomb kernel.
 2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
-3. Extend persistent equation-of-motion and RK support beyond the fixed Test
-   9 gate.
+3. Extend persistent equation-of-motion and integrator support beyond the
+   fixed Tests 9--11 gate, then port the Platen stochastic integrator.
 4. Add explicit device teardown/recreation hooks around capacity changes and
    synchronize only topology metadata and requested output fields.
 5. Port the local Akima coefficient loops, replace the interpolation interval

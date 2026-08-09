@@ -70,13 +70,13 @@ tests/smoke/run.sh mpi
 The same modes run in GitHub Actions, together with compilation of the
 LaTeX manual.
 
-The longer [Test Case 9 benchmark](docs/examples/test-9.md) is intentionally
-excluded from the smoke and numerical-regression suites. It provides a fixed
-1,000-bead workload for CPU/GPU performance measurements and optional
-region-level profiling during OpenACC development. The current single-GPU
-milestone offloads direct Coulomb interactions and, for the fixed Test 9
-configuration, the three-dimensional equation-of-motion assembly including
-its local curvature calculation. Test 9 keeps its state and RK4 scratch data
+The longer [Test Cases 9--11](docs/examples/README.md) are intentionally
+excluded from the smoke and numerical-regression suites. They provide fixed
+1,000-bead RK4, Euler, and RK2 workloads for CPU/GPU performance measurements
+and optional region-level profiling during OpenACC development. The current
+single-GPU milestone offloads direct Coulomb interactions and, for these fixed
+configurations, the three-dimensional equation-of-motion assembly including
+its local curvature calculation. State and integrator scratch data remain
 resident on the device across timesteps. See the
 [OpenACC porting status](docs/introduction/openacc.md) for supported
 configurations, numerical constraints, and remaining work.

@@ -1,0 +1,26 @@
+\section{Test Cases 10 and 11: Euler and RK2 GPU benchmarks}
+
+Test Cases 10 and 11 retain the fixed 1,000-bead geometry, physical
+parameters, constant axial electric field, and 1,000-step duration of Test
+Case 9. Test Case 10 selects the explicit Euler integrator, while Test Case 11
+selects the second-order Heun (RK2) integrator. Their inputs are stored in
+\texttt{examples/input-10/input.dat} and
+\texttt{examples/input-11/input.dat}.
+
+Both integrators have an explicit persistent OpenACC path for this fixed
+configuration. Primary state, Coulomb force, equation-of-motion derivatives,
+and intermediate arrays remain on the accelerator between timesteps. The
+final state update is fused with the path-length and maximum-stress
+reductions. Ordinary statistical samples transfer only the selected bead and
+reduced scalars; complete state is synchronized for output formats that need
+it and for restart data.
+
+A paired reference measurement used NVFORTRAN 24.3 and one NVIDIA A30. Euler
+required 9.787760 s on CPU and 0.741555 s with OpenACC, corresponding to a
+speedup of 13.20. RK2 required 19.464682 s on CPU and 1.254380 s with OpenACC,
+corresponding to a speedup of 15.52. Both six-sample trajectories passed the
+CPU/GPU comparison with relative tolerance $10^{-6}$ and absolute tolerance
+$10^{-9}$. The worst normalized differences were $4.00\,10^{-7}$ for Euler
+and $8.99\,10^{-7}$ for RK2. Versioned outputs and the comparison helper are
+stored in \texttt{tests/performance/integrators/}. These timings are specific
+to the measured system and are not portable performance guarantees.

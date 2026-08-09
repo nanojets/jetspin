@@ -31,7 +31,9 @@ module integrator_mod
 #ifdef _OPENACC
  use accelerator_mod, only : accelerator_eom3_stage, &
                          accelerator_set_persistent, &
-                         accelerator_rk4_final_statistics
+                         accelerator_rk4_final_statistics, &
+                         accelerator_euler_final_statistics, &
+                         accelerator_rk2_final_statistics
  use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
                          maxstressposx
 #endif
@@ -56,7 +58,16 @@ module integrator_mod
  
  public :: driver_integrator
 
- contains
+contains
+
+ logical function fixed_accelerator_eligible()
+  implicit none
+  fixed_accelerator_eligible=systype.eq.3 .and. npjet.eq.1000 .and. &
+   mxrank.eq.1 .and. mystart.eq.0 .and. myend.eq.npjet .and. &
+   linserted .and. .not.linserting .and. .not.lmultiplestep .and. &
+   .not.levaporation .and. lairdrag .and. .not.lflorentz .and. &
+   .not.luppot .and. nfieldtype.eq.0
+ end function fixed_accelerator_eligible
   
  subroutine driver_integrator(timesub,h,k,dorefinment)
  
@@ -190,6 +201,8 @@ module integrator_mod
   integer :: ipoint,j
   
   logical, save :: lfirstsub=.true.
+  logical, save :: persistent_acc=.false.
+  logical :: used_acc_eom
   
   
 ! check and eventually reallocate the service arrays
@@ -244,6 +257,21 @@ module integrator_mod
     end select
     lfirstsub=.false.
   endif
+
+#ifdef _OPENACC
+  if(.not.persistent_acc .and. fixed_accelerator_eligible())then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
+!$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
+!$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
+!$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetfr(0:mxnpjet))
+!$acc enter data create(fxx(0:mxchunk),fyy(0:mxchunk), &
+!$acc& fzz(0:mxchunk),fst(0:mxchunk),fvx(0:mxchunk), &
+!$acc& fvy(0:mxchunk),fvz(0:mxchunk))
+    call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(.true.)
+    persistent_acc=.true.
+  endif
+#endif
   
   
 ! select the proper system type
@@ -282,38 +310,61 @@ module integrator_mod
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx, &
        jetyy,jetzz)
       j=0
-      do ipoint=mystart,myend
-        call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-          jetvl,coulforce,fxx(j),fyy(j),fzz(j),fst(j), &
-          fvx(j),fvy(j),fvz(j),timesub,k)
-        j=j+1
-      enddo
+      call profiling_start(prof_eom)
+      used_acc_eom=.false.
+#ifdef _OPENACC
+      if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx, &
+       jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
+       jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz,linserted, &
+       liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
+       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext)
+#endif
+      if(.not.used_acc_eom)then
+        do ipoint=mystart,myend
+          call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+            jetvl,coulforce,fxx(j),fyy(j),fzz(j),fst(j), &
+            fvx(j),fvy(j),fvz(j),timesub,k)
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_eom)
       call restore_charge()
       j=0
-      yxx(:)=0.d0
-      yyy(:)=0.d0
-      yzz(:)=0.d0
-      yst(:)=0.d0
-      yvx(:)=0.d0
-      yvy(:)=0.d0
-      yvz(:)=0.d0
-      do ipoint=mystart,myend
-	    yxx(ipoint) = jetxx(ipoint) + h*fxx(j)
-	    yyy(ipoint) = jetyy(ipoint) + h*fyy(j)
-	    yzz(ipoint) = jetzz(ipoint) + h*fzz(j)
-	    yst(ipoint) = jetst(ipoint) + h*fst(j)
-	    yvx(ipoint) = jetvx(ipoint) + h*fvx(j)
-	    yvy(ipoint) = jetvy(ipoint) + h*fvy(j)
-	    yvz(ipoint) = jetvz(ipoint) + h*fvz(j)
-	    j=j+1
-      enddo
-      call sum_world_darr(yxx,npjet+1,jetxx)
-      call sum_world_darr(yyy,npjet+1,jetyy)
-      call sum_world_darr(yzz,npjet+1,jetzz)
-      call sum_world_darr(yst,npjet+1,jetst)
-      call sum_world_darr(yvx,npjet+1,jetvx)
-      call sum_world_darr(yvy,npjet+1,jetvy)
-      call sum_world_darr(yvz,npjet+1,jetvz)
+      call profiling_start(prof_rk_update)
+      if(persistent_acc)then
+#ifdef _OPENACC
+        call accelerator_euler_final_statistics(mystart,myend,h, &
+         jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+         fxx,fyy,fzz,fst,fvx,fvy,fvz,counterlpath,ncounterlpath, &
+         maxstress,maxstressposx)
+#endif
+      else
+        yxx(:)=0.d0
+        yyy(:)=0.d0
+        yzz(:)=0.d0
+        yst(:)=0.d0
+        yvx(:)=0.d0
+        yvy(:)=0.d0
+        yvz(:)=0.d0
+        do ipoint=mystart,myend
+	      yxx(ipoint) = jetxx(ipoint) + h*fxx(j)
+	      yyy(ipoint) = jetyy(ipoint) + h*fyy(j)
+	      yzz(ipoint) = jetzz(ipoint) + h*fzz(j)
+	      yst(ipoint) = jetst(ipoint) + h*fst(j)
+	      yvx(ipoint) = jetvx(ipoint) + h*fvx(j)
+	      yvy(ipoint) = jetvy(ipoint) + h*fvy(j)
+	      yvz(ipoint) = jetvz(ipoint) + h*fvz(j)
+	      j=j+1
+        enddo
+        call sum_world_darr(yxx,npjet+1,jetxx)
+        call sum_world_darr(yyy,npjet+1,jetyy)
+        call sum_world_darr(yzz,npjet+1,jetzz)
+        call sum_world_darr(yst,npjet+1,jetst)
+        call sum_world_darr(yvx,npjet+1,jetvx)
+        call sum_world_darr(yvy,npjet+1,jetvy)
+        call sum_world_darr(yvz,npjet+1,jetvz)
+      endif
+      call profiling_stop(prof_rk_update)
       timesub=timesub+h
       call compute_posnoinserted(jetxx,jetyy,jetzz)
   end select
@@ -378,6 +429,8 @@ module integrator_mod
   double precision ::  fvz
   
   logical, save :: lfirstsub=.true.
+  logical, save :: persistent_acc=.false.
+  logical :: used_acc_eom
   
 ! check and eventually reallocate the service arrays
   if(doallocate)then
@@ -451,6 +504,26 @@ module integrator_mod
     end select
     lfirstsub=.false.
   endif
+
+#ifdef _OPENACC
+  if(.not.persistent_acc .and. fixed_accelerator_eligible())then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
+!$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
+!$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
+!$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetfr(0:mxnpjet))
+!$acc enter data create(yxx(0:mxnpjet),yyy(0:mxnpjet), &
+!$acc& yzz(0:mxnpjet),yst(0:mxnpjet),yvx(0:mxnpjet), &
+!$acc& yvy(0:mxnpjet),yvz(0:mxnpjet))
+!$acc enter data create(f1xx(0:mxchunk),f1yy(0:mxchunk), &
+!$acc& f1zz(0:mxchunk),f1st(0:mxchunk),f1vx(0:mxchunk), &
+!$acc& f1vy(0:mxchunk),f1vz(0:mxchunk),f2xx(0:mxchunk), &
+!$acc& f2yy(0:mxchunk),f2zz(0:mxchunk),f2st(0:mxchunk), &
+!$acc& f2vx(0:mxchunk),f2vy(0:mxchunk),f2vz(0:mxchunk))
+    call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(.true.)
+    persistent_acc=.true.
+  endif
+#endif
   
   
 ! select the proper system type
@@ -510,79 +583,144 @@ module integrator_mod
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx, &
        jetyy,jetzz)
       j=0
-      yxx(:)=0.d0
-      yyy(:)=0.d0
-      yzz(:)=0.d0
-      yst(:)=0.d0
-      yvx(:)=0.d0
-      yvy(:)=0.d0
-      yvz(:)=0.d0
-      do ipoint=mystart,myend
-        call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-          jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k)
-        f1xx(j)=fxx
-        f1yy(j)=fyy
-        f1zz(j)=fzz
-        f1st(j)=fst
-        f1vx(j)=fvx
-        f1vy(j)=fvy
-        f1vz(j)=fvz
-	    yxx(ipoint) = jetxx(ipoint) + h*f1xx(j)
-	    yyy(ipoint) = jetyy(ipoint) + h*f1yy(j)
-	    yzz(ipoint) = jetzz(ipoint) + h*f1zz(j)
-	    yst(ipoint) = jetst(ipoint) + h*f1st(j)
-	    yvx(ipoint) = jetvx(ipoint) + h*f1vx(j)
-	    yvy(ipoint) = jetvy(ipoint) + h*f1vy(j)
-	    yvz(ipoint) = jetvz(ipoint) + h*f1vz(j)
-	    j=j+1
-      enddo
+      call profiling_start(prof_eom)
+      used_acc_eom=.false.
+#ifdef _OPENACC
+      if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx, &
+       jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
+       jetch,jetfr,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted, &
+       liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
+       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext)
+#endif
+      if(.not.used_acc_eom)then
+        do ipoint=mystart,myend
+          call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+            jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k)
+          f1xx(j)=fxx
+          f1yy(j)=fyy
+          f1zz(j)=fzz
+          f1st(j)=fst
+          f1vx(j)=fvx
+          f1vy(j)=fvy
+          f1vz(j)=fvz
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_eom)
+      j=0
+      call profiling_start(prof_rk_update)
+      if(persistent_acc)then
+#ifdef _OPENACC
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
+!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+!$acc& yxx,yyy,yzz,yst,yvx,yvy,yvz) private(j)
+        do ipoint=mystart,myend
+          j=ipoint-mystart
+          yxx(ipoint)=jetxx(ipoint)+h*f1xx(j)
+          yyy(ipoint)=jetyy(ipoint)+h*f1yy(j)
+          yzz(ipoint)=jetzz(ipoint)+h*f1zz(j)
+          yst(ipoint)=jetst(ipoint)+h*f1st(j)
+          yvx(ipoint)=jetvx(ipoint)+h*f1vx(j)
+          yvy(ipoint)=jetvy(ipoint)+h*f1vy(j)
+          yvz(ipoint)=jetvz(ipoint)+h*f1vz(j)
+        enddo
+!$acc end parallel loop
+#endif
+      else
+        yxx(:)=0.d0
+        yyy(:)=0.d0
+        yzz(:)=0.d0
+        yst(:)=0.d0
+        yvx(:)=0.d0
+        yvy(:)=0.d0
+        yvz(:)=0.d0
+        do ipoint=mystart,myend
+          yxx(ipoint)=jetxx(ipoint)+h*f1xx(j)
+          yyy(ipoint)=jetyy(ipoint)+h*f1yy(j)
+          yzz(ipoint)=jetzz(ipoint)+h*f1zz(j)
+          yst(ipoint)=jetst(ipoint)+h*f1st(j)
+          yvx(ipoint)=jetvx(ipoint)+h*f1vx(j)
+          yvy(ipoint)=jetvy(ipoint)+h*f1vy(j)
+          yvz(ipoint)=jetvz(ipoint)+h*f1vz(j)
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_rk_update)
       call restore_charge()
       
-      call sum_world_darr(yxx,npjet+1)
-      call sum_world_darr(yyy,npjet+1)
-      call sum_world_darr(yzz,npjet+1)
-      call sum_world_darr(yst,npjet+1)
-      call sum_world_darr(yvx,npjet+1)
-      call sum_world_darr(yvy,npjet+1)
-      call sum_world_darr(yvz,npjet+1)
+      if(.not.persistent_acc)then
+        call sum_world_darr(yxx,npjet+1)
+        call sum_world_darr(yyy,npjet+1)
+        call sum_world_darr(yzz,npjet+1)
+        call sum_world_darr(yst,npjet+1)
+        call sum_world_darr(yvx,npjet+1)
+        call sum_world_darr(yvy,npjet+1)
+        call sum_world_darr(yvz,npjet+1)
+      endif
       
       call smooth_charge(yxx,yyy,yzz)
       call compute_posnoinserted(yxx,yyy,yzz)
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz)
       j=0
-      do ipoint=mystart,myend
-        call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h,k)
-        j=j+1
-      enddo
+      call profiling_start(prof_eom)
+      used_acc_eom=.false.
+#ifdef _OPENACC
+      if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
+       yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr, &
+       f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
+       lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+       yieldstress,att,fve,gr,ks,li,v,velext)
+#endif
+      if(.not.used_acc_eom)then
+        do ipoint=mystart,myend
+          call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
+           jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
+           f2vx(j),f2vy(j),f2vz(j),timesub+h,k)
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_eom)
       j=0
-      yxx(:)=0.d0
-      yyy(:)=0.d0
-      yzz(:)=0.d0
-      yst(:)=0.d0
-      yvx(:)=0.d0
-      yvy(:)=0.d0
-      yvz(:)=0.d0
-      do ipoint=mystart,myend
-        yxx(ipoint) = jetxx(ipoint) + (h/2.d0)*(f1xx(j)+f2xx(j))
-        yyy(ipoint) = jetyy(ipoint) + (h/2.d0)*(f1yy(j)+f2yy(j))
-        yzz(ipoint) = jetzz(ipoint) + (h/2.d0)*(f1zz(j)+f2zz(j))
-	    yst(ipoint) = jetst(ipoint) + (h/2.d0)*(f1st(j)+f2st(j))
-	    yvx(ipoint) = jetvx(ipoint) + (h/2.d0)*(f1vx(j)+f2vx(j))
-	    yvy(ipoint) = jetvy(ipoint) + (h/2.d0)*(f1vy(j)+f2vy(j))
-	    yvz(ipoint) = jetvz(ipoint) + (h/2.d0)*(f1vz(j)+f2vz(j))
-	    j=j+1
-      enddo
+      call profiling_start(prof_rk_update)
+      if(persistent_acc)then
+#ifdef _OPENACC
+        call accelerator_rk2_final_statistics(mystart,myend,h, &
+         jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+         f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+         f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+         counterlpath,ncounterlpath,maxstress,maxstressposx)
+#endif
+      else
+        yxx(:)=0.d0
+        yyy(:)=0.d0
+        yzz(:)=0.d0
+        yst(:)=0.d0
+        yvx(:)=0.d0
+        yvy(:)=0.d0
+        yvz(:)=0.d0
+        do ipoint=mystart,myend
+          yxx(ipoint)=jetxx(ipoint)+(h/2.d0)*(f1xx(j)+f2xx(j))
+          yyy(ipoint)=jetyy(ipoint)+(h/2.d0)*(f1yy(j)+f2yy(j))
+          yzz(ipoint)=jetzz(ipoint)+(h/2.d0)*(f1zz(j)+f2zz(j))
+          yst(ipoint)=jetst(ipoint)+(h/2.d0)*(f1st(j)+f2st(j))
+          yvx(ipoint)=jetvx(ipoint)+(h/2.d0)*(f1vx(j)+f2vx(j))
+          yvy(ipoint)=jetvy(ipoint)+(h/2.d0)*(f1vy(j)+f2vy(j))
+          yvz(ipoint)=jetvz(ipoint)+(h/2.d0)*(f1vz(j)+f2vz(j))
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_rk_update)
       call restore_charge()
-      call sum_world_darr(yxx,npjet+1,jetxx)
-      call sum_world_darr(yyy,npjet+1,jetyy)
-      call sum_world_darr(yzz,npjet+1,jetzz)
-      call sum_world_darr(yst,npjet+1,jetst)
-      call sum_world_darr(yvx,npjet+1,jetvx)
-      call sum_world_darr(yvy,npjet+1,jetvy)
-      call sum_world_darr(yvz,npjet+1,jetvz)
+      if(.not.persistent_acc)then
+        call sum_world_darr(yxx,npjet+1,jetxx)
+        call sum_world_darr(yyy,npjet+1,jetyy)
+        call sum_world_darr(yzz,npjet+1,jetzz)
+        call sum_world_darr(yst,npjet+1,jetst)
+        call sum_world_darr(yvx,npjet+1,jetvx)
+        call sum_world_darr(yvy,npjet+1,jetvy)
+        call sum_world_darr(yvz,npjet+1,jetvz)
+      endif
       timesub=timesub+h
       call compute_posnoinserted(jetxx,jetyy,jetzz)
   end select

@@ -192,6 +192,21 @@ The persistent trajectory passes the unchanged A30 baseline with `rtol=1e-6`
 and `atol=1e-9`. Its worst normalized difference is `7.8e-5`, and it differs
 from the preceding call-scoped GPU trajectory by at most `2.0e-7` normalized.
 
+## Device-resident statistics milestone
+
+Path length and maximum stress are now accumulated on the device after each
+step. The statistic counters remain device resident, and the complete primary
+state is copied to the host only at the five scheduled 200-step samples and
+before the final restart. The former 56,056-byte transfer on every timestep is
+therefore absent.
+
+A representative A30 run took `2.468580 s` for the complete loop. Statistics
+took `0.056676 s`; this is mostly the launch overhead of the small reduction
+kernels rather than data transfer. The trajectory passed the unchanged A30
+baseline with `rtol=1e-6` and `atol=1e-9`; the worst normalized difference was
+`7.97e-5`. A future optimization can fuse these reductions with the final RK
+kernel to avoid separate launches.
+
 ## Versioned numerical records
 
 The CPU and A30 OpenACC `statout.dat` files from this initial measurement are

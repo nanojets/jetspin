@@ -4,11 +4,129 @@ module accelerator_mod
  private
 
  logical, parameter, public :: accelerator_enabled=.true.
+ logical, save :: accelerator_persistent=.false.
+ logical, save :: accelerator_statistics_mapped=.false.
+ double precision, save :: statistics_step_max=-huge(0.d0)
+ integer, save :: statistics_step_index=-1
 
  public :: accelerator_prepare
  public :: accelerator_eom3_stage
+ public :: accelerator_set_persistent
+ public :: accelerator_is_persistent
+ public :: accelerator_update_host_state
+ public :: accelerator_store_statistics
+ public :: accelerator_update_host_statistics
+ public :: accelerator_update_device_statistics
 
 contains
+
+ subroutine accelerator_set_persistent(enabled)
+  implicit none
+  logical, intent(in) :: enabled
+  accelerator_persistent=enabled
+  return
+ end subroutine accelerator_set_persistent
+
+ logical function accelerator_is_persistent()
+  implicit none
+  accelerator_is_persistent=accelerator_persistent
+ end function accelerator_is_persistent
+
+ subroutine accelerator_update_host_state(npjet,jetxx,jetyy,jetzz, &
+   jetst,jetvx,jetvy,jetvz)
+  implicit none
+  integer, intent(in) :: npjet
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
+  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
+  if(.not.accelerator_persistent)return
+#ifdef _OPENACC
+!$acc update self(jetxx(0:npjet),jetyy(0:npjet),jetzz(0:npjet), &
+!$acc& jetst(0:npjet),jetvx(0:npjet),jetvy(0:npjet),jetvz(0:npjet))
+#endif
+  return
+ end subroutine accelerator_update_host_state
+
+ subroutine accelerator_store_statistics(inpjet,npjet,jetxx,jetyy, &
+   jetzz,jetst,counterlpath,ncounterlpath,maxstress,maxstressposx)
+  implicit none
+  integer, intent(in) :: inpjet,npjet
+  integer, intent(inout) :: ncounterlpath
+  double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
+  integer :: ipoint
+  double precision :: dx,dy,dz
+
+  if(.not.accelerator_persistent)return
+#ifdef _OPENACC
+  if(.not.accelerator_statistics_mapped)then
+!$acc enter data copyin(counterlpath,ncounterlpath,maxstress, &
+!$acc& maxstressposx,statistics_step_max,statistics_step_index)
+    accelerator_statistics_mapped=.true.
+  endif
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
+!$acc& counterlpath,statistics_step_max) private(dx,dy,dz) &
+!$acc& reduction(+:counterlpath) reduction(max:statistics_step_max)
+#endif
+  do ipoint=inpjet,npjet
+    if(ipoint<npjet)then
+      dx=jetxx(ipoint)-jetxx(ipoint+1)
+      dy=jetyy(ipoint)-jetyy(ipoint+1)
+      dz=jetzz(ipoint)-jetzz(ipoint+1)
+      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
+    endif
+    statistics_step_max=max(statistics_step_max,jetst(ipoint))
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+!$acc parallel loop gang vector present(jetst,statistics_step_max, &
+!$acc& statistics_step_index) reduction(max:statistics_step_index)
+#endif
+  do ipoint=inpjet,npjet
+    if(jetst(ipoint)==statistics_step_max)then
+      statistics_step_index=max(statistics_step_index,ipoint)
+    endif
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+!$acc serial present(jetxx,counterlpath,ncounterlpath,maxstress, &
+!$acc& maxstressposx,statistics_step_max,statistics_step_index)
+#endif
+  ncounterlpath=ncounterlpath+1
+  if(statistics_step_max>=maxstress)then
+    maxstress=statistics_step_max
+    maxstressposx=jetxx(statistics_step_index)
+  endif
+  statistics_step_max=-huge(0.d0)
+  statistics_step_index=-1
+#ifdef _OPENACC
+!$acc end serial
+#endif
+  return
+ end subroutine accelerator_store_statistics
+
+ subroutine accelerator_update_host_statistics(counterlpath, &
+   ncounterlpath,maxstress,maxstressposx)
+  implicit none
+  integer, intent(inout) :: ncounterlpath
+  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
+  if(.not.accelerator_statistics_mapped)return
+#ifdef _OPENACC
+!$acc update self(counterlpath,ncounterlpath,maxstress,maxstressposx)
+#endif
+  return
+ end subroutine accelerator_update_host_statistics
+
+ subroutine accelerator_update_device_statistics(counterlpath, &
+   ncounterlpath,maxstress,maxstressposx)
+  implicit none
+  integer, intent(in) :: ncounterlpath
+  double precision, intent(in) :: counterlpath,maxstress,maxstressposx
+  if(.not.accelerator_statistics_mapped)return
+#ifdef _OPENACC
+!$acc update device(counterlpath,ncounterlpath,maxstress,maxstressposx)
+#endif
+  return
+ end subroutine accelerator_update_device_statistics
 
  subroutine accelerator_prepare()
   implicit none

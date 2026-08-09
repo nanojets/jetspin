@@ -76,13 +76,13 @@ Each Coulomb stage computes its cross sections on the device; EOM consumes the
 device Coulomb force directly, and all four RK updates execute on the device.
 The host no longer receives stage intermediates or Coulomb forces.
 
-The existing statistics and output routines still execute on the CPU and read
-the complete primary state. The final RK kernel therefore updates the seven
-coordinate, stress, and velocity arrays on the host once per timestep. For
-1,001 beads this is 56,056 bytes per step, or about 53.5 MiB over the complete
-1,000-step benchmark. Removing that last recurring transfer requires porting
-the per-step statistics/reductions or computing their compact observables on
-the device. Dynamic topology remains outside persistent mode.
+The per-step path-length and maximum-stress statistics are accumulated on the
+device. Their scalar accumulators also remain device resident. The seven
+coordinate, stress, and velocity arrays are now updated on the host only when
+`compute_statistic` produces scheduled output and once before the final
+restart. With the Test 9 cadence this reduces full-state synchronization from
+1,000 times to five scheduled snapshots plus the final restart. Dynamic
+topology remains outside persistent mode.
 
 ## Numerical validation
 
@@ -115,8 +115,8 @@ regression above and cannot establish GPU performance.
 ## Next porting stages
 
 1. Port the evaporation-specific direct Coulomb kernel.
-2. Port the Test 9 statistics and output reductions so that the host needs an
-   update only on scheduled output and checkpoint steps.
+2. Fuse the Test 9 statistic reductions with an existing integration kernel
+   to remove their small-kernel launch overhead.
 3. Extend persistent equation-of-motion and RK support beyond the fixed Test
    9 gate.
 4. Add explicit device teardown/recreation hooks around capacity changes and

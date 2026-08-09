@@ -45,7 +45,8 @@
                        get_sync_world,finalize_world,idrank
   use utility_mod,    only : init_random_seed
 #ifdef _OPENACC
-  use accelerator_mod, only : accelerator_prepare
+  use accelerator_mod, only : accelerator_prepare, &
+                         accelerator_update_host_state
 #endif
   use profiling_mod, only : profiling_initialize,profiling_reset, &
                        profiling_start,profiling_stop,profiling_report, &
@@ -56,7 +57,8 @@
                        tstep,xyzrescale,set_resolution_length, &
                        allocate_jet,set_initial_jet,add_jetbead, &
                        remove_jetbead,erase_jetbead,lengthscale, &
-                       pdbrescale,lreadrest,lKVfluid,levaporation
+                       pdbrescale,lreadrest,lKVfluid,levaporation, &
+                       jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz
   use breaking_mod,   only : ckeck_breakup
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
@@ -294,6 +296,10 @@
   call finish_print(nstep,mytime,itime,ftime)
   
 ! print restart file
+#ifdef _OPENACC
+  call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz,jetst, &
+   jetvx,jetvy,jetvz)
+#endif
   call write_restart_file(1,135,'save.dat',nstep,mytime)
   
 ! close the XYZ formatted output file 
@@ -312,6 +318,5 @@
 
  end program JetSpin
   
-
 
 

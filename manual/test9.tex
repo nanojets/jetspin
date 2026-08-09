@@ -110,3 +110,13 @@ full-state update to the host. The complete-loop speedup over the CPU was
 15.75. The trajectory passed the unchanged A30 baseline with relative
 tolerance $10^{-6}$ and absolute tolerance $10^{-9}$; its worst normalized
 difference was $7.8\,10^{-5}$.
+
+In the following device-resident-statistics milestone, the path length and
+maximum stress are accumulated on the accelerator after each step. Their
+scalar counters remain on the device. The complete primary state is copied to
+the host only at the five scheduled 200-step samples and before the final
+restart, rather than after every timestep. A representative A30 run took
+2.468580 s for the complete loop, of which 0.056676 s was attributed to the
+small statistic kernels. The trajectory passed the unchanged A30 baseline
+with relative tolerance $10^{-6}$ and absolute tolerance $10^{-9}$; the worst
+normalized difference was $7.97\,10^{-5}$.

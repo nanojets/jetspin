@@ -25,6 +25,13 @@ module statistic_mod
  use dynamic_refinement_mod,only : irefinementdone
  use support_functions_mod, only : compute_crosssec,compute_length_path
  use electric_field_mod,    only : actual_form_electric_field
+#ifdef _OPENACC
+ use accelerator_mod,       only : accelerator_is_persistent, &
+                             accelerator_store_statistics, &
+                             accelerator_update_host_state, &
+                             accelerator_update_host_statistics, &
+                             accelerator_update_device_statistics
+#endif
  
  implicit none
  
@@ -132,9 +139,17 @@ module statistic_mod
   call store_geometry_end(lrem,nremovedsub)
   
   call store_vel_init()
-  call store_length_path()
-  
-  call store_maxstress()
+#ifdef _OPENACC
+  if(accelerator_is_persistent())then
+    call accelerator_store_statistics(inpjet,npjet,jetxx,jetyy,jetzz, &
+     jetst,counterlpath,ncounterlpath,maxstress,maxstressposx)
+  else
+#endif
+    call store_length_path()
+    call store_maxstress()
+#ifdef _OPENACC
+  endif
+#endif
   
   call store_viscosity_end(lrem,nremovedsub)
   call store_elastic_end(lrem,nremovedsub)
@@ -169,6 +184,17 @@ module statistic_mod
   integer, save :: nmulstepdoneold=0
   
   double precision, dimension(3) :: vext
+
+#ifdef _OPENACC
+! CPU output and derived observables need a current host snapshot only at the
+! configured statistics cadence, not after every integration step.
+  if(accelerator_is_persistent())then
+    call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz,jetst, &
+     jetvx,jetvy,jetvz)
+    call accelerator_update_host_statistics(counterlpath, &
+     ncounterlpath,maxstress,maxstressposx)
+  endif
+#endif
   
 ! compute all the observables
   call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
@@ -312,6 +338,12 @@ module statistic_mod
   nmultisteperror=0
   nstepsubold=nstepsub
   nmulstepdoneold=nmulstepdone
+#ifdef _OPENACC
+  if(accelerator_is_persistent())then
+    call accelerator_update_device_statistics(counterlpath, &
+     ncounterlpath,maxstress,maxstressposx)
+  endif
+#endif
   
   return
   
@@ -1277,4 +1309,3 @@ module statistic_mod
  end subroutine compute_evrat_end
   
  end module statistic_mod
-

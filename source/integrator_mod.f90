@@ -29,7 +29,8 @@ module integrator_mod
  use profiling_mod, only : profiling_start,profiling_stop,prof_eom, &
                          prof_rk_update
 #ifdef _OPENACC
- use accelerator_mod, only : accelerator_eom3_stage
+ use accelerator_mod, only : accelerator_eom3_stage, &
+                         accelerator_set_persistent
 #endif
  use electric_field_mod, only : nfieldtype
  use coulomb_force_mod, only : smooth_charge,restore_charge, &
@@ -794,6 +795,7 @@ module integrator_mod
 !$acc& f4yy(0:mxchunk),f4zz(0:mxchunk),f4st(0:mxchunk), &
 !$acc& f4vx(0:mxchunk),f4vy(0:mxchunk),f4vz(0:mxchunk))
     call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(.true.)
     persistent_acc=.true.
   endif
 #endif
@@ -1181,8 +1183,6 @@ module integrator_mod
            2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
         enddo
 !$acc end parallel loop
-!$acc update self(jetxx(0:npjet),jetyy(0:npjet),jetzz(0:npjet), &
-!$acc& jetst(0:npjet),jetvx(0:npjet),jetvy(0:npjet),jetvz(0:npjet))
 #endif
       else
         do ipoint=mystart,myend

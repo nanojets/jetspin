@@ -284,7 +284,7 @@ integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90
 	$(FC) $(FFLAGS) integrator_kv_ev_mod.f90
 
 statistic_mod.o:statistic_mod.f90
-	$(FC) $(FFLAGS) statistic_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) statistic_mod.f90
 
 io_mod.o:io_mod.f90
 	$(FC) $(FFLAGS) io_mod.f90

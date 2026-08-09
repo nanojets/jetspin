@@ -1,164 +1,91 @@
-The JETSPIN README File                                                 
-Version 1.22 (May 2017)                                                 
-                                                                        
-JETSPIN is a specific-purpose open-source software for electrospinning  
-simulations of nanofibers. The code was originally written by           
-                                                                        
-Marco Lauricella         IAC-CNR, Rome                     Italy        
-                                                                        
-at Applicazioni del Calcolo "Mauro Picone" -                            
-Consiglio Nazionale delle Ricerche                                      
-                                                                        
-with contributions from:                                                
-                                                                        
-Federico Cipolletta      IAC-CNR, Rome                     Italy        
-Ivan Coluzza             University of Vienna              Austria      
-Dario Pisignano          University of Salento             Italy        
-Giuseppe Pontrelli       IAC-CNR, Rome                     Italy        
-Sauro Succi              IAC-CNR, Rome                     Italy        
-                                                                        
-The software development process has received funding from the European
-Research Council under the European Union's Seventh Framework Programme
-(FP/2007-2013)/ERC Grant Agreement n. 306357 (NANO-JETS).               
-                                                                        
-This is an experimental code. The authors accept no responsibility      
-for the performance of the code or for the correctness of the results.  
-                                                                        
-The code is licensed under Open Software License v. 3.0 (OSL-3.0).      
-                                                                        
-If results obtained with this code are published, an appropriate        
-citation would be:                                                      
-                                                                        
-Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,    
-Sauro Succi, JETSPIN: A specific-purpose open-source software for       
-electrospinning simulations of nanofibers, Computer Physics             
-Communications, 197 (2015), pp. 227-238.                                
-                                                                        
-Structure                                                               
-                                                                        
-JETSPIN is supplied as a main UNIX directory with 4 subdirectories.     
-All the source code files are contained in the source sub-directory.    
-The examples sub-directory contains different test cases that can help  
-the user to edit new input files. For further details on the input      
-directives the reader is referred to the article:                       
-                                                                        
-Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,    
-Sauro Succi, JETSPIN: A specific-purpose open-source software for       
-electrospinning simulations of nanofibers, Computer Physics             
-Communications, 197 (2015), pp. 227-238.                                
-                                                                        
-The evaporation model introduced in Version 1.22 follows A. L. Yarin,   
-S. Koombhongse and D. H. Reneker, J. Appl. Phys. 89, 3018-3026 (2001), 
-using the standard JETSPIN nondimensionalization. Its equations,         
-rheological corrections and input directives are documented in          
-manual/evaporation.tex.                                                 
-The same concentration-dependent viscosity and elastic-modulus laws can    
-also be used with the Kelvin-Voigt rheology. This is documented as a       
-JETSPIN extension of the Yarin concentration laws (not as part of the       
-original Yarin-2001 Maxwell model).                                        
-                                                                        
-A dedicated Yarin-2001 reference/regression input is provided in        
-examples/input-8. It uses the 6 wt% aqueous-PEO material and setup       
-parameters reported in that paper and documents the expected            
-evaporation cutoff and concentration-dependent rheological ratios.      
-                                                                        
-Compiling JETSPIN                                                       
-                                                                        
-The build sub-directory stores a UNIX makefile that assembles the       
-executable versions of the code both in serial and parallel version     
-with different compilers. Note that JETSPIN may be compiled on any      
-UNIX platform. The makefile does not need to be copied. From the root
-of the repository, invoke it directly while using source as the working
-directory:
+# JETSPIN
 
-make -C source -f ../build/Makefile target
+JETSPIN is an open-source Fortran simulator for the dynamics of electrified
+viscoelastic jets in electrospinning. It represents a jet as a sequence of
+charged beads connected by viscoelastic elements and supports serial and MPI
+execution.
 
-Object and module files are generated in source, and the resulting
-main.x executable is placed in execute. Replace target with one of the
-following options:                                                      
-gfortran      ---> compile in serial mode using the GFortran compiler.  
-gfortran-mpi  ---> compile in parallel mode using the GFortran compiler
-                   and the Open MPI library.
-cygwin        ---> compile in serial mode using the GFortran compiler   
-                   under the command-line interface Cygwin for Windows. 
-cygwin-mpi    ---> compile in parallel mode using the GFortran compiler 
-                   and the Open Mpi library under the command-line      
-                   interface Cygwin for Windows (note a precompiled     
-                   package of the Open Mpi library is already available 
-                   on Cygwin).                                          
-intel         ---> compile in serial mode using the Intel compiler.     
-intel-mpi     ---> compile in parallel mode using the Intel compiler    
-                   and the Intel Mpi library.                           
-intel-openmpi ---> compile in parallel mode using the Intel compiler    
-                   and the Open Mpi library.                            
-help          ---> return the list of possible target choices.          
-clean         ---> remove object and module files from source.
+The latest stable release is
+[**JETSPIN 1.22**](https://github.com/nanojets/jetspin/releases/tag/v1.22).
+Ongoing work is integrated on the `development` branch before it reaches
+`master`.
 
-For example, compile the serial GFortran version with:
+## Capabilities
 
+JETSPIN includes one- and three-dimensional jet models, Maxwell,
+Herschel–Bulkley, and Kelvin–Voigt rheology, aerodynamic drag, dynamic
+refinement, time-dependent electric fields, stochastic forcing, and the
+Yarin 2001 solvent-evaporation and rheological-solidification model.
+
+## Quick start
+
+From the repository root, compile the serial GFortran version:
+
+```sh
 make -C source -f ../build/Makefile gfortran
+```
 
-On Windows system we advice the user to compile JETSPIN under the       
-command-line interface Cygwin. Note that a Message Passing Interface    
-Implementation is necessary to compile and run JETSPIN in parallel      
-mode.                                                                   
-                                                                        
-Executing JETSPIN                                                       
-                                                                        
-To run JETSPIN, it is necessary first to ensure that the program is     
-compiled (from the source sub-directory) and that the file input.dat    
-is present in the execute subdirectory.                                 
-All output data files will be returned to the execute sub-directory.    
-Remember that the input file HAS TO BE NAMED 'input.dat' and put in     
-the 'execute' Sub-directory. Few example input files are contained in   
-the examples sub-directory which can be used as test cases.             
-                                                                        
-Example command to run JETSPIN in serial mode:                          
-                                                                        
-./main.x                                                                
-                                                                        
-Example command to run JETSPIN in parallel mode on 4 CPUs:              
-                                                                        
-mpirun -np 4 ./main.x                                                   
-                                                                        
-                                                                        
-New features in JETSPIN Version 1.22                                    
-                                                                        
-  - Oscillating electric fields added                                   
-                                                                        
-  - Evaporation effect added                                            
-                                                                        
-  - The Yarin-2001 evaporation cutoff and rheological model are         
-    documented in manual/evaporation.tex.                               
-                                                                        
-  - Evaporation can be combined with Kelvin-Voigt rheology using the       
-    same concentration-dependent mu and G laws, including the required     
-    product-rule terms for time-dependent material properties.              
-                                                                        
-  - Example 8 was added as a 6 wt% aqueous-PEO Yarin-2001 reference     
-    and regression case for evaporation and rheological solidification. 
-                                                                        
-  - The job close directive was added to ensure a controlled close down 
-    procedure when a job runs out of time.                              
-                                                                        
-  - Random noise added                                                  
-                                                                        
-  - The manual was updated.                                             
-                                                                        
-New features in JETSPIN Version 1.21                                    
-                                                                        
-  - The dynamic refinement method was implemented.                      
-                                                                        
-  - It was implemented a multiple step algorithm for the long-range     
-    Coulomb forces.                                                     
-                                                                        
-  - The rheological Kelvin–Voigt model was added.                       
-                                                                        
-  - Example 6 was added modelling a Kelvin–Voigt fluid.                 
-                                                                        
-  - JETSPIN can write PDB formatted file with a PSF file containing the 
-    structure of the jet (defining a bond for each pair of consecutive  
-    jet beads).                                                         
-                                                                        
-  - The manual was updated.                                             
-                                                                        
+Then select an example and run it:
+
+```sh
+cp examples/input-1/input.dat execute/input.dat
+cd execute
+./main.x
+```
+
+See the [compilation guide](docs/introduction/compiling.md) and
+[running guide](docs/introduction/running.md) for other compilers, MPI, and
+runtime details.
+
+## Documentation
+
+- [Operational documentation](docs/README.md): build, execution, input,
+  output, and worked examples in GitHub-friendly Markdown.
+- [Project overview](docs/project-overview.md): architecture, repository
+  conventions, maintenance context, and documentation policy.
+- [Scientific user manual](manual/manual.pdf): authoritative equations,
+  algorithms, references, and complete parameter tables.
+- [LaTeX manual sources](manual/): modular source for the scientific manual.
+- [Changelog](CHANGELOG.md): user-visible changes by release.
+
+The Markdown guide intentionally avoids reproducing the complete scientific
+manual. Operational guidance belongs in `docs/`; mathematical derivations
+and the formal reference belong in `manual/`.
+
+## Validation
+
+Run the local numerical smoke suite with:
+
+```sh
+tests/smoke/run.sh serial
+```
+
+Runtime-checking and MPI variants are also available:
+
+```sh
+tests/smoke/run.sh debug
+tests/smoke/run.sh mpi
+```
+
+The same modes run in GitHub Actions, together with compilation of the
+LaTeX manual.
+
+## Citation
+
+If JETSPIN contributes to published work, please cite:
+
+> M. Lauricella, G. Pontrelli, I. Coluzza, D. Pisignano, and S. Succi,
+> “JETSPIN: A specific-purpose open-source software for electrospinning
+> simulations of nanofibers,” *Computer Physics Communications* **197**
+> (2015), 227–238.
+
+The evaporation implementation follows A. L. Yarin, S. Koombhongse, and
+D. H. Reneker, *Journal of Applied Physics* **89** (2001), 3018–3026.
+See the scientific manual for model scope and attribution.
+
+## License and disclaimer
+
+JETSPIN is distributed under the
+[Open Software License 3.0](LICENSE.md). It is experimental research
+software and is provided without warranty; users are responsible for
+validating results for their applications.

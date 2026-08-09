@@ -46,7 +46,8 @@
   use utility_mod,    only : init_random_seed
 #ifdef _OPENACC
   use accelerator_mod, only : accelerator_prepare, &
-                         accelerator_update_host_state
+                         accelerator_update_host_state, &
+                         accelerator_is_persistent
 #endif
   use profiling_mod, only : profiling_initialize,profiling_reset, &
                        profiling_start,profiling_stop,profiling_report, &
@@ -93,6 +94,7 @@
   double precision :: loop_start_time,loop_end_time,loop_elapsed_time
   
   logical :: ladd,lrem,lremdat,ldorefinment,lrecycle
+  logical :: lfullhostoutput
   
   integer :: i,j,k,atype
 
@@ -221,6 +223,26 @@
     call profiling_start(prof_breakup)
     call ckeck_breakup(mytime)
     call profiling_stop(prof_breakup)
+
+!   Synchronize the complete state only for output formats that consume bead
+!   arrays. Normal statistical output transfers only its selected bead.
+#ifdef _OPENACC
+    if(accelerator_is_persistent())then
+      lfullhostoutput=.false.
+      if(lprintxyz)lfullhostoutput=mod(nstep,iprintxyz)==0
+      if(lprintxyzsing)lfullhostoutput=lfullhostoutput .or. &
+       mod(nstep,iprintxyzsing)==0
+      if(lprintpdbsing)lfullhostoutput=lfullhostoutput .or. &
+       mod(nstep,iprintpdbsing)==0
+      if(lprintdat)lfullhostoutput=lfullhostoutput .or. &
+       mod(nstep,iprintdat)==0
+      lfullhostoutput=lfullhostoutput .or. mod(nstep,nrestartdump)==0
+      if(lfullhostoutput)then
+        call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz, &
+         jetst,jetvx,jetvy,jetvz,nstep)
+      endif
+    endif
+#endif
     
 !   compute statistical quanities
     call profiling_start(prof_statistics)
@@ -318,4 +340,3 @@
 
  end program JetSpin
   
-

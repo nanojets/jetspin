@@ -79,13 +79,14 @@ The host no longer receives stage intermediates or Coulomb forces.
 The per-step path-length and maximum-stress reductions are fused with the
 final RK4 state-update kernel. Their scalar accumulators also remain device
 resident. A small follow-up kernel preserves the CPU rule that the last bead
-index wins when several beads share the maximum stress. The seven
-coordinate, stress, and velocity arrays are now updated on the host only when
-`compute_statistic` produces scheduled output. The accelerator records the
-last synchronized timestep, so the final restart reuses the step-1000 host
-snapshot instead of downloading it again. With the Test 9 cadence this reduces
-full-state synchronization from 1,000 times to five snapshots. Dynamic
-topology remains outside persistent mode.
+index wins when several beads share the maximum stress. For ordinary
+statistical output, only the seven state values of the selected bead and four
+scalar accumulators are downloaded. XYZ, PDB, binary trajectory, and periodic
+restart events request a complete state explicitly. With the standard Test 9
+input, the five scheduled samples transfer 420 bytes in total and the final
+restart performs the only 56,056-byte full-state download. The accelerator
+records the last synchronized timestep so coincident output and restart events
+never duplicate a transfer. Dynamic topology remains outside persistent mode.
 
 ## Numerical validation
 

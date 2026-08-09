@@ -15,6 +15,8 @@ module accelerator_mod
  public :: accelerator_set_persistent
  public :: accelerator_is_persistent
  public :: accelerator_update_host_state
+ public :: accelerator_update_host_point
+ public :: accelerator_host_state_is_current
  public :: accelerator_store_statistics
  public :: accelerator_update_host_statistics
  public :: accelerator_update_device_statistics
@@ -113,6 +115,27 @@ contains
   implicit none
   accelerator_is_persistent=accelerator_persistent
  end function accelerator_is_persistent
+
+ logical function accelerator_host_state_is_current(nstep)
+  implicit none
+  integer, intent(in) :: nstep
+  accelerator_host_state_is_current=accelerator_persistent .and. &
+   nstep==accelerator_last_host_sync_step
+ end function accelerator_host_state_is_current
+
+ subroutine accelerator_update_host_point(ipoint,jetxx,jetyy,jetzz, &
+   jetst,jetvx,jetvy,jetvz)
+  implicit none
+  integer, intent(in) :: ipoint
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
+  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
+  if(.not.accelerator_persistent)return
+#ifdef _OPENACC
+!$acc update self(jetxx(ipoint),jetyy(ipoint),jetzz(ipoint), &
+!$acc& jetst(ipoint),jetvx(ipoint),jetvy(ipoint),jetvz(ipoint))
+#endif
+  return
+ end subroutine accelerator_update_host_point
 
  subroutine accelerator_update_host_state(npjet,jetxx,jetyy,jetzz, &
    jetst,jetvx,jetvy,jetvz,nstep)

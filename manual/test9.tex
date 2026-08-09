@@ -132,3 +132,12 @@ A30 run, the statistics region decreased from 0.056676 s to 0.036373 s, and
 the complete loop took 2.457896 s. An extended comparison matched maximum
 stress and its position exactly; path length differed by at most
 $2\,10^{-8}$ cm because of reduction ordering.
+
+In the selective-output milestone, ordinary statistical output downloads only
+the seven state values of the selected bead and four scalar accumulators. The
+sampling interval is computed from \texttt{print time / timestep}; the value
+of 200 steps belongs to the standard Test 9 input and is not hardcoded. OpenACC
+transfer tracing reported 280 bytes for the five point samples, 140 bytes for
+their statistics, and one 56,056-byte complete-state download for the final
+restart, or 56,476 bytes in total. XYZ, PDB, binary trajectory, and periodic
+restart output still request a complete snapshot at their configured cadence.

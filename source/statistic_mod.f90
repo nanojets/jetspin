@@ -30,7 +30,9 @@ module statistic_mod
                              accelerator_store_statistics, &
                              accelerator_update_host_state, &
                              accelerator_update_host_statistics, &
-                             accelerator_update_device_statistics
+                             accelerator_update_device_statistics, &
+                             accelerator_update_host_point, &
+                             accelerator_host_state_is_current
 #endif
  
  implicit none
@@ -184,20 +186,25 @@ module statistic_mod
   integer, save :: nmulstepdoneold=0
   
   double precision, dimension(3) :: vext
+  logical :: complete_host_state
 
+  complete_host_state=.true.
 #ifdef _OPENACC
-! CPU output and derived observables need a current host snapshot only at the
-! configured statistics cadence, not after every integration step.
   if(accelerator_is_persistent())then
-    call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz,jetst, &
-     jetvx,jetvy,jetvz,nstepsub)
+    complete_host_state=accelerator_host_state_is_current(nstepsub)
+    if(.not.complete_host_state)then
+      call accelerator_update_host_point(inpjet,jetxx,jetyy,jetzz, &
+       jetst,jetvx,jetvy,jetvz)
+    endif
     call accelerator_update_host_statistics(counterlpath, &
      ncounterlpath,maxstress,maxstressposx)
   endif
 #endif
   
 ! compute all the observables
-  call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
+  if(complete_host_state)then
+    call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
+  endif
   if(levaporation)then
     call compute_crosssec(jetxx,jetyy,jetzz,jetve,jetce)
   endif

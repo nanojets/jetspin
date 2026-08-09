@@ -224,6 +224,22 @@ differed by at most `2e-8 cm` because of reduction ordering. The standard Test
 9 trajectory still passed the A30 baseline with a worst normalized difference
 of `7.97e-5`.
 
+## Selective-output milestone
+
+The output path no longer downloads all seven state arrays for ordinary
+statistics. At each configured `print time`, it transfers only the seven state
+values of the selected bead plus four accumulated statistics. The interval is
+derived from `print time / timestep`; 200 steps is specific to the standard
+Test 9 input and is not hardcoded.
+
+`NV_ACC_NOTIFY=2` reported 280 bytes for five point samples, 140 bytes for the
+associated scalar statistics, and one 56,056-byte full-state download for the
+final restart: 56,476 bytes in total. The preceding implementation transferred
+280,420 bytes. A diagnostic input with XYZ output enabled correctly reverted
+to complete snapshots at the requested XYZ cadence and produced a valid
+trajectory file. The standard numerical comparison retained the worst
+normalized difference of `7.97e-5`.
+
 ## Versioned numerical records
 
 The CPU and A30 OpenACC `statout.dat` files from this initial measurement are

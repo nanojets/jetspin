@@ -190,7 +190,7 @@ module statistic_mod
 ! configured statistics cadence, not after every integration step.
   if(accelerator_is_persistent())then
     call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz,jetst, &
-     jetvx,jetvy,jetvz)
+     jetvx,jetvy,jetvz,nstepsub)
     call accelerator_update_host_statistics(counterlpath, &
      ncounterlpath,maxstress,maxstressposx)
   endif

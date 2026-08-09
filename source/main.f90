@@ -298,7 +298,7 @@
 ! print restart file
 #ifdef _OPENACC
   call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz,jetst, &
-   jetvx,jetvy,jetvz)
+   jetvx,jetvy,jetvz,nstep)
 #endif
   call write_restart_file(1,135,'save.dat',nstep,mytime)
   
@@ -318,5 +318,4 @@
 
  end program JetSpin
   
-
 

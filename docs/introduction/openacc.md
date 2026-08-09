@@ -81,9 +81,10 @@ final RK4 state-update kernel. Their scalar accumulators also remain device
 resident. A small follow-up kernel preserves the CPU rule that the last bead
 index wins when several beads share the maximum stress. The seven
 coordinate, stress, and velocity arrays are now updated on the host only when
-`compute_statistic` produces scheduled output and once before the final
-restart. With the Test 9 cadence this reduces full-state synchronization from
-1,000 times to five scheduled snapshots plus the final restart. Dynamic
+`compute_statistic` produces scheduled output. The accelerator records the
+last synchronized timestep, so the final restart reuses the step-1000 host
+snapshot instead of downloading it again. With the Test 9 cadence this reduces
+full-state synchronization from 1,000 times to five snapshots. Dynamic
 topology remains outside persistent mode.
 
 ## Numerical validation

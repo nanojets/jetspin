@@ -196,9 +196,11 @@ from the preceding call-scoped GPU trajectory by at most `2.0e-7` normalized.
 
 Path length and maximum stress are now accumulated on the device after each
 step. The statistic counters remain device resident, and the complete primary
-state is copied to the host only at the five scheduled 200-step samples and
-before the final restart. The former 56,056-byte transfer on every timestep is
-therefore absent.
+state is copied to the host only at the five scheduled 200-step samples. The
+final restart detects that the step-1000 snapshot is already current and does
+not download it again. The former 56,056-byte transfer on every timestep is
+therefore absent. `NV_ACC_NOTIFY=2` confirms exactly 35 array downloads and 20
+scalar-statistic downloads: five synchronization events in total.
 
 A representative A30 run took `2.468580 s` for the complete loop. Statistics
 took `0.056676 s`; this is mostly the launch overhead of the small reduction

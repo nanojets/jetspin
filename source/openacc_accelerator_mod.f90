@@ -8,6 +8,7 @@ module accelerator_mod
  logical, save :: accelerator_statistics_mapped=.false.
  double precision, save :: statistics_step_max=-huge(0.d0)
  integer, save :: statistics_step_index=-1
+ integer, save :: accelerator_last_host_sync_step=-huge(0)
 
  public :: accelerator_prepare
  public :: accelerator_eom3_stage
@@ -114,16 +115,21 @@ contains
  end function accelerator_is_persistent
 
  subroutine accelerator_update_host_state(npjet,jetxx,jetyy,jetzz, &
-   jetst,jetvx,jetvy,jetvz)
+   jetst,jetvx,jetvy,jetvz,nstep)
   implicit none
   integer, intent(in) :: npjet
+  integer, intent(in), optional :: nstep
   double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
   double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
   if(.not.accelerator_persistent)return
+  if(present(nstep))then
+    if(nstep==accelerator_last_host_sync_step)return
+  endif
 #ifdef _OPENACC
 !$acc update self(jetxx(0:npjet),jetyy(0:npjet),jetzz(0:npjet), &
 !$acc& jetst(0:npjet),jetvx(0:npjet),jetvy(0:npjet),jetvz(0:npjet))
 #endif
+  if(present(nstep))accelerator_last_host_sync_step=nstep
   return
  end subroutine accelerator_update_host_state
 

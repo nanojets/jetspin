@@ -1,0 +1,31 @@
+% JETSPIN jet random noise documentation
+
+\section{Random noise\label{sec:Random-noise}}
+
+In JETSPIN, it is possible to add a random noise to Eq. \ref{eq:force-EOM}
+in order to model the instability at the nozzle triggering the bending
+motion. This procedure can be used as an alternative to (or in junction
+with) the strategy presented in Section \ref{sec:Perturbations-at-the}.
+
+In particular, collected in $\vec{\textbf{f}}_{old,i}=\vec{\textbf{f}}_{el,i}+\vec{\textbf{f}}_{c,i}+\vec{\textbf{f}}_{\upsilon e,i}+\vec{\textbf{f}}_{st,i}+\vec{\textbf{f}}_{g,i}+\vec{\textbf{f}}_{diss,i}+\vec{\textbf{f}}_{rand}$
+all the force terms, we modify Eq. \ref{eq:force-EOM} as
+\begin{equation}
+m_{i}\frac{d\vec{\boldsymbol{\upsilon}}_{i}}{dt}=\vec{\textbf{f}}_{old,i}-m_{i}\gamma_{rand}\vec{\boldsymbol{\upsilon}}_{i}+\sqrt{2m_{i}^{2}D_{rand}}\vec{\boldsymbol{\eta}_{i}}(t),
+\end{equation}
+
+following a standard Langevin approach, where $D_{rand}$ is a diffusion
+coefficient in the velocity space (in cgs units, $\text{cm}^{2}/\text{s}^{3}$)
+and as $\gamma_{rand}$ a dissipative term ($\text{s}^{-1}$). We
+highlight that $D_{rand}$ sets the width of the fluctuations. In
+particular, it is possible to demonstrate \cite{gillespie2012simple}
+that the variance $\sigma_{rand}\left(t\right)^{2}$ of the velocity
+$\vec{\boldsymbol{\upsilon}}_{i}$ ($\text{cm}^{2}/\text{s}^{2}$)
+due to only the random and dissipative terms at time $t$, computed
+over an ensemble of stochastic trajectories, is equal to $\sigma_{rand}\left(t\right)^{2}\equiv$$<\left[\vec{\boldsymbol{\upsilon}}_{i}-<\vec{\boldsymbol{\upsilon}}_{i}>\right]^{2}>$
+$=\left(D_{rand}/\gamma_{rand}\right)\left(1-e^{-2\gamma_{rand}t}\right)$,
+and, consequently, $\lim\limits _{t\rightarrow\infty}\sigma_{rand}\left(t\right)^{2}=D_{rand}/\gamma_{rand}$,
+which is sometimes called fluctuation-dissipation Langevin relation.
+In \texttt{input} file, the user should specified both $D_{rand}$
+and $\sigma_{rand}{}^{2}$. The $\gamma_{rand}$ is automatically
+set to be equal to $\gamma_{rand}=D_{rand}/\sigma_{rand}{}^{2}$ by
+exploiting the Langevin relation.

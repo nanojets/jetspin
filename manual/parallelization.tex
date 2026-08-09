@@ -1,0 +1,44 @@
+% JETSPIN parallelization documentation
+
+\section{Parallelization\label{sec:Parallelization}}
+
+The parallel infrastructure of JETSPIN incorporates the necessary
+data distribution and communication structures. The parallel strategy
+underlying JETSPIN is the Replicated Data (RD) scheme\cite{smith1991molecular},
+where fundamental data of the simulated system are reproduced on all
+processing nodes. In simulations of nanofibers, the fundamental data
+consist of position, velocity, and viscoelastic stress arrays of each
+bead in which the nanojet is discretised (see below Cap \ref{chap:JETSPIN-Model-and}).
+Further data defining mass and charge of each bead are also replicated.
+However, all auxiliary data are distributed in equal portion of data
+(as much as possible) for each processor. Despite being available
+other parallel strategies such as the Domain Decomposition\cite{brown1993domain},
+our experience has shown that such volume of data is by no means prohibitive
+on current parallel computers.
+
+By the RD scheme, we adopt in JETSPIN a simple communication strategy
+of the communication between nodes, which is handled by global summation
+routines. The module \texttt{version\_mod} located in the \texttt{parallel\_version\_mod.f90}
+file contains all the global communication routines which exploit
+the MPI (Message Passing Interface) library. Note that a FORTRAN90
+compiler and an MPI implementation for the specific machine architecture
+are required in order to compile JETSPIN in parallel mode. An alternative
+version of the module \texttt{version\_mod} is located in the \texttt{serial\_version\_mod.f90}
+file, and it can be easily selected by appropriate flags in the \texttt{makefile}
+at compile time. By selecting this version, JETSPIN can also be run
+on serial computers without modification, even though the code has
+been designed to run on parallel computers.
+
+The size system is strictly time-dependent as mentioned in Sec \ref{sec:Structure}
+and, therefore, the memory of various service bookkeeping arrays is
+dynamically distributed over all the processing nodes. In particular,
+the bookkeeping array size, declared as \texttt{mxchunk}, is managed
+by the routine \texttt{set\_mxchunk}. All the beads of the discretised
+nanofiber are assigned at every time step to a specific node by the
+routine \texttt{set\_chunk}, and their temporary data are stored in
+bookkeeping arrays belonging to the assigned node. It is worth stressing
+that the communication latency makes the parallelization efficiency
+strictly dependent on the system size. Therefore, we only advice the
+use of JETSPIN in parallel mode whenever the user expects a system
+size with at least 50 beads for each node (further details in Ref
+\cite{lauricella2015jetspin}).

@@ -1,0 +1,38 @@
+\section{External oscillating electric field\label{sec:External-oscillating-electric-field}}
+
+Oscillating orthogonal electric field can bias the electrospinning
+process, particularly the radius of the electrospun fibers. Further,
+it can be used as a control mechanism to achieve uniform distributions
+of polymer filaments at the collector. In JETSPIN it is possible to
+simulate external oscillating electric field. Denoted the electric
+field
+
+\begin{equation}
+\vec{E}=\left(E_{x},\,E_{y},\,E_{z}\right),
+\end{equation}
+the directive \texttt{external potential type} (see Table \ref{tab:inputlist})
+can be used to select the waveform of the oscillation. The user can
+select three types of waveform: a rectangular wave oriented along
+x-axis; a rectangular wave produced by a RC circuit; a rotating electric
+field of a sinusoidal wave. In the first case the electric field is
+given by
+
+\begin{equation}
+\vec{E}=\left(E_{x}\left\lceil\sin\omega t+\varphi\right\rceil,\,0,\,0\right),
+\end{equation}
+
+where the symbol $\left\lceil .\right\rceil$ denotes the ceiling
+function. If the waveform is modeled as produced by an RC circuit,
+the exponential decay $E_{x}\exp\left(-t/RC\right)$ is added to the
+previous equation whenever the field is switched off, and the
+exponential increase $E_{x}\left[1-\exp\left(-t/RC\right)\right]$
+is added whenever the field is switched on. Here, $RC$ denotes a
+decay time (seconds). The last case describes an orthogonal rotating
+electric field. Here the electric field takes the form
+
+\begin{equation}
+\vec{E}=\left(E_{x},\,E_{y}\cos\omega t+\varphi,\,E_{z}\sin\omega t+\varphi\right).
+\end{equation}
+
+Details on the main effects of orthogonal rotating electric fields
+are available in Ref. \cite{lauricella2017effects}.

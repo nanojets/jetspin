@@ -1,0 +1,41 @@
+% JETSPIN perturbations documentation
+
+\section{Perturbations at the nozzle\label{sec:Perturbations-at-the}}
+
+The spinneret nozzle is represented by a single mass-less point of
+charge $\bar{q}$ fixed at $x=0$ (nozzle bead). Its charge $\bar{q}$
+is assumed equal to the mean charge value of the jet beads. Such charged
+point can be also interpreted as a small portion of jet which is fixed
+to the nozzle. In JETSPIN it is possible to add small perturbations
+to the $y_{n}$ and $z_{n}$ coordinates of the nozzle bead in order
+to model fast mechanical oscillations of the spinneret\cite{coluzza2014ultrathin}.
+Given the initial position of the nozzle
+
+\begin{subequations}
+
+\begin{equation}
+y_{n}=A\cdot\cos\left(\varphi\right)
+\end{equation}
+
+\begin{equation}
+z_{n}=A\cdot\sin\left(\varphi\right),
+\end{equation}
+
+\end{subequations}
+
+the equations of motion for the nozzle bead are
+
+\begin{subequations}
+
+\begin{equation}
+\frac{dy_{n}}{dt}=-\omega\cdot z_{n}
+\end{equation}
+
+\begin{equation}
+\frac{dz_{n}}{dt}=\omega\cdot y_{n},
+\end{equation}
+
+\end{subequations}
+
+where $A$ denotes the amplitude of the perturbation, while $\omega$
+and $\varphi$ are its frequency and initial phase, respectively.

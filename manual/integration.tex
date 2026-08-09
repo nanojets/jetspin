@@ -1,0 +1,57 @@
+\section{Integration schemes}
+
+In order to integrate the homogeneous differential equations of motion
+we discretize time as $t_{i}=t_{0}+i\Delta t$ with $i=1,\ldots,n_{steps}$,
+where $n_{steps}$ denotes the number of sub-intervals. In JETSPIN
+three different integration schemes: the first-order accurate Euler
+scheme, the second-order accurate Heun scheme (sometimes called second-order
+accurate Runge-Kutta), and the fourth-order accurate Runge-Kutta scheme\cite{press2007numerical}.
+The user can select a specific scheme by using appropriate keys in
+the input file, as described in Sec \ref{sec:Input-file}. If the
+airdrag is activated, the explicit strong order scheme by Platen \cite{platen1987derivative,kloeden1992numerical,platen2010numerical}
+have to be selected, whereof the order of strong convergence was evaluated
+equal to 1.5.
+
+This scheme avoids the use of derivatives by corresponding finite
+differences in the same way as Runge-Kutta schemes do for ODEs in
+a deterministic setting, and it is briefly summarized as follows.
+
+Let us consider a Brownian motion vector process $\textbf{X}=\left\{ \textbf{X}_{t},t\right\} $
+of \textit{d}-dimensional satisfying the stochastic differential equation
+
+\begin{equation}
+\frac{d\textbf{X}}{dt}=\textbf{a}\left(t,X^{1},\ldots,X^{d}\right)+\textbf{b}d\Omega\label{eq:generic-sde}
+\end{equation}
+where $\textbf{a}$ and $\textbf{b}$ are vectors of \textit{d}-dimensional
+usually called drift and diffusion vector coefficients, and $\Omega\left(t\right)$
+denotes a Wiener process. Denoted $Y_{t}^{k}$ the approximation for
+the \textit{k}-th component of the vector $\textbf{X}$ at time $t$,
+the integrator has the following form:
+
+\begin{equation}
+Y_{t+\varDelta t}^{k}=Y_{t}^{k}+b^{k}\Delta\Omega+\frac{1}{2\sqrt{\Delta t}}\left[a^{k}\left(\widetilde{\boldsymbol{\Upsilon}}_{+}\right)-a^{k}\left(\widetilde{\boldsymbol{\Upsilon}}_{-}\right)\right]\Delta\varPsi+\frac{1}{4}\left[a^{k}\left(\widetilde{\boldsymbol{\Upsilon}}_{+}\right)+2a^{k}+a^{k}\left(\widetilde{\boldsymbol{\Upsilon}}_{-}\right)\right]\Delta t,\label{eq:integrator-platen}
+\end{equation}
+
+with the vector supporting values
+
+\begin{equation}
+\begin{alignedat}{1}\widetilde{\boldsymbol{\Upsilon}}_{\pm} & =\textbf{Y}_{t}+\textbf{a}\Delta t\pm\textbf{b}\sqrt{\Delta t}\\
+\widetilde{\boldsymbol{\Phi}}_{\pm} & =\widetilde{\boldsymbol{\Upsilon}}_{+}\pm\textbf{b}\left(\widetilde{\boldsymbol{\Upsilon}}_{+}\right)\sqrt{\Delta t}.
+\end{alignedat}
+\end{equation}
+
+Here, $\Delta\Omega$ and $\Delta\varPsi$ indicate normally distributed
+random variables constructed from two independent $N\left(0,1\right)$
+standard Gaussian distributed random variables ($U_{1}$, $U_{2}$)
+by means of the following linear transformation:
+
+\begin{equation}
+\begin{alignedat}{1}\Delta\Omega & =U_{1}\sqrt{\Delta t}\\
+\Delta\varPsi & =\frac{1}{2}\Delta t^{3/2}\left(U_{1}+\frac{1}{\sqrt{3}}U_{2}\right).
+\end{alignedat}
+\label{eq:random-var-1}
+\end{equation}
+
+Note that in JETSPIN the time step $\Delta t$ is automatically rescaled
+by the quantity $\tau$, in accordance with the mentioned dimensionless
+scaling convention.

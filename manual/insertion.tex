@@ -1,0 +1,34 @@
+% JETSPIN jet insertion documentation
+
+\section{Jet insertion\label{subsec:Jet-insertion}}
+
+The jet insertion at the nozzle is modeled as follows. For the sake
+of simplicity, let us consider a simulation which starts with only
+two bodies: a single mass-less point fixed at $x=0$ representing
+the spinneret nozzle, and a bead modeling an initial jet segment of
+mass $m_{i}$ and charge $e_{i}$ located at distance $l_{step}$
+from the nozzle along the $x$ axis. Here, $l_{step}$ denotes the
+length step used to discretize the jet in a sequence of beads. The
+starting jet bead is assumed to have a cross-sectional radius $a_{0}$,
+defined as the radius of the filament at the nozzle before the stretching
+process. Applying the condition that the volume of the jet is conserved,
+the relation $\pi a_{i}^{2}\,l_{i}=\pi a_{0}^{2}l_{step}$ is valid
+for any $i-th$ bead. Furthermore, the starting jet bead has an initial
+velocity $\upsilon_{s}$ along the $x$ axis equal to the bulk fluid
+velocity in the syringe needle. Once this traveling jet bead is a
+distance of $2\cdot l_{step}$ away from the nozzle, a new jet bead
+(third body) is placed at distance $l_{step}$ from the nozzle along
+the straight line joining the two previous bodies. Let us now label
+$i-1$ the farthest bead from the nozzle, and $i$ the last inserted
+bead. The $i-th$ bead is inserted with the initial velocity $\upsilon_{i}=\upsilon_{s}+\upsilon_{d}$,
+where $\upsilon_{d}$ denotes the dragging velocity computed as
+
+\begin{equation}
+\upsilon_{d}=\frac{\upsilon_{i-i}-\upsilon_{s}}{2}.
+\end{equation}
+
+Here, the dragging velocity should be interpreted as an extra term
+which accounts for the drag effect of the electrospun jet on the last
+inserted segment. Note that the actual dragging velocity definition
+was chosen in order to not alter the strain velocity term $\left(1/l_{i-1}\right)\cdot\left(dl_{i-1}/dt\right)$
+of Eq \ref{eq:huang-garcia} before and after the bead insertion.

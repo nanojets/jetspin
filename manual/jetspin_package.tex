@@ -1,0 +1,83 @@
+% JETSPIN Package documentation
+
+\section{The JETSPIN Package\label{sec:The-JETSPIN-Package}}
+
+In the recent years, electrospun nanofibers have gained a considerable
+industrial interest due to many possible applications, such as tissue
+engineering, air and water filtration, drug delivery and regenerative
+medicine. In particular, the high surface-area ratio of the fibers
+offers an intriguing prospect for technological applications. As consequence,
+several studies were focused on the characterization and production
+of uni-dimensionally elongated nanostructures. A number of reviews
+\cite{li2004electrospinning,greiner2007electrospinning,carroll2008nanofibers,huang2003review,persano2013industrial}
+and books \cite{yarin2014fundamentals,wendorff2012electrospinning,pisignanoelectrospinning}
+concerning electrospinning have been published in the last decade.
+
+Typically, electrospun nanofibers are produced at laboratory scale
+by the uniaxial stretching of a jet, which is ejected at the nozzle
+from a charged polymer solution. The initial elongation of a jet can
+be produced by applying an externally electrostatic field between
+the spinneret and a conductive collector. Electrospinning involves
+mainly two sequential stages in the uniaxial elongation of the extruded
+polymer jet: an initial quasi steady stage, in which the electric
+field stretches the jet in a straight path away from the nozzle of
+the ejecting apparatus, and a second stage characterized by a bending
+instability induced from small perturbations, which misalign the jet
+from its axis of elongation \cite{zeng2006numerical}. These small
+disturbances may originate from mechanical vibrations at the nozzle
+or from hydrodynamic-aerodynamic perturbations within the experimental
+apparatus. Such a misalignment provides an electrostatic-driven bending
+instability before the jet reaches the conductive collector, where
+the fibers are finally deposited. As a consequence, the jet path length
+between the nozzle and the collector increases, and the stream cross-section
+undergoes a further decrease. The ultimate goal of electrospinning
+process is to minimize the radius of the collected fibers. By a simple
+argument of mass conservation, this is tantamount to maximizing the
+jet length by the time it reaches the collecting plane. By the same
+argument, it is therefore of interest to minimize the length of the
+initial stable jet region. Consequently, the bending instability is
+a desirable effect, as it produces a higher surface-area-to-volume
+ratio of the jet, which is transferred to the resulting nanofibers
+\cite{feng2003stretching}.
+
+Computational models provide a useful tool to elucidate the physical
+phenomenon and provide information which might be used for the design
+of electrospinning experiments. Numerical simulations can be used
+to improve the capability of predicting the key processing parameters
+and exert a better control on the resulting nanofiber structure. In
+recent years, with a renewed interest in nanotechnology, electrospinning
+studies attracted the attention of many resarchers both from modeling,
+computational and experimental point of view \cite{reneker2000bending,yarin2001taylor,fridrikh2003controlling,theron2004experimental,lu2006computer,zeng2006numerical}.
+Although some author uses dissipative particle dynamics (DPD) mesoscale
+simulation method into electrospinning study \cite{wang2013simulation},
+most models usually treat the jet filament as a series of discrete
+elements ({\em beads}) obeying the equations of continuum mechanics
+\cite{reneker2000bending,yarin2001taylor}. Each bead is subject to
+different types of interactions, such as long-range Coulomb repulsion,
+viscoelastic drag, the external electric field. The main aim of such
+models is to explain the complexity of the resulting dynamics and
+provide the set of parameters driving the optimal process. The effect
+of fast-oscillating loads on the bending instability have been explored
+in an extensive modeling and computational study \cite{coluzza2014ultrathin}.
+
+JETSPIN delivers a FORTRAN code especially designed to simulate the
+electrospinning process in a variety of different conditions and experimental
+settings. This comprehensive platform is devised such that different
+cases and input variables can be described and simulated. The framework
+is developed to exploit several computational architectures, both
+serial and parallel.
+
+JETSPIN, as open-source software, can be used to carry out a systematic
+sensitivity analysis over a broad range of parameter values. The results
+of simulations provide valuable insight on the physics of the process
+and can be used to assess experimental procedures for an optimal design
+of the equipment and to control processing strategies of technological
+advanced nanofibers.
+
+\textbf{The JETSPIN code is freely downloadable at the web site: }
+
+\bigskip{}
+
+\begin{center}
+\href{http://www.nanojets.eu}{http://www.nanojets.eu}
+\par\end{center}

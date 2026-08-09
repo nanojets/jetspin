@@ -1,0 +1,51 @@
+\section{Test Case 3: Three-D simulation of electrospinning process\label{sec:Test-Case-3:}}
+
+The electrospinning of polyvinylpyrrolidone (PVP) nanofibers is a
+prototypical process, which has been largely investigated in literature.\cite{yarin2014fundamentals,pisignanoelectrospinning,persano2013industrial}
+By the input located in the \textit{input-3} sub-directory, we simulate
+the electrospinning process of PVP solutions. Then, the theoretical
+results predicted by the models are compared with the aforementioned
+experimental data. In particular, we reproduce an experiment in which
+a solution of PVP (molecular weight = 1300 kDa) is prepared by a mixture
+of ethanol and water (17:3 v:v), at a concentration of about 2.5 wt\%.
+The applied voltage is in a range around 10 kV, and the collector
+is placed at distance 16 cm from the nozzle, which has radius $250\,$micron
+(further details are provided in Ref. \cite{montinaro2015electrospinning,lauricella2015jetspin}
+). As rheological properties of such system we consider the zero-shear
+viscosity $\mu_{0}=0.2\,\text{g}/(\text{cm}\cdot\text{s})$ \cite{yuya2010morphology,buhler2005polyvinylpyrrolidone},
+the elastic modulus $G=5\cdot10^{4}\,\text{g}/(\text{cm}\cdot\text{s}^{2})$
+\cite{morozov2012water}, and the surface tension $\alpha=21.1\,\text{g}/\text{s}^{2}$
+\cite{yuya2010morphology}. We use for the simulation a viscosity
+value $\mu$ which is two order of magnitude larger than the zero-shear
+viscosity $\mu_{0}$ reported, since the strong longitudinal flows
+we are dealing with can lead to an increase of the extensional viscosity
+from $\mu_{0}$, as already observed in literature.\cite{reneker2000bending,yarin1993free}
+The mass density is equal to $0.84\,\text{g}/\text{cm}^{3}$, while
+the charge density was estimated by experimental observations of the
+current measured at the nozzle. For convenience, all the simulation
+parameters are summarized in Tab \ref{tab:simulation-param}.
+
+\begin{table}
+\begin{centering}
+\begin{tabular}{cccccccccc}
+\hline
+$\rho$  & $\rho_{q}$  & $a_{0}$  & $\upsilon_{s}$  & $\alpha$  & $\mu$  & $G$  & $V_{0}$  & $\omega$  & $A$\tabularnewline
+($\text{kg}/\text{m}^{3}$)  & ($\text{C}/\text{L}$)  & ($\text{cm}$)  & ($\text{cm/s}$)  & (mN/m)  & (Pa$\cdot$s)  & (Pa)  & (kV)  & ($\text{s}^{-1}$)  & ($\text{cm}$)\tabularnewline
+\hline
+\hline
+840  & $2.8\cdot10^{-7}$  & $5\cdot10^{-3}$  & 0.28  & 21.1  & 2.0  & 50000  & 9.0  & $10^{4}$  & $10^{-3}$\tabularnewline
+\hline
+\end{tabular}
+\par\end{centering}
+\protect\protect\caption{Simulation parameters for the simulation of PVP nanofibers. The headings
+used are as follows: $\rho$: density, $\rho_{q}$: charge density,
+$a_{0}$: fiber radius at the nozzle, $\upsilon_{s}$: bulk fluid
+velocity in the syringe needle, $\alpha$: surface tension, $\mu$:
+viscosity, $G$ : elastic modulus, $V_{0}$ : applied voltage bias,
+$\omega$: frequency of perturbation, $A$ : amplitude of perturbation.
+The bulk fluid velocity $\upsilon_{s}$ was estimated considering
+that the solution was pumped at constant flow rate of 2 mL/h in a
+needle of radius $250\,$micron.}
+
+\label{tab:simulation-param}
+\end{table}

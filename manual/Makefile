@@ -6,7 +6,9 @@ BIBTEX ?= bibtex
 
 all: manual.pdf
 
-manual.pdf: manual.tex evaporation.tex evaporation-input.tex evaporation-examples.tex bibliography.bib elsarticle-num.bst figure01.png vmd1.png vmd2.png
+SECTION_TEX := $(filter-out manual.tex,$(wildcard *.tex))
+
+manual.pdf: manual.tex $(SECTION_TEX) bibliography.bib elsarticle-num.bst figure01.png vmd1.png vmd2.png
 	@if command -v $(LATEXMK) >/dev/null 2>&1; then \
 		$(LATEXMK) -pdf -interaction=nonstopmode -halt-on-error manual.tex; \
 	else \

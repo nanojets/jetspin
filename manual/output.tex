@@ -1,0 +1,95 @@
+\section{Output files\label{sec:Output-files}}
+
+A series of specific directives causes the writing of output files
+(see Tab \ref{tab:inputlist}). In JETSPIN three output files can
+be written: 1) the file \texttt{statdat.dat} containing time-dependent
+statistical data of simulated process; 2) the file \texttt{traj.xyz}
+reporting the nanofiber trajectory in XYZ format file; 3) the files
+\texttt{frame\%06d.xyz} reporting the nanofiber geometries in splitted
+XYZ format files (a single file for each frame); 4) the files \texttt{frame\%06d.pdb}
+reporting the nanofiber geometries in splitted PDB (Protein Data Bank)
+format files (a single file for each frame). Note that in the last
+case a topological file \texttt{frame\%06d.psf} in PSF (Protein Structure
+File) format will be printed alongside each pdb file. These two files
+(PDB and PSF) can be opened by VMD-Visual Molecular Dyanamics \cite{humphrey1996vmd}.
+
+Various statistical data can be written on the file \texttt{statdat.dat}
+, and the user can select them in input using the directive \texttt{printstat
+list} followed by appropriate symbolic strings, whose the list with
+corresponding meanings is reported in Tab \ref{tab:outputlist}. The
+selected observables will be printed at time interval on the same
+line following the order specified in input file. In the same way,
+a list of statistical data can be printed on computer terminal using
+the directive \texttt{print list} followed by the symbolic strings
+of Tab \ref{tab:outputlist}.
+
+The file \texttt{traj.xyz} is written as a continuous series of XYZ
+format frames taken at time interval, so that can be read by suitable
+visualization programs (e.g. VMD-Visual Molecular Dynamics \cite{humphrey1996vmd},
+UCSF Chimera \cite{pettersen2004ucsf}, etc.) to generate animations.
+The number of elements contained in the file is kept constant equal
+to the value specified by the directive \texttt{print xyz maxnum},
+since few programs (e.g. VMD) do not manage a variable number of elements
+along the simulations. If the actual number of beads is lower than
+the given constant \texttt{maxnum}, the extra elements are printed
+in the origin point. On the other hand, the number of beads printed
+in the files \texttt{frame\%06d.xyz} and \texttt{frame\%06d.pdb} is
+exactly the actual number of beads used to discretized the jet at
+the given frame. Note that the unit of mesurement used in the files,
+\texttt{traj.xyz}, \texttt{frame\%06d.xyz} and \texttt{frame\%06d.pdb}
+is the centimeter multiplied by $f$, which was given in input file
+by the directve `` \textit{print xyz rescale} $f$ '' and `` \textit{print
+pdb rescalepdb} $f$ '' (see Table \ref{tab:inputlist}), respectively.
+
+\begin{longtable}{cc}
+\caption{In JETSPIN a series of instantaneous and statistical data are available
+to be printed by selecting the appropriate key. Here, the list of
+symbolic string keys is reported with their corresponding meanings.
+Note by \textit{scaled} we mean that the observable was rescaled by
+the characteristic values provided in Tab\ref{tab:tabella-adimensionale}.
+The underlined keys correspond to data which are averaged on the time
+interval given by the directive \texttt{print time} in input file.
+Note by \textit{farest bead} we mean the farest bead from the nozzle
+(with greatest $x$ value). Note all the quantities are expressed
+in centimeter\textendash gram\textendash second unit system, excepted
+the dimensionless scaled observables.}
+\tabularnewline
+\endlastfoot
+\hline
+\textbf{keys:}  & \textbf{meaning:}\tabularnewline
+\hline
+\hline
+t  & unscaled time\tabularnewline
+ts  & scaled time \tabularnewline
+x, y, z  & unscaled coordinates of the farest bead \tabularnewline
+xs, ys, zs  & scaled coordinates of the farest bead\tabularnewline
+st  & unscaled stress of the farest bead\tabularnewline
+sts  & scaled stress of the farest bead\tabularnewline
+vx, vy, vz  & unscaled velocities of the farest bead \tabularnewline
+vxs, vys, vzs  & scaled velocities of the farest bead \tabularnewline
+yz  & unscaled normal distance from the x axis of the farest bead\tabularnewline
+yzs  & scaled normal distance from the x axis of the farest bead\tabularnewline
+mass  & last inserted mass at the nozzle \tabularnewline
+q  & last inserted charge at the nozzle\tabularnewline
+cpu  & time for every print interval\tabularnewline
+cpur  & remaining time to the end \tabularnewline
+cpue  & elapsed time \tabularnewline
+n  & number of beads used to discretise the jet\tabularnewline
+f  & index of the first bead \tabularnewline
+l  & index of the last bead \tabularnewline
+\uline{curn}  & current at the nozzle \tabularnewline
+\uline{curc}  & current at the collector \tabularnewline
+\uline{vn}  & velocity modulus of jet at the nozzle \tabularnewline
+\uline{vc}  & velocity modulus of jet at the collector\tabularnewline
+\uline{svc}  & strain velocity at the collector \tabularnewline
+\uline{mfn}  & mass flux at the nozzle \tabularnewline
+\uline{mfc}  & mass flux at the collector \tabularnewline
+\uline{rc}  & radius of jet at the collector \tabularnewline
+\uline{rrr}  & radius reduction ratio of jet \tabularnewline
+\uline{lp}  & length path of jet \tabularnewline
+\uline{rlp}  & length path of jet divided by the collector distance\tabularnewline
+mxst  & maximum stress along the jet\tabularnewline
+mxsx  & x position of the jet maximum stress\tabularnewline
+\hline
+\label{tab:outputlist}  & \tabularnewline
+\end{longtable}

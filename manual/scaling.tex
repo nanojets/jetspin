@@ -1,0 +1,108 @@
+\section{Dimensionless quantities\label{subsec:Introduction-of-dimensionless}}
+
+In JETSPIN all the variables are automatically re-scaled and stored
+in dimensionless units. In order to adopt a dimensionless form of
+the equations of motion, we use the dimensionless scaling procedure
+proposed by Reneker et al.\cite{reneker2000bending}. We define a
+characteristic length
+
+\begin{equation}
+L_{0}=\sqrt{\frac{\bar{q}^{2}}{\pi a_{0}^{2}G}}=l_{step}\sqrt{\frac{\pi a_{0}^{2}\rho_{V}^{2}}{G}},\label{eq:Length-scale}
+\end{equation}
+where we write the charge $q$ as $\pi a_{0}^{2}l_{step}\rho_{V}$,
+denoting $\rho_{V}$ the electric volume charge density of the filament.
+Further, we divide the time $t$ and the stress $\sigma$ by their
+respective characteristic scales reported in Tab\ref{tab:tabella-adimensionale}.
+Applying the condition that the volume of the jet is conserved $\pi a_{i}^{2}\,l_{i}=V_{i}$
+for any $i-th$ bead, we rewrite the EOM as:
+
+\begin{subequations}
+
+\begin{equation}
+\frac{d\vec{\bar{\textbf{r}}}_{i}}{d\bar{t}}=\vec{\boldsymbol{\bar{\upsilon}}}_{\,i}\label{eq:EOM-A1}
+\end{equation}
+
+\begin{equation}
+\frac{d\bar{\sigma}_{i}}{d\bar{t}}=-\left[\bar{\sigma}_{i}-\bar{\sigma}_{Y}+\bar{k}_{\upsilon e}\left(\frac{1}{\bar{l}_{i}}\frac{d\bar{l}_{i}}{d\bar{t}}\right)^{n_{\upsilon e}}\right]\label{eq:EOM-A2}
+\end{equation}
+
+\begin{equation}
+\begin{alignedat}{1}\frac{d\vec{\boldsymbol{\bar{\upsilon}}}_{\,i}}{d\bar{t}}= & \Phi\cdot\vec{\textbf{x}}+\sum_{\substack{j=1\\
+j\neq i
+}
+}^{n}\frac{Q_{ij}}{\bar{R}_{ij}^{2}+\bar{a}_{j}^{2}}\cdot\vec{\textbf{u}}_{ij}-F_{ve,i}\bar{V}_{i}\frac{\bar{\sigma}_{i}}{\bar{l}_{i}}\cdot\vec{\textbf{t}}_{i}+F_{ve,i+1}\bar{V}_{i+1}\frac{\bar{\sigma}_{i+1}}{\bar{l}_{i+1}}\cdot\vec{\textbf{t}}_{i+1}\\
+ & +A_{i}\frac{\bar{k_{i}}}{4}\left(\frac{\sqrt{\bar{V}_{i}}}{\sqrt{\bar{l}_{i}}}+\frac{\sqrt{\bar{V}_{i-1}}}{\sqrt{\bar{l}_{i-1}}}\right)^{2}\cdot\vec{\textbf{c}}_{i}+F_{g}\cdot\vec{\textbf{x}}-\Gamma_{i}\,\bar{l}_{i}^{0.905}\bar{\upsilon}_{tan,i}^{1+0.19}\cdot\vec{\textbf{t}}_{i-1}-\\
+ & -\Lambda_{i}\frac{\bar{k_{i}}\bar{\upsilon}_{tan,i}^{2}}{4}\left(\frac{\sqrt{\bar{V}_{i}}}{\sqrt{\bar{l}_{i}}}+\frac{\sqrt{\bar{V}_{i-1}}}{\sqrt{\bar{l}_{i-1}}}\right)^{2}\cdot\vec{\textbf{c}}_{i}-\Gamma_{rand}\vec{\boldsymbol{\bar{\upsilon}}}_{\,i}+\sqrt{2(\Theta_{\upsilon}+\Theta_{rand})}\cdot\vec{\boldsymbol{\eta}_{i}}(\bar{t})
+\end{alignedat}
+\label{eq:EOM-A3}
+\end{equation}
+
+\end{subequations}
+
+where we used the dimensionless derived variables and groups defined
+in Tab\ref{tab:tabella-adimensionale}. It is worth stressing that
+the viscoelastic and surface tension force terms are slightly different
+from the dimensionless form provided by Reneker et al. \cite{reneker2000bending},
+since we are considering the DyRen model presented in Sec \ref{sec:Dynamic-refinement}.
+In particular, we do not use the relation $\pi a_{i}^{2}\,l_{i}=\pi a_{0}^{2}l_{step}$
+since it is valid only for the Ren model (see discussion in Sec \ref{sec:Dynamic-refinement}).
+Note that, whenever the Kelvin\textendash Voigt model is activated,
+Eq \ref{eq:EOM-A2} is replaced by
+
+\begin{equation}
+\frac{d\bar{\sigma}_{i}}{d\bar{t}}=\frac{1}{\bar{l}_{i}}\frac{d\bar{l}_{i}}{d\bar{t}}-\frac{1}{\bar{l}_{i}}\frac{d^{2}\bar{l}_{i}}{d\bar{t}^{2}}.
+\end{equation}
+
+Finally, the dimensionless EOM of the nozzle are given as
+
+\begin{subequations}
+
+\begin{equation}
+\frac{d\bar{y}_{i}}{d\bar{t}}=-K_{s}\cdot\bar{z}_{i}
+\end{equation}
+
+\begin{equation}
+\frac{d\bar{z}_{i}}{d\bar{t}}=K_{s}\cdot\bar{y}_{i}\:,
+\end{equation}
+
+\end{subequations}
+
+with the dimensionless parameter $K_{s}$ defined in Tab\ref{tab:tabella-adimensionale}.
+
+\begin{table}[H]
+\begin{centering}
+\begin{tabular}{cc}
+\hline
+\multicolumn{2}{c}{Characteristic Scales}\tabularnewline
+\hline
+\hline
+$L_{0}=l_{step}\sqrt{\frac{\pi a_{0}^{2}\rho_{V}^{2}}{G}}$  & $t_{0}=\frac{\mu}{G}$\tabularnewline
+$\sigma_{0}=G$  & \tabularnewline
+\hline
+\multicolumn{2}{c}{Dimensionless Quantities}\tabularnewline
+\hline
+\hline
+$\bar{l}_{i}={\displaystyle \frac{l_{i}}{L_{0}}}$  & $\bar{R}_{ij}={\displaystyle \frac{R_{ij}}{L_{0}}}$\tabularnewline
+$\bar{\sigma}_{i}={\displaystyle \frac{\sigma_{i}}{\sigma_{0}}}$  & $\bar{\upsilon}_{i}=\upsilon_{i}{\displaystyle \frac{t_{0}}{L_{0}}}$ \tabularnewline
+$\bar{k_{i}}=k_{i}L_{0}$  & $\bar{\upsilon}_{tan,i}=\upsilon_{tan,i}{\displaystyle \frac{t_{0}}{L_{0}}}$ \tabularnewline
+$\bar{V}_{i}={\displaystyle \frac{V_{i}}{L_{0}^{3}}}$  & ${\displaystyle \bar{k}_{\upsilon e}=\frac{k_{\upsilon e}}{\mu\tau^{\left(n_{\upsilon e}-1\right)}}}$\tabularnewline
+$\bar{a}_{i}={\displaystyle \frac{a_{i}}{L_{0}}}$  & \tabularnewline
+\hline
+\multicolumn{2}{c}{Dimensionless Groups}\tabularnewline
+\hline
+\hline
+$\Phi_{i}={\displaystyle \frac{q_{i}\Phi_{0}\mu^{2}}{m_{i}h\,L_{0}\,G^{2}}}$  & $Q_{ij}={\displaystyle \frac{q_{i}q_{j}\mu^{2}}{m_{i}L_{0}^{3}G^{2}}}$\tabularnewline
+$F_{ve,i}={\displaystyle \frac{L_{0}\mu^{2}}{m_{i}G}}$  & $A_{i}={\displaystyle \frac{\alpha\mu^{2}}{m_{i}G^{2}}}$\tabularnewline
+$F_{g}={\displaystyle \frac{g\mu^{2}}{L_{0}G^{2}}}$  & $K_{s}=\omega{\displaystyle \frac{\mu}{G}}$\tabularnewline
+$H={\displaystyle \frac{h}{L_{0}}}$  & $L_{step}={\displaystyle \frac{l_{step}}{L_{0}}}$\tabularnewline
+$\Gamma_{i}={\displaystyle \gamma_{i}\cdot t_{0}L_{0}^{0.905}\left(\frac{L_{0}}{t_{0}}\right)^{0.19}}$  & $\Theta_{\upsilon}=D_{\upsilon}\cdot{\displaystyle \frac{t_{0}^{3}}{L_{0}^{2}}}$\tabularnewline
+$\Gamma_{rand}={\displaystyle \gamma_{rand}\cdot t_{0}}$  & $\Theta_{rand}=D_{rand}\cdot{\displaystyle \frac{t_{0}^{3}}{L_{0}^{2}}}$\tabularnewline
+$\Lambda_{i}={\displaystyle \frac{\rho_{a}L_{0}^{3}}{m_{i}}}$  & \tabularnewline
+\hline
+\end{tabular}
+\par\end{centering}
+\protect\protect\protect\caption{Definitions of the characteristic scales, dimensionless derived variables,
+and groups employed in the text.}
+
+\label{tab:tabella-adimensionale}
+\end{table}

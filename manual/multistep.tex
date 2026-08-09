@@ -1,0 +1,47 @@
+\section{Multiple Timestep Algorithm for Coulomb forces\label{sec:Multiple-Timestep-Algorithm}}
+
+For simulations involving a large number of beads in the calculation
+of the long-range Coulomb interactions JETSPIN offers the possibility
+of using a multiple timestep algorithm which improves the efficiency.
+The method is based on that described by Streett \textit{et al} in
+Ref \cite{streett1978multiple} and modified for the special context
+of electrospinning process.
+
+In the multiple timestep algorithm a primary cutoff $r_{pcut}$ for
+the Coulomb pair interactions is given. The cutoff $r_{pcut}$ is
+used to define a standard Verlet neighbor list \cite{allen1989computer}.
+Long-range Coulomb forces derived from beads in the neighbor list
+are usually larger than those due to remaining (far) beads not contained
+in the list. Therefore, it is possible to assess the Coulomb energy
+if the forces derived from the beads in the neighbor list are calculated
+at every timestep, while those from the remaining beads are calculated
+much less frequently, and are merely extrapolated over the interval.
+JETSPIN handles this procedure as follows: The Verlet neighbor list
+is updated at regular intervals $n_{mult}$. The interval between
+updates should be usually of the order of \ensuremath{\sim}50 timesteps
+$n_{step}$. Whenever the Verlet neighbor list is updated ($n_{step}=1$),
+the force contributions from both the beads of the list and outside
+the list are calculated. Then, the Coulomb forces are computed in
+total in the subsequent timestep ($n_{step}=2$), Hence, for $n_{step}>2$
+the Coulomb force acting on a single bead is assessed as sum of the
+forces derived from the beads in the neighbor list calculated explicitly,
+and those derived from the outer beads (outside the list) which are
+calculated by linear extrapolation of the exact forces obtained in
+the first two timesteps of the multi-step interval. As soon as the
+condition $n_{step}=n_{mult}$ is achieved, the procedure is restarted
+(the neighbor list is again updated). It is readily apparent how this
+scheme can lead to a significant saving in execution time.
+
+Note that the accuracy of the algorithm is a function of the multiple
+step interval, and decreases as $n_{mult}$ increases. Further, the
+neighbor list removes the need to scan over all the beads in the simulation
+at every timestep. It is worth to highlight that the algorithm is
+not time reversible.
+
+We remark that it is also possible to define in input file a maximum
+displacement $\Delta r_{pcut}$ in order to achieve a better control
+on the accuracy of the multiple timestep algorithm. The maximum displacement
+$\Delta r_{pcut}$ works as follows: whenever a bead has traveled
+for a distance larger than $\Delta r_{pcut}$ from its position at
+multi-step $n_{mult}=1$, the Verlet neighbor list is updated (even
+if $n_{step}<n_{mult}$).

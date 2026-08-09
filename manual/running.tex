@@ -1,0 +1,54 @@
+% JETSPIN running documentation
+
+\section{Running JETSPIN\label{sec:Running-JETSPIN}}
+
+In order to run the JETSPIN executable (main.x) the user should prepare
+the input file following the hints provided in Section \ref{sec:Input-file}.
+The test cases located in \textit{examples} sub-directory can be used
+as starting point for editing the input file. As JETSPIN is executed,
+the program will look for the input file, named \texttt{input.dat},
+in the same directory, where the executable was called. For instance,
+if JETSPIN is called in the \textit{execute} sub-directory, the code
+will look for the file \texttt{input.dat}, which must have been put
+in the same sub-directory.
+
+The JETSPIN code can be executed in serial mode by the command\texttt{ }
+
+\bigskip{}
+
+\texttt{./main.x}
+
+\bigskip{}
+
+or in parallel mode by the command
+
+\bigskip{}
+
+\texttt{mpirun -np \$ncpu ./main.x}
+
+\bigskip{}
+ where \texttt{\$ncpu} is the number of CPUs used in parallel (e.g.
+\texttt{mpirun -np 4 ./main.x} in order to run JETSPIN in parallel
+mode on 4 CPUs).
+
+A successful run of JETSPIN will generate several output files, which
+appear in the directory, where the executable was called. The output
+files will be produced only if their writing was explicitly requested
+in input file by using proper directives (see Section \ref{sec:Input-file}).
+A detailed description of the generated output files is provided in
+Section \ref{sec:Output-files}. Briefly, the main output files are
+the files \texttt{statdat.dat},\texttt{ traj.xyz} and \texttt{frame\%06d.xyz},
+which are human readable. The contains a catalogue of instantaneous
+or blocked averaged values of several variables, which can be used
+for temporal or statistical analysis in post-processing. The \texttt{traj.xyz}
+file provides a time ordered sequence of configurations to facilitate
+further analysis of the jet dynamics, while the \texttt{frame\%06d.xyz}
+file, reports the same information in splitted files, one for each
+registered time frame. Further, as JETSPIN is running, a series of
+lines will be printed in the terminal window, providing several information
+as requested by suitable directives in input file (see Section \ref{sec:Input-file}).
+Also present will be the \texttt{save.dat} file, which contains the
+accumulated data for computing statistical quantities and other quantities
+defining the current simulation. This file is intended to be used
+together with the input file for restarting a JETSPIN job (see Section
+\ref{sec:Restarting-JETSPIN}), and it is \textit{not} human readable.

@@ -1,0 +1,62 @@
+% JETSPIN jet refinement documentation
+
+\section{Dynamic refinement\label{sec:Dynamic-refinement}}
+
+In the original Ren model, each bead represent a constant quantity
+$V_{c}$ of jet volume, so that the relationship $\pi a_{i}^{2}\,l_{i}=\pi a_{0}^{2}l_{step}=V_{c}$
+is valid for any $i-th$ bead. Despite such relationship can be sometimes
+a useful advantage (as example, see Sec \ref{subsec:Introduction-of-dimensionless}),
+the radius reduction $a_{i}$ of the electrospun nanofiber provides
+a significant increase of the discretization length $l_{i}$ value
+along the jet path (also greater than two order of magnitude). As
+consequence, it was observed in literature \cite{kowalewski2009modeling}
+that the jet discretization close the collector becomes rather coarse
+to model efficiently the nanofiber. To get around this problem the
+dynamic refinement procedure developed in Ref \cite{lauricella2016refinement}
+can be used in JETSPIN in order to maintain the the length of the
+elements $l_{i}$ below a prescribed characteristic length max $l_{max}$.
+Whenever a bead length $l_{i}$ is larger than $l_{max}$, the nanofiber
+is refined by discretizing uniformly the jet at the length step $l_{step}$
+value given in input file. The discretization is performed by Akima
+spline interpolations \cite{akima1970new,akima1991method} of the
+main quantities describing the jet beads (positions, fiber radius,
+stress, velocities). In order to perform the interpolation we proceed
+following three steps. First of all, we introduce the variable $\lambda\in[0,1]$
+to parametrize the jet path, where $\lambda=0$ identifies the nozzle,
+and $\lambda=1$ the jet at the collector. For each bead we compute
+its respective $\lambda_{i}$ value by using the formula
+
+\begin{equation}
+\lambda_{i}=\frac{1}{l_{path}}\sum_{k=1}^{i}l_{k}
+\end{equation}
+where $l_{path}=\sum_{k=1}^{N_{beads}}l_{k}$ is the jet path length
+from the nozzle to the collector, and $i=1$ and $i=N_{beads}$ denote
+the jet bead at the nozzle and collector, respectively ($i=0$ denotes
+the nozzle). The set of ${\lambda_{i}}$ values represent the mesh
+used to build the cubic spline. Given a generic quantity $y$, the
+data $y_{i}=y\left(\lambda_{i}\right)$ are tabulated and used in
+order to compute the coefficients of the \textit{Akima spline}, following
+the algorithm reported in Ref \cite{akima1991method}. Then, we enforce
+a uniform parametrization of the nanofiber by imposing all the lengths
+of the elements equal to $l_{step}$. The new mesh ${\lambda_{i}^{*}}$
+is defined as
+
+\begin{equation}
+\lambda_{0}^{*}=0\;\lambda_{i}^{*}=\frac{i}{N_{beads}^{*}},\;i=1,2,\ldots,N_{beads}^{*}\text{.}
+\end{equation}
+where $N_{beads}^{*}=l_{path}/l_{step}$ represents the number of
+jet beads in the new representation. Finally, the new values $y\left(\lambda_{i}^{*}\right)$
+are computed for any $i-th$ bead by the \textit{spline interpolation}.
+The procedure is repeated for positions, fiber radius, stress and
+velocities of the jet beads in order to provide the respective quantities
+in the new mesh ${\lambda_{i}^{*}}$. It is worth to dressing that
+the volume $V_{i}=\pi a_{i}^{2}\,l_{i}$ represented by each bead
+is not anymore constant, and, consequently, $\pi a_{i}^{2}\,l_{i}\neq\pi a_{0}^{2}l_{step}$.
+It is also possible keep few beads in their positions before and after
+the refinement procedure in order to reduce possible errors introduced
+by the interpolation procedure. In other words, these anchor beads
+are manteined as knots of both the old and new meshes (see directive
+\texttt{dynam refin anchor} in Tab \ref{tab:inputlist}). In the
+following text we will refer to this emended version of the Ren model
+as DyRen model. Further details on the implemented dynamic refinement
+procedure are available in Ref \cite{lauricella2016refinement}.

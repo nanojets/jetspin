@@ -1,24 +1,3 @@
-% Evaporation examples, included in the Example Simulations chapter.
-
-\section{Test Case 7: Three-D simulation with evaporation and an orthogonal rotating electric field}
-
-Test Case 7 combines the three-dimensional Maxwell model with an
-orthogonal rotating electric field and the solvent evaporation and
-solidification model described in Sec.~\ref{sec:Evaporation}. The
-setting \texttt{evaporation tconstant 1} reproduces the relaxation-time
-law of Eq.~(38) of Yarin, Koombhongse and Reneker
-\cite{yarin2001bending}. The evaporation cutoff is the Yarin criterion
-$c_s=0.1$, which in JETSPIN is imposed through the equivalent volume
-ratio $V_i/V_i^0=c_{p,0}/0.9$.
-
-The example in \texttt{examples/input-7/input.dat} is intended as a
-regression and reference case for the coupled JETSPIN implementation.
-Its initial polymer fraction is $c_{p,0}=0.025$ and therefore it should
-not be interpreted as a quantitative reproduction of the 6\% aqueous-PEO
-case used in the original Yarin et al. comparison. The orthogonal rotating
-field is a separate JETSPIN extension and is not part of the 2001
-evaporation model.
-
 \section{Test Case 8: Yarin et al. (2001) reference parameters\label{sec:Test-Case-8}}
 
 The directory \texttt{examples/input-8} contains a dedicated reference

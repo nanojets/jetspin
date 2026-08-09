@@ -1,0 +1,39 @@
+% JETSPIN restarting documentation
+
+\section{Restarting JETSPIN\label{sec:Restarting-JETSPIN}}
+
+A simulation can be restarted after normal termination or error termination,
+if the last was due to inadequate time allocation. In order to restart
+a JETSPIN job the file \texttt{input.dat} is again required together
+with the file \texttt{restart.dat}, which is the exact copy of the
+\texttt{save.dat} file created by the previous job. In particular,
+the \texttt{save.dat} file was written by JETSPIN at regular time
+interval during the previous simulation. The file \texttt{save.dat}
+is \textit{not} human readable, and it should be renamed as \texttt{restart.dat},
+and located in the same directory of input file. If the user attempts
+to restart JETSPIN without the \texttt{restart.dat} file, the job
+will immediately exit with error. Note that the directive ``\textit{restart
+yes}'' needs to be added in input file in order to restart a previous
+JETSPIN job (see Section \ref{sec:Input-file}). Further, whenever
+a job is restarted, it is also possible to reset the accumulated statistical
+data, collected in the previous run, by adding the directive ``\textit{restart
+reset}'' in input file. It is worth stressing that JETSPIN will append
+new data to the files \texttt{statdat.dat},\texttt{ traj.xyz} , while
+all the other output files will be \textbf{overwritten} (included
+the \texttt{save.dat} file). Thus, the user is advised to keep backup
+copies of the \texttt{restart.dat} file, noting the times it was written,
+to help you avoid going right back to the start of a simulation.
+
+The same restarting procedure can be also used for extending a simulation
+beyond its initial allocation of timesteps. In this case, the directive
+\textit{timesteps} should be adjusted in input file to the new total
+number of steps required for the simulation. For instance, if a 10000
+step simulation needs to be extended by a further 5000 steps, the
+user should use the directive ``\textit{timesteps 15000}'' in the
+input file and include the ``\textit{restart yes}'' directive. Further,
+the restarting procedure can be useful in the event of machine failure.
+Here, the job can be restarted in the same way from the \texttt{save.dat}
+file, which is written at regular time intervals in order to meet
+just such an emergency. We stress that the procedure is not foolproof
+in the last event, since the job could be crash while the \texttt{save.dat}
+file is being written.

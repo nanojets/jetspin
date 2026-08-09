@@ -1,0 +1,227 @@
+% JETSPIN EoM documentation
+
+\section{Equations of Motion\label{sec:Equation-of-Motion}}
+
+The model implemented in JETSPIN is an extension of the Lagrangian
+discrete model introduced by Reneker et al. \cite{reneker2000bending}
+(in the following text referred as Ren model). The model provides
+a compromise of efficiency and accuracy by representing the filament
+as a series of $n$ beads (jet beads) at mutual distance $l$ connected
+by viscoelastic elements. The length $l$ is typically larger than
+the cross-sectional radius of the filament, but smaller than the characteristic
+lengths of other observables of interest (e.g. curvature radius).
+Each $i-th$ bead has mass $m_{i}$ and charge $q_{i}$ (not necessarily
+equal for all the beads). The nanofiber is modeled as a viscoelastic
+fluid following the approach developed in Ref. \cite{pontrelli2014electrospinning},
+and the stress $\sigma_{i}$ for the element connecting bead $i$
+with bead $i+1$ is given by the viscoelastic constitutive equation:
+
+\begin{equation}
+\frac{d\sigma_{i}}{dt}=-\frac{1}{t_{0}}\left(\sigma_{i}-\sigma_{HB}\right),\label{eq:huang-garcia}
+\end{equation}
+where $t_{0}$ is the relaxation time and $\sigma_{HB}$ is the Herschel\textendash Bulkley
+stress. Note that the relaxation time is give as
+
+\begin{equation}
+t_{0}=\frac{\mu}{G},\label{eq:relaxation-time}
+\end{equation}
+where $G$ is the elastic modulus and $\mu$ the viscosity of the
+fluid jet, while $\sigma_{HB}$ reads
+
+\begin{equation}
+\sigma_{HB}=\sigma_{Y}+K_{\upsilon e}\left(\frac{1}{l_{i}}\frac{dl_{i}}{dt}\right)^{n_{\upsilon e}}.\label{eq:Herschel=00003D002013Bulkley}
+\end{equation}
+In the previous expression, $K_{\upsilon e}$ is the flow consistency
+index with dimensions $\text{g}\text{s}^{ne-2}\text{cm}^{-1}$, $\sigma_{Y}$
+the yield stress, $n_{\upsilon e}$ the flow behavior index, $t$
+the time, and $l_{i}$ the length of the element connecting bead $i$
+with bead $i+1$. Note that it is possible to define an effective
+viscosity $\mu_{eff}$ as
+
+\begin{equation}
+\mu_{eff}=K_{\upsilon e}\left(\frac{1}{l_{i}}\frac{dl_{i}}{dt}\right)^{n_{\upsilon e}-1}.\label{eq:effective-viscosity}
+\end{equation}
+It is worth stressing that the case $K_{\upsilon e}=\mu$, $n_{\upsilon e}=1$
+and $\sigma_{Y}=0$ recovers the Maxwellian fluid model. Keeping the
+last case in mind, for convenience sake, we write
+
+\begin{equation}
+K_{\upsilon e}=k_{\upsilon e}\mu,\label{eq:rescaled-prefactor}
+\end{equation}
+with $k_{\upsilon e}$ the flow consistency index re-scaled by $\mu$,
+and the viscoelastic constitutive equation is rearranged as
+
+\begin{equation}
+\frac{d\sigma_{i}}{dt}=-\frac{G}{\mu}\left[\sigma_{i}-\sigma_{Y}+k_{\upsilon e}\mu\left(\frac{1}{l_{i}}\frac{dl_{i}}{dt}\right)^{n_{\upsilon e}}\right],\label{eq:stress-ode}
+\end{equation}
+The last constitutive equation allows the modeling of several fluids
+as, for example, Bingham fluids ( $\sigma_{Y}>0$ ), shear-thinning
+fluids ( $n_{\upsilon e}>1$ ), shear-thickening fluid ( $n_{\upsilon e}<1$
+) .
+
+As alternative, it is possible to activate the Kelvin\textendash Voigt
+model \cite{barnes1989introduction} (see Tab \ref{tab:inputlist}).
+In the last case, Eq \ref{eq:stress-ode} is replaced by
+
+\begin{equation}
+\frac{d\sigma_{i}}{dt}=G\frac{1}{l_{i}}\frac{dl_{i}}{dt}+\mu\frac{1}{l_{i}}\frac{d\upsilon_{i}}{dt}.\label{eq:stress-ode-KV}
+\end{equation}
+
+Given $a_{i}$ the cross-sectional radius of the filament at the bead
+$i$, the viscoelastic force $\vec{\textbf{f}}_{\upsilon e}$ pulling
+bead $i$ back to $i-1$ and towards $i+1$ is
+
+\begin{equation}
+\vec{\textbf{f}}_{\upsilon e,i}=-\pi a_{i}^{2}\sigma_{i}\cdot\vec{\textbf{t}}_{i}+\pi a_{i+1}^{2}\sigma_{i+1}\cdot\vec{\textbf{t}}_{i+1}\text{,}
+\end{equation}
+where $\vec{\textbf{t}}_{i}$ is the unit vector pointing bead $i$
+from bead $i-1$. The surface tension force $\vec{\textbf{f}}_{st}$
+for the $i-th$ bead is given by
+
+\begin{equation}
+\vec{\textbf{f}}_{st,i}=k_{i}\cdot\pi\left(\frac{a_{i}+a_{i-1}}{2}\right)^{2}\alpha\cdot\vec{\textbf{c}}_{i}\text{,}
+\end{equation}
+where $\alpha$ is the surface tension coefficient, $k_{i}$ is the
+local curvature, and $\vec{\textbf{c}}_{i}$ is the unit vector pointing
+the center of the local curvature from bead $i$. Note the force $\vec{\textbf{f}}_{st}$
+is acting to restore the rectilinear shape of the bending part of
+the jet.
+
+In the electrospinning experimental configuration an intense external
+electric potential $\Phi_{0}$ is applied between the spinneret and
+a conducting collector located at distance $h$ from the injection
+point. As consequence, each $i-th$ bead endures the electric force
+
+\begin{equation}
+\vec{\textbf{f}}_{el,i}=e_{i}\frac{\Phi_{0}}{h}\cdot\vec{\textbf{x}}\text{,}
+\end{equation}
+where $\vec{\textbf{x}}$ is the unit vector pointing the collector
+from the spinneret and assumed along the $x$ axis. Note that in Ren
+model the electric field $\Phi_{0}$ is assumed to be static in order
+to avoid the computationally expensive integration of Poisson equation,
+whereas in reality $\Phi$ is depending on the net charge of the nanofiber
+so as to maintain constant the potential at the electrodes. The latter
+issue was elegantly addressed by Kowalewski et al. \cite{kowalewski2009modeling},
+and its implementation in JETSPIN will be planned. Further, it is
+possible to impose a time dependent external electric potential described
+by a rectangular waveform with amplitude $\Phi_{0}$ and frequency
+given in input file (see Section \ref{sec:Input-file}).
+
+The net Coulomb force $\vec{\textbf{f}}_{c}$ acting on the $i-th$
+bead from all the other beads is given by
+
+\begin{equation}
+\vec{\textbf{f}}_{c,i}=\sum_{\substack{j=1\\
+j\neq i
+}
+}^{n}\frac{q_{i}q_{j}}{R_{ij}^{2}+a_{j}^{2}}\cdot\vec{\textbf{u}}_{ij}\text{,}
+\end{equation}
+where $R_{ij}=\left[\left(x_{i}-x_{j}\right)^{2}+\left(y_{i}-y_{j}\right)^{2}+\left(z_{i}-z_{j}\right)^{2}\right]^{1/2}$,
+and $\vec{\textbf{u}}_{ij}$ is the unit vector pointing the $i-th$
+bead from $j-th$ bead. Note that $j-th$ charge is assumed to induces
+a field from its outer shell of the fiber (a charged ring of radius
+$a_{j}$) and not from the center line (the particle-like point) as
+implemented in the original Ren model. Although the Ren model provides
+a reasonable description for the spiral motion of the jet, the last
+term $\vec{\textbf{f}}_{c}$ introduces mathematical inconsistencies
+due to the discretization of the fiber into point-charges. Different
+approaches were developed to overcome this issue which usually imply
+strong approximations\cite{feng2002stretching,feng2003stretching,hohman2001electrospinning}.
+Other strategies use a less crude approximation by accounting for
+the actual electrostatic form factors between two interacting sections
+of a charged fiber\cite{kowalewski2005experiments} or involving more
+sophisticated methods which exploit the tree-code hierarchical force
+calculation algorithm\cite{kowalewski2009modeling}. In JETSPIN it
+is possible to activate the dynamic refinement algorithm to recover
+a finer discretization of the jet (see Sec \ref{sec:Dynamic-refinement}).
+
+Although usually much smaller than the other driving forces, the body
+force due to the gravity is computed in the model by the usual expression
+
+\begin{equation}
+\vec{\textbf{f}}_{g,i}=m_{i}g\cdot\vec{\textbf{x}},
+\end{equation}
+where $g$ is the gravitational acceleration.
+
+As shown in experimental evidences \cite{spinning1991science}, the
+air drag force affects the dynamics of the nanofiber. The extended
+stochastic model developed in Refs \cite{lauricella2016refinement,Lauricella2015dissipative,lauricella2015nonlinear}
+was included in JETSPIN to reproduce the aerodynamic effects. In particular,
+the air drag is modeled by adding two force terms: a random term and
+a dissipative term. The dissipative air drag term is usually dependent
+on the geometry of the jet, which changes in time, and it combines
+longitudinal and lateral components. Based on experimental results\cite{spinning1991science},
+the longitudinal component of the air drag dissipative force term
+acting on bead $i$ is
+
+\begin{equation}
+\vec{\textbf{f}}_{air,i}=-0.65\pi a_{i}l_{i}\rho_{a}\left(2a_{i}/\nu_{a}\right)^{-0.81}\upsilon_{tan,i}^{1+0.19}\cdot\vec{\textbf{t}}_{i-1}
+\end{equation}
+where $\rho_{a}$ and $\nu_{a}$ are the air density and kinematic
+viscosity, respectively, $\vec{\textbf{t}}_{i-1}$ is the unit vector
+pointing bead $i$ from bead $i-1$, and $\upsilon_{tan,i}=\vec{\boldsymbol{\upsilon}_{i}}\cdot\vec{\textbf{t}}_{i-1}$
+is the projection of the vector velocity of bead $i$ along the unit
+vector $\vec{\textbf{t}}_{i-1}$. Further, it is possible to write
+$\vec{\textbf{f}}_{air,i}$ as
+
+\begin{equation}
+\vec{\textbf{f}}_{air,i}=-m_{i}\gamma_{i}\,l_{i}^{0.905}\upsilon_{t,i}^{1+0.19}\cdot\vec{\textbf{t}}_{i-1}
+\end{equation}
+if we introduced the dissipative coefficient $\gamma_{i}$ equal to
+
+\begin{equation}
+\gamma_{i}=0.65\pi^{0.905}\frac{\rho_{a}}{m_{i}}\left(\frac{2}{\nu_{air}}\right)^{-0.81}V_{i}^{0.095},\label{eq:fric_dissip}
+\end{equation}
+where $V_{i}=\pi a_{i}^{2}\,l_{i}$ is the jet volume represented
+by the $i-th$ bead.
+
+Following the expression introduced by A. Yarin\cite{yarin1993free,yarin2014fundamentals},
+under a high-speed air drag the lateral component $\vec{\textbf{f}}_{lift,i}$
+of the aerodynamic dissipative force related to the flow speed is
+given in the linear approximation (for small bending perturbations)
+by
+\begin{equation}
+\vec{\textbf{f}}_{lift,i}=-l_{i}\cdot k_{i}\rho_{a}\upsilon_{i}^{2}\pi\left(\frac{a_{i}+a_{i-1}}{2}\right)^{2}\cdot\vec{\textbf{c}}_{i},
+\end{equation}
+where $k_{i}$ is still the local curvature, and $\vec{\textbf{c}}_{i}$
+is the unit vector pointing the center of the local curvature from
+bead $i$. The combined action of such longitudinal and lateral components
+provide the dissipative force term acting on the $i-th$ bead
+
+\begin{equation}
+\vec{\textbf{f}}_{diss,i}=\vec{\textbf{f}}_{air,i}+\vec{\textbf{f}}_{lift,i}\:.
+\end{equation}
+Instead, the random force term for the $i-th$ bead has the form
+
+\begin{equation}
+\vec{\textbf{f}}_{rand,i}=\sqrt{2m_{i}^{2}D_{\upsilon}}\cdot\vec{\boldsymbol{\eta}_{i}}(t),
+\end{equation}
+where $D_{\upsilon}$ denotes a generic diffusion coefficient in velocity
+space (which is assumed constant and equal for all the beads), and
+$\vec{\boldsymbol{\eta}_{i}}$ is a three-dimensional vector, whereof
+each component $\eta$ is an independent stochastic process that is
+nowhere differentiable with $<\eta\left(t_{1}\right)\eta\left(t_{2}\right)>=\delta\left(\left|t_{2}-t_{1}\right|\right)$,
+and $<\eta\left(t\right)>=0$. Note that for the sake of simplicity
+we assume $\eta=d\omega(t)/dt$, where $\omega(t)$ is a Wiener process.
+Further details are available in Ref \cite{lauricella2016flow}.
+
+The combined action of these forces governs the elongation of the
+jet according to the Newton's equation providing a non-linear Langevin-like
+stochastic differential equation:
+
+\begin{equation}
+m_{i}\frac{d\vec{\boldsymbol{\upsilon}}_{i}}{dt}=\vec{\textbf{f}}_{el,i}+\vec{\textbf{f}}_{c,i}+\vec{\textbf{f}}_{\upsilon e,i}+\vec{\textbf{f}}_{st,i}+\vec{\textbf{f}}_{g,i}+\vec{\textbf{f}}_{diss,i}+\vec{\textbf{f}}_{rand}\:\text{,}\label{eq:force-EOM}
+\end{equation}
+where $\vec{\boldsymbol{\upsilon}}_{i}$ is the velocity of the $i-th$
+bead. The velocity $\vec{\boldsymbol{\upsilon}}_{i}$ satisfies the
+kinematic relation:
+
+\begin{equation}
+\frac{d\vec{\textbf{r}}_{i}}{dt}=\vec{\boldsymbol{\upsilon}}_{i}\label{eq:pos-EOM}
+\end{equation}
+where $\vec{\textbf{r}}_{i}$ is the position vector of the $i-th$
+bead, $\vec{\textbf{r}}_{i}=x_{i}\vec{\textbf{x}}+y_{i}\vec{\textbf{y}}+z_{i}\vec{\textbf{z}}$.
+The three Eqs \ref{eq:stress-ode}, \ref{eq:force-EOM} and \ref{eq:pos-EOM}
+form the set of equations of motion (EOM) governing the time evolution
+of system. It is worth stressing that Eq \ref{eq:force-EOM} recovers
+a deterministic EOM by imposing $\rho_{a}=0$ and $D_{\upsilon}=0$.

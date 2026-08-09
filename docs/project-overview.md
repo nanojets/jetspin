@@ -55,6 +55,16 @@ The code is written in modular Fortran. Important entry points include:
 | `source/serial_version_mod.f90` | Serial communication abstraction |
 | `source/parallel_version_mod.f90` | MPI replicated-data implementation |
 
+For the communication model, bead partitioning, collectives, scalability,
+and MPI maintenance invariants, see the dedicated
+[MPI parallelization guide](introduction/parallelization.md).
+For the moving active interval, capacity growth, compaction, refinement, and
+workspace-resizing invariants, see
+[dynamic allocation and bead indexing](introduction/dynamic-allocation.md).
+The adaptive remeshing algorithm, conservation rules, anchors, and
+refinement-specific validation are covered by the
+[dynamic-refinement guide](introduction/dynamic-refinement.md).
+
 ## Repository map
 
 | Directory | Contents |
@@ -83,6 +93,9 @@ These behaviours are important when changing code or documentation:
 - The build Makefile is invoked from `source/` through
   `make -C source -f ../build/Makefile <target>`; it is not copied.
 - The stable executable name is `main.x`.
+- Jet arrays use a moving active interval inside a larger zero-based
+  allocation; `inpjet` is not necessarily zero and `mxnpjet` is not the bead
+  count.
 
 ## Validation expectations
 

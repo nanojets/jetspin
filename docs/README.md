@@ -15,9 +15,12 @@ and documentation-maintenance rules, see the
 ## Getting started
 
 1. [Compile JETSPIN](introduction/compiling.md)
-2. [Run JETSPIN](introduction/running.md)
-3. [Prepare an input file](data/input.md)
-4. [Read the output files](data/output.md)
+2. [Understand MPI parallelization](introduction/parallelization.md)
+3. [Understand dynamic allocation and bead indexing](introduction/dynamic-allocation.md)
+4. [Understand dynamic refinement](introduction/dynamic-refinement.md)
+5. [Run JETSPIN](introduction/running.md)
+6. [Prepare an input file](data/input.md)
+7. [Read the output files](data/output.md)
 
 ## Example simulations
 

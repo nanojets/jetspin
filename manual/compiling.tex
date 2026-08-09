@@ -50,11 +50,19 @@ Neither target enables OpenACC offloading.
 The \texttt{nvfortran-openacc} target enables single-GPU OpenACC
 offloading. Its default values target compute capability 8.0, including
 NVIDIA A30 and A100 GPUs, and the CUDA 12.3 toolkit distributed with HPC SDK
-24.3:
+24.3. It also selects the \texttt{nofma} GPU option to preserve the numerical
+behaviour of the nearly straight three-point curvature calculation:
 
 \begin{verbatim}
 make -C source -f ../build/Makefile nvfortran-openacc
 \end{verbatim}
+
+The OpenACC GPU and host-validation targets expose the standard
+\texttt{\_OPENACC} preprocessing macro.
+Accelerator imports, initialization, Coulomb dispatch, and equation-of-motion
+dispatch are enclosed by this macro. CPU targets preprocess the same sources
+without defining it, so accelerator calls are absent from their compiled
+translation units rather than being retained as no-op runtime branches.
 
 Another device architecture or installed CUDA toolkit can be selected through
 the \texttt{GPUCC} and \texttt{CUDA\_VERSION} Make variables. The

@@ -12,7 +12,9 @@
 !***********************************************************************
  use version_mod,           only : idrank,mxrank,sum_world_darr, &
                              max_world_darr,sum_world_iarr
+#ifdef _OPENACC
  use accelerator_mod,       only : accelerator_enabled
+#endif
  use profiling_mod,         only : profiling_start,profiling_stop, &
                              prof_coulomb
  use error_mod
@@ -278,10 +280,12 @@
   
       ycf(0:ncoulforce,1:1)=0.d0
 
+#ifdef _OPENACC
       if(accelerator_enabled .and. mxrank==1)then
         call compute_coulomelec_openacc_1d(ycf,yxx)
         return
       endif
+#endif
       
 !     compute the Coulomb forces
       do ipoint=inpjet+idrank,npjet,mxrank
@@ -334,10 +338,12 @@
       
       ycf(0:ncoulforce,1:3)=0.d0
 
+#ifdef _OPENACC
       if(accelerator_enabled .and. mxrank==1)then
         call compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz)
         return
       endif
+#endif
       
 !     compute the Coulomb forces
       do ipoint=inpjet+idrank,npjet,mxrank

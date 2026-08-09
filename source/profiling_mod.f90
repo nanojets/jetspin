@@ -12,7 +12,9 @@ module profiling_mod
  integer, parameter, public :: prof_erase_bead=7
  integer, parameter, public :: prof_output=8
  integer, parameter, public :: prof_restart=9
- integer, parameter :: nprofile=9
+ integer, parameter, public :: prof_eom=10
+ integer, parameter, public :: prof_rk_update=11
+ integer, parameter :: nprofile=11
 
  logical, public, save :: profiling_enabled=.false.
  double precision, save :: elapsed(nprofile)=0.d0
@@ -83,7 +85,8 @@ contains
    'Add bead               ', 'Remove bead            ', &
    'Breakup check          ', 'Statistics             ', &
    'Erase bead             ', 'Scheduled output       ', &
-   'Restart output         ']
+   'Restart output         ', 'EOM evaluation (nested)', &
+   'RK update (nested)     ']
 
   if((.not.profiling_enabled) .or. idrank/=0)return
   write(6,'(/,a)')'Subroutine timing profile (wall clock)'
@@ -99,7 +102,7 @@ contains
     endif
   enddo
   write(6,'(a)') &
-   'Note: Coulomb is included within Integrator total and is not additive.'
+   'Note: Coulomb, EOM, and RK update are nested within Integrator total.'
  end subroutine profiling_report
 
 end module profiling_mod

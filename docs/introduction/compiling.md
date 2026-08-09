@@ -59,11 +59,18 @@ make -C source -f ../build/Makefile nvfortran-mpi
 
 Build with OpenACC offloading. The defaults target compute capability 8.0
 (including NVIDIA A30 and A100) and the CUDA 12.3 toolkit shipped with HPC
-SDK 24.3:
+SDK 24.3. The target also selects `nofma` to preserve the numerical behaviour
+of the nearly straight three-point curvature calculation:
 
 ```sh
 make -C source -f ../build/Makefile nvfortran-openacc
 ```
+
+The OpenACC GPU and host-validation targets expose the standard `_OPENACC`
+preprocessing macro. Imports and calls that initialize or select accelerator
+code are enclosed by this macro. CPU targets preprocess the same source
+without defining it, so those calls are absent from the compiled CPU
+translation units rather than being executed as no-op runtime branches.
 
 Select another GPU compute capability or CUDA toolkit through Make variables.
 Pass the numeric capability without the `cc` prefix; the Makefile constructs

@@ -73,7 +73,12 @@ LaTeX manual.
 The longer [Test Case 9 benchmark](docs/examples/test-9.md) is intentionally
 excluded from the smoke and numerical-regression suites. It provides a fixed
 1,000-bead workload for CPU/GPU performance measurements and optional
-region-level profiling during OpenACC development.
+region-level profiling during OpenACC development. The current single-GPU
+milestone offloads direct Coulomb interactions and, for the fixed Test 9
+configuration, the three-dimensional equation-of-motion assembly including
+its local curvature calculation. See the
+[OpenACC porting status](docs/introduction/openacc.md) for supported
+configurations, numerical constraints, and remaining work.
 
 ## Citation
 

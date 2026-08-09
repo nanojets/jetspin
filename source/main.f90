@@ -44,7 +44,9 @@
                        alloc_domain,time_world,wall_time_world, &
                        get_sync_world,finalize_world,idrank
   use utility_mod,    only : init_random_seed
+#ifdef _OPENACC
   use accelerator_mod, only : accelerator_prepare
+#endif
   use profiling_mod, only : profiling_initialize,profiling_reset, &
                        profiling_start,profiling_stop,profiling_report, &
                        prof_integrator,prof_add_bead,prof_remove_bead, &
@@ -180,7 +182,9 @@
 !***********************************************************************
 ! Initialize an accelerator runtime before the measured region. This is a
 ! no-op for CPU builds and excludes one-time device setup from loop timing.
+#ifdef _OPENACC
   call accelerator_prepare()
+#endif
   call profiling_initialize()
   call profiling_reset()
   call get_sync_world()
@@ -308,8 +312,6 @@
 
  end program JetSpin
   
-
-
 
 
 

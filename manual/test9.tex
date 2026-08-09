@@ -63,3 +63,32 @@ measurement are versioned in
 later CPU and GPU results with relative tolerance $10^{-6}$ and absolute
 tolerance $10^{-9}$. These records remain outside the automatic regression
 matrix because of the benchmark's longer execution time.
+
+A subsequent profiler refinement measured 2.026551 s (56.28%) in Coulomb,
+1.420609 s (39.45%) in the equation-of-motion evaluations, and 0.014712 s
+(0.41%) in the separate Runge--Kutta vector updates on the A30. Each
+equation-of-motion and Coulomb region was called 4,000 times. This breakdown
+selects the three-dimensional equation-of-motion chain as the next meaningful
+accelerator target; porting the vector updates alone cannot materially improve
+this workload. The trajectory still matched the versioned A30 reference
+exactly at the saved output precision.
+
+The first equation-of-motion offload milestone uses one explicit OpenACC
+kernel per RK4 stage for the Test 9 force assembly. The local three-point
+curvature construction also executes entirely on the device: every bead reads
+only itself and its two neighbours, and no curvature array is transferred from
+the host. Because the initially straight jet makes the circumcentre arithmetic
+sensitive to floating-point contraction, the OpenACC target uses the
+NVFORTRAN \texttt{nofma} GPU option. In an updated paired measurement built
+from the same source with NVFORTRAN 24.3, the CPU and A30 complete-loop times
+were 38.616119 s and 3.159748 s, respectively, for a speedup of 12.22. The
+CPU/A30 regional times were 37.059132/2.250507 s for Coulomb (16.47 speedup),
+1.398234/0.736914 s for equation-of-motion evaluation including curvature
+(1.90 speedup), and 0.018556/0.030343 s for the Runge--Kutta updates. Coulomb
+and equation-of-motion evaluation each had 4,000 calls. The slower device-side
+RK updates represented less than one percent of the A30 loop. The complete
+saved trajectory passed the
+A30 baseline comparison with relative tolerance $10^{-6}$ and absolute
+tolerance $10^{-9}$; the worst normalized difference was $7.82\,10^{-5}$.
+The kernel uses call-scoped transfers and is restricted to the fixed Test 9
+configuration; other configurations retain the CPU path.

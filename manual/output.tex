@@ -44,7 +44,7 @@ time, percentage of the complete temporal-loop time, and call count on the
 terminal; it does not write a profiling file. These are explicitly
 instrumented regions rather than an automatic measurement of every Fortran
 subroutine. Region timings are inclusive, so the integrator value includes
-the Coulomb calls.
+the Coulomb, equation-of-motion evaluation, and Runge--Kutta update regions.
 
 In MPI execution, the detailed region breakdown is local to rank zero and is
 not reduced to the maximum over all ranks. The synchronized complete-loop

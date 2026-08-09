@@ -5,6 +5,7 @@
 BINROOT = ../execute
 FC=undefined
 FFLAGS=undefined
+FPPFLAGS ?= -cpp
 LDFLAGS=undefined
 TYPE=undefined
 EX=main.x
@@ -15,7 +16,7 @@ MPIFC ?= mpif90
 NVFORTRAN ?= nvfortran
 GPUCC ?= 80
 CUDA_VERSION ?= 12.3
-OPENACC_GPU_FLAGS = -gpu=cc$(GPUCC),cuda$(CUDA_VERSION)
+OPENACC_GPU_FLAGS = -gpu=cc$(GPUCC),cuda$(CUDA_VERSION),nofma
 ACCOBJ ?= host_accelerator_mod.o
 MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
@@ -112,6 +113,7 @@ gfortran-mpi:
 nvfortran:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -c" \
+	FPPFLAGS="-Mpreprocess" \
 	LDFLAGS="-O3 -o" \
 	ACCOBJ=host_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -119,6 +121,7 @@ nvfortran:
 nvfortran-mpi:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(MPIFC) \
 	FFLAGS="-O3 -c" \
+	FPPFLAGS="-Mpreprocess" \
 	LDFLAGS="-O3 -o" \
 	ACCOBJ=host_accelerator_mod.o TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
@@ -126,6 +129,7 @@ nvfortran-mpi:
 nvfortran-openacc:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
+	FPPFLAGS="-Mpreprocess" \
 	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -133,6 +137,7 @@ nvfortran-openacc:
 nvfortran-openacc-host:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O2 -acc=host -Minfo=accel -c" \
+	FPPFLAGS="-Mpreprocess" \
 	LDFLAGS="-O2 -acc=host -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -154,6 +159,7 @@ gfortran-debugger:
 intel:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=ifort \
 	FFLAGS="-O2 -c" \
+	FPPFLAGS="-fpp" \
 	LDFLAGS="-O2 -o" \
 	TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -161,6 +167,7 @@ intel:
 intel-mpi:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=mpiifort \
 	FFLAGS="-O2 -c" \
+	FPPFLAGS="-fpp" \
 	LDFLAGS="-O2 -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
@@ -168,6 +175,7 @@ intel-mpi:
 intel-openmpi:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=mpif90 \
 	FFLAGS="-O2 -c" \
+	FPPFLAGS="-fpp" \
 	LDFLAGS="-O2  -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
@@ -175,6 +183,7 @@ intel-openmpi:
 intel-debugger:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=ifort \
 	FFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -c" \
+	FPPFLAGS="-fpp" \
 	LDFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -o" \
 	TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -182,6 +191,7 @@ intel-debugger:
 intel-mpidebugger:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=mpiifort \
 	FFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -c" \
+	FPPFLAGS="-fpp" \
 	LDFLAGS="-O0 -g -check all -fpe0 -traceback -debug extended -o" \
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
@@ -253,7 +263,7 @@ viscoelastic_force_mod.o: viscoelastic_force_mod.f90
 	$(FC) $(FFLAGS) viscoelastic_force_mod.f90
 	
 coulomb_force_mod.o: coulomb_force_mod.f90
-	$(FC) $(FFLAGS) coulomb_force_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) coulomb_force_mod.f90
 	
 electric_field_mod.o: electric_field_mod.f90
 	$(FC) $(FFLAGS) electric_field_mod.f90
@@ -268,7 +278,7 @@ driver_eom_mod.o: driver_eom_mod.f90
 	$(FC) $(FFLAGS) driver_eom_mod.f90
 
 integrator_mod.o:integrator_mod.f90
-	$(FC) $(FFLAGS) integrator_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) integrator_mod.f90
 
 integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90
 	$(FC) $(FFLAGS) integrator_kv_ev_mod.f90
@@ -280,7 +290,7 @@ io_mod.o:io_mod.f90
 	$(FC) $(FFLAGS) io_mod.f90
 	
 main.o:main.f90
-	$(FC) $(FFLAGS) main.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) main.f90
 
 clean:
 	rm -rf $(OBJ_MOD) $(OBJ_SRC) *.mod

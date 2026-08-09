@@ -29,10 +29,10 @@ The profiler instruments selected code regions rather than discovering and
 timing every Fortran subroutine automatically. For every region, the report
 shows its cumulative wall time, its percentage of the complete temporal-loop
 time, and its call count. Region times are inclusive: in particular, the
-integrator measurement includes its Coulomb calls. In an MPI run the detailed
-breakdown is the measurement from rank 0; it is not reduced to the maximum
-time over all ranks. Use the synchronized complete-loop wall time for MPI
-scaling measurements.
+integrator measurement includes its Coulomb, EOM-evaluation, and RK-update
+regions. In an MPI run the detailed breakdown is the measurement from rank 0;
+it is not reduced to the maximum time over all ranks. Use the synchronized
+complete-loop wall time for MPI scaling measurements.
 
 Clock reads add a small amount of overhead. Compare two performance runs with
 profiling either enabled in both or disabled in both.

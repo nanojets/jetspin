@@ -21,8 +21,17 @@ module integrator_mod
  use nanojet_mod,       only : doallocate,mxnpjet,npjet,inpjet,systype,&
                          jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetst, &
                          jetms,jetch,jetvl,compute_posnoinserted, &
-                         jetpt,lKVfluid,levaporation,jetve,evlim
+                         jetpt,lKVfluid,levaporation,jetve,evlim,jetfr, &
+                         linserted,liniperturb,lairdrag,lflorentz,luppot, &
+                         pfreq,consistency,findex,yieldstress,att,fve,gr, &
+                         ks,li,v,velext
  use dynamic_refinement_mod, only : driver_dynamic_refinement
+ use profiling_mod, only : profiling_start,profiling_stop,prof_eom, &
+                         prof_rk_update
+#ifdef _OPENACC
+ use accelerator_mod, only : accelerator_eom3_stage
+#endif
+ use electric_field_mod, only : nfieldtype
  use coulomb_force_mod, only : smooth_charge,restore_charge, &
                          coulforce,compute_coulomelec_driver
  use driver_eom_mod,    only : xpsys,xpsys_pos,xpsys_stress, &
@@ -634,6 +643,7 @@ module integrator_mod
   double precision, intent(in) :: h
   
   logical, save :: lfirstsub=.true.
+  logical :: used_acc_eom
   
   double precision ::  fxx
   double precision ::  fyy
@@ -875,16 +885,27 @@ module integrator_mod
       yvx(:)=0.d0
       yvy(:)=0.d0
       yvz(:)=0.d0
+      call profiling_start(prof_eom)
+      used_acc_eom=.false.
+#ifdef _OPENACC
+      if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx, &
+       jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
+       jetch,jetfr,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted, &
+       liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
+       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext)
+#endif
+      if(.not.used_acc_eom)then
+        do ipoint=mystart,myend
+          call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+           jetvl,coulforce,f1xx(j),f1yy(j),f1zz(j),f1st(j),f1vx(j), &
+           f1vy(j),f1vz(j),timesub,k)
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_eom)
+      j=0
+      call profiling_start(prof_rk_update)
       do ipoint=mystart,myend
-        call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-         jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k) 
-        f1xx(j)=fxx
-        f1yy(j)=fyy
-        f1zz(j)=fzz
-        f1st(j)=fst
-        f1vx(j)=fvx
-        f1vy(j)=fvy
-        f1vz(j)=fvz
         yxx(ipoint) = jetxx(ipoint) + 0.5d0*h*f1xx(j)
         yyy(ipoint) = jetyy(ipoint) + 0.5d0*h*f1yy(j)
         yzz(ipoint) = jetzz(ipoint) + 0.5d0*h*f1zz(j)
@@ -894,6 +915,7 @@ module integrator_mod
         yvz(ipoint) = jetvz(ipoint) + 0.5d0*h*f1vz(j)
         j=j+1
       enddo
+      call profiling_stop(prof_rk_update)
       call restore_charge()
       call sum_world_darr(yxx,npjet+1)
       call sum_world_darr(yyy,npjet+1)
@@ -908,12 +930,24 @@ module integrator_mod
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz)
       j=0
-      do ipoint=mystart,myend
-        call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
-         f2vx(j),f2vy(j),f2vz(j),timesub+h/2.d0,k)
-        j=j+1
-      enddo
+      call profiling_start(prof_eom)
+      used_acc_eom=.false.
+#ifdef _OPENACC
+      if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
+       yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f2xx, &
+       f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb,lairdrag, &
+       lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
+       att,fve,gr,ks,li,v,velext)
+#endif
+      if(.not.used_acc_eom)then
+        do ipoint=mystart,myend
+          call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
+           jetvl,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
+           f2vx(j),f2vy(j),f2vz(j),timesub+h/2.d0,k)
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_eom)
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -922,6 +956,7 @@ module integrator_mod
       yvx(:)=0.d0
       yvy(:)=0.d0
       yvz(:)=0.d0
+      call profiling_start(prof_rk_update)
       do ipoint=mystart,myend
         yxx(ipoint) = jetxx(ipoint) + 0.5d0*h*f2xx(j)
         yyy(ipoint) = jetyy(ipoint) + 0.5d0*h*f2yy(j)
@@ -932,6 +967,7 @@ module integrator_mod
         yvz(ipoint) = jetvz(ipoint) + 0.5d0*h*f2vz(j)
         j=j+1
       enddo
+      call profiling_stop(prof_rk_update)
       call restore_charge()
       call sum_world_darr(yxx,npjet+1)
       call sum_world_darr(yyy,npjet+1)
@@ -946,12 +982,24 @@ module integrator_mod
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz)
       j=0
-      do ipoint=mystart,myend
-        call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f3xx(j),f3yy(j),f3zz(j),f3st(j), &
-         f3vx(j),f3vy(j),f3vz(j),timesub+h/2.d0,k)
-        j=j+1
-      enddo
+      call profiling_start(prof_eom)
+      used_acc_eom=.false.
+#ifdef _OPENACC
+      if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
+       yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f3xx, &
+       f3yy,f3zz,f3st,f3vx,f3vy,f3vz,linserted,liniperturb,lairdrag, &
+       lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
+       att,fve,gr,ks,li,v,velext)
+#endif
+      if(.not.used_acc_eom)then
+        do ipoint=mystart,myend
+          call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
+           jetvl,coulforce,f3xx(j),f3yy(j),f3zz(j),f3st(j), &
+           f3vx(j),f3vy(j),f3vz(j),timesub+h/2.d0,k)
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_eom)
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -960,6 +1008,7 @@ module integrator_mod
       yvx(:)=0.d0
       yvy(:)=0.d0
       yvz(:)=0.d0
+      call profiling_start(prof_rk_update)
       do ipoint=mystart,myend
         yxx(ipoint) = jetxx(ipoint) + h*f3xx(j)
         yyy(ipoint) = jetyy(ipoint) + h*f3yy(j)
@@ -970,6 +1019,7 @@ module integrator_mod
         yvz(ipoint) = jetvz(ipoint) + h*f3vz(j)
         j=j+1
       enddo
+      call profiling_stop(prof_rk_update)
       call restore_charge()
       call sum_world_darr(yxx,npjet+1)
       call sum_world_darr(yyy,npjet+1)
@@ -984,12 +1034,24 @@ module integrator_mod
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz)
       j=0
-      do ipoint=mystart,myend
-        call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
-         jetvl,coulforce,f4xx(j),f4yy(j),f4zz(j),f4st(j), &
-         f4vx(j),f4vy(j),f4vz(j),timesub+h,k)
-        j=j+1
-      enddo
+      call profiling_start(prof_eom)
+      used_acc_eom=.false.
+#ifdef _OPENACC
+      if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
+       yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f4xx, &
+       f4yy,f4zz,f4st,f4vx,f4vy,f4vz,linserted,liniperturb,lairdrag, &
+       lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
+       att,fve,gr,ks,li,v,velext)
+#endif
+      if(.not.used_acc_eom)then
+        do ipoint=mystart,myend
+          call xpsys(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
+           jetvl,coulforce,f4xx(j),f4yy(j),f4zz(j),f4st(j), &
+           f4vx(j),f4vy(j),f4vz(j),timesub+h,k)
+          j=j+1
+        enddo
+      endif
+      call profiling_stop(prof_eom)
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -998,6 +1060,7 @@ module integrator_mod
       yvx(:)=0.d0
       yvy(:)=0.d0
       yvz(:)=0.d0
+      call profiling_start(prof_rk_update)
       do ipoint=mystart,myend
         yxx(ipoint) = jetxx(ipoint) + (h/6.d0)*(f1xx(j)+ &
          2.d0*(f2xx(j)+f3xx(j))+f4xx(j))
@@ -1015,6 +1078,7 @@ module integrator_mod
          2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
         j=j+1
       enddo
+      call profiling_stop(prof_rk_update)
       call restore_charge()
       call sum_world_darr(yxx,npjet+1,jetxx)
       call sum_world_darr(yyy,npjet+1,jetyy)

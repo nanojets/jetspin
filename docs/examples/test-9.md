@@ -108,6 +108,60 @@ complete-loop speedup was approximately `11.99x`. Later porting milestones
 should record the same table to show whether time moves from Coulomb into the
 remaining host-side integrator work or data transfers.
 
+A subsequent profiler refinement separated the remaining A30 integrator
+time into explicitly instrumented regions:
+
+| Region | A30 time | Share of loop | Calls |
+| --- | ---: | ---: | ---: |
+| Coulomb, nested | `2.026551 s` | `56.28%` | 4,000 |
+| EOM evaluation, nested | `1.420609 s` | `39.45%` | 4,000 |
+| RK update, nested | `0.014712 s` | `0.41%` | 3,000 |
+
+This measurement identifies the three-dimensional equation-of-motion chain,
+not the inexpensive RK vector updates, as the next relevant accelerator
+target. Absolute timings vary between runs; the numerical trajectory matched
+the versioned A30 baseline exactly at the saved output precision.
+
+## Device EOM and curvature milestone
+
+The first equation-of-motion port uses one explicit OpenACC kernel per RK4
+stage. The Test 9 force assembly and its local three-point curvature
+construction execute entirely on the device. Each bead reads only its own
+coordinates and those of its two neighbours. No curvature array is constructed
+or transferred by the host.
+
+The initially straight jet makes the circumcentre calculation sensitive to
+floating-point contraction. The OpenACC target therefore uses NVFORTRAN's
+`nofma` GPU option. Without it, fused multiply-add changed the trajectory
+beyond the accepted tolerance; with it, the device calculation preserves the
+versioned reference while remaining parallel.
+
+An updated paired measurement compiled both executables from the same source
+with NVFORTRAN 24.3 and ran them sequentially with profiling enabled:
+
+| Region | NVFORTRAN CPU | OpenACC A30 | Speedup | A30 share | Calls |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Complete temporal loop | `38.616119 s` | `3.159748 s` | `12.22x` | `100%` | 1 |
+| Integrator total | `38.609060 s` | `3.152703 s` | `12.25x` | `99.78%` | 1,000 |
+| Coulomb, nested | `37.059132 s` | `2.250507 s` | `16.47x` | `71.22%` | 4,000 |
+| EOM evaluation, nested | `1.398234 s` | `0.736914 s` | `1.90x` | `23.32%` | 4,000 |
+| RK update, nested | `0.018556 s` | `0.030343 s` | `0.61x` | `0.96%` | 4,000 |
+| Statistics | `0.005216 s` | `0.004980 s` | `1.05x` | `0.16%` | 1,000 |
+
+The complete temporal loop is `12.22x` faster. Direct Coulomb evaluation
+obtains the largest regional speedup and remains the dominant A30 cost. The
+device EOM, including curvature, is `1.90x` faster. RK updates are slower in
+this call-scoped implementation but account for less than one percent of the
+GPU loop. Their call count is 4,000 because all four RK stages are
+instrumented separately.
+
+The full six-snapshot, fourteen-column trajectory passed against the A30
+baseline with `rtol=1e-6` and `atol=1e-9`; its worst normalized difference was
+`7.82e-5`. The current kernel is deliberately limited to the fixed Test 9
+configuration and uses call-scoped data transfers. Unsupported configurations
+retain the CPU EOM path. Absolute timings vary with system load; preserve the
+compiler, profiler setting, and execution order when repeating the comparison.
+
 ## Versioned numerical records
 
 The CPU and A30 OpenACC `statout.dat` files from this initial measurement are

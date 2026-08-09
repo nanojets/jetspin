@@ -13,6 +13,8 @@
  use version_mod,           only : idrank,mxrank,sum_world_darr, &
                              max_world_darr,sum_world_iarr
  use accelerator_mod,       only : accelerator_enabled
+ use profiling_mod,         only : profiling_start,profiling_stop, &
+                             prof_coulomb
  use error_mod
  use utility_mod,           only : Pi,modulvec,cross,dot,sig
  use nanojet_mod,           only : jetch,jetfr,h,inpjet,npjet,q,&
@@ -182,6 +184,8 @@
   double precision, allocatable, intent(in) ::  yyy(:)
   double precision, allocatable, intent(in) ::  yzz(:)
   double precision, allocatable, intent(in), optional ::  yve(:)
+
+  call profiling_start(prof_coulomb)
   
   call allocate_coulcrossec(npjet)
   if(levaporation)then
@@ -221,6 +225,8 @@
       endif
     end select
   endif
+
+  call profiling_stop(prof_coulomb)
   
   return
   

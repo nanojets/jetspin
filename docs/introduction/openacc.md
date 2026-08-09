@@ -70,24 +70,30 @@ The direct CPU algorithm accumulates one pair into both beads, whereas the
 race-free accelerator algorithm accumulates independently by target bead.
 Their results should therefore be compared numerically, not as binary files.
 The initial development checks use the regression-suite criterion with
-`rtol=1e-6` and `atol=1e-9`; tighter tolerances can be recorded per case after
-validation on real NVIDIA hardware.
+`rtol=1e-6` and `atol=1e-9`. Run the complete CPU/GPU comparison with:
+
+```sh
+tests/regression/run.sh openacc
+```
+
+The initial 1,000-step validation on an NVIDIA A30 passed all eight cases;
+the written observables matched the NVFORTRAN CPU results at their output
+precision.
 
 `nvfortran-openacc-host` is useful for checking the accelerated control path
-and dynamic allocation without a GPU. A real GPU run is still required before
-performance or device-runtime correctness is claimed.
+and dynamic allocation without a GPU. It does not replace the real-device
+regression above and cannot establish GPU performance.
 
 ## Next porting stages
 
-1. Add a GPU regression runner and record results on the target NVIDIA GPU.
-2. Port the evaporation-specific direct Coulomb kernel.
-3. Move the equation-of-motion and integrator stages into explicit device
+1. Port the evaporation-specific direct Coulomb kernel.
+2. Move the equation-of-motion and integrator stages into explicit device
    regions, keeping the main bead state resident across timesteps.
-4. Add explicit device teardown/recreation hooks around capacity changes and
+3. Add explicit device teardown/recreation hooks around capacity changes and
    synchronize only topology metadata and requested output fields.
-5. Port the local Akima coefficient loops, replace the interpolation interval
+4. Port the local Akima coefficient loops, replace the interpolation interval
    scan with a GPU-suitable search, and then address dynamic refinement.
-6. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
+5. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 
 The intended steady state is a persistent device-resident simulation with

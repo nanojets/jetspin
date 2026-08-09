@@ -1,0 +1,65 @@
+\section{Test Case 9: 1,000-bead CPU/GPU performance benchmark}
+
+Test Case 9 is a performance-oriented three-dimensional Maxwell simulation
+derived from Test Case 7. It initializes 1,000 beads uniformly over the full
+16 cm distance from the nozzle to the collector and executes 1,000 integration
+steps. Insertion, removal, multiple-step Coulomb summation, and dynamic
+refinement are disabled, so the workload remains fixed.
+
+The material, aerodynamic, gravity, and perturbation parameters are retained
+from Test Case 7. The orthogonal rotating field is replaced by a constant
+axial electric potential. Evaporation is disabled because its direct Coulomb
+routine is not yet accelerated by the initial OpenACC implementation. The
+case therefore exercises the direct $O(N^2)$ Coulomb kernel without an
+evaporation fallback or topology changes.
+
+Test Case 9 is intended for performance comparison rather than as an
+additional physical validation baseline. CPU and accelerator runs should be
+compared using the terminal value \texttt{Time-integration loop wall time},
+which excludes input processing, initial allocation, and accelerator
+initialization. Its input is stored in
+\texttt{examples/input-9/input.dat}.
+
+After compiling separate CPU and accelerator executables, copy each executable
+and \texttt{examples/input-9/input.dat} into a separate run directory. Execute
+the two cases sequentially on an otherwise idle system and compare their
+\texttt{Time-integration loop wall time} values. The compiler version, GPU
+model, GPU compute capability, and build options should accompany every
+reported benchmark.
+
+An initial reference measurement with NVFORTRAN 24.3 and one NVIDIA A30
+reported 40.659856 s for the CPU executable and 3.785055 s for the OpenACC
+executable, corresponding to a speedup of 10.742. Both runs retained exactly
+1,000 beads and agreed within the numerical regression tolerances. These
+timings are indicative and should be remeasured on each target system.
+
+An optional internal subroutine profiler is enabled at run time with
+\texttt{JETSPIN\_PROFILE=1 ./main.x}; no rebuild is required. The report
+separates the integrator, Coulomb force, bead topology operations, statistics,
+scheduled output, and restart output. The Coulomb region is nested within the
+integrator total and the two values must not be added.
+
+The report is written only to the terminal and gives cumulative wall time,
+percentage of the complete temporal loop, and call count for each explicitly
+instrumented region. It is not an automatic profile of every Fortran
+subroutine. The fourth-order Runge--Kutta integration used by this test makes
+four Coulomb evaluations per step, yielding 4,000 calls. Clock reads add a
+small overhead, so profiling must have the same enabled or disabled state in
+both runs being compared. In MPI execution, the detailed table is local to
+rank zero rather than a maximum over ranks; the synchronized complete-loop
+timer remains the appropriate MPI scaling measurement.
+
+In an initial profiled run, the NVFORTRAN CPU loop required 39.813621 s,
+of which 38.232985 s (96.03\%) was spent in 4,000 Coulomb evaluations.
+The A30 loop required 3.320607 s, with 2.164045 s (65.17\%) in the same
+Coulomb region. The corresponding speedups were approximately 11.99 for the
+complete loop and 17.67 for Coulomb alone. Repeating this profile after each
+porting milestone provides a direct view of time moving from the Coulomb
+kernel to remaining host work, device transfers, or other force terms.
+
+The complete sampled CPU and A30 OpenACC numerical outputs from this initial
+measurement are versioned in
+\texttt{tests/performance/test9/}. The accompanying comparison script checks
+later CPU and GPU results with relative tolerance $10^{-6}$ and absolute
+tolerance $10^{-9}$. These records remain outside the automatic regression
+matrix because of the benchmark's longer execution time.

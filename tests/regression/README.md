@@ -23,13 +23,34 @@ abs(actual - reference) <= atol + rtol * abs(reference)
 Run the suite from the repository root:
 
 ```sh
-tests/regression/run.sh
+tests/regression/run.sh gfortran
+```
+
+The same cases can be compiled entirely with NVIDIA HPC SDK. Load the
+`nvhpc/24.3` module first so both `nvfortran` and `mpif90` select NVIDIA
+Fortran:
+
+```sh
+tests/regression/run.sh nvfortran
+```
+
+This uses compiler-specific baselines under `baselines/nvfortran/` and then
+compares the two-rank NVFORTRAN/MPI result with the matching serial result.
+The compiler-specific baseline is necessary because Fortran compilers may
+provide different `random_number` sequences.
+
+Compare the OpenACC executable with the matching NVFORTRAN CPU trajectory on
+an accessible NVIDIA GPU with:
+
+```sh
+tests/regression/run.sh openacc
 ```
 
 | Comparison | Relative tolerance | Absolute tolerance |
 | --- | ---: | ---: |
 | Serial versus baseline | `1e-7` | `1e-10` |
 | Two-rank MPI versus serial | `1e-6` | `1e-9` |
+| OpenACC versus NVFORTRAN CPU | `1e-6` | `1e-9` |
 
 Override the defaults without editing the test:
 
@@ -38,13 +59,16 @@ JETSPIN_REGRESSION_RTOL=1e-8 \
 JETSPIN_REGRESSION_ATOL=1e-11 \
 JETSPIN_MPI_REGRESSION_RTOL=1e-7 \
 JETSPIN_MPI_REGRESSION_ATOL=1e-10 \
-tests/regression/run.sh
+JETSPIN_OPENACC_REGRESSION_RTOL=1e-7 \
+JETSPIN_OPENACC_REGRESSION_ATOL=1e-10 \
+tests/regression/run.sh nvfortran
 ```
 
 Regenerate baselines intentionally after an accepted numerical change with:
 
 ```sh
 tests/regression/run.sh update
+tests/regression/run.sh nvfortran update
 ```
 
 Baseline updates must be reviewed as scientific results. Do not update them

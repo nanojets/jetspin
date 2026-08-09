@@ -39,6 +39,7 @@
  public :: finalize_world
  public :: abort_world
  public :: time_world
+ public :: wall_time_world
  public :: bcast_world_i
  public :: bcast_world_l
  public :: bcast_world_d
@@ -296,6 +297,26 @@
   return
   
  end subroutine time_world
+
+ subroutine wall_time_world(walltime)
+
+!***********************************************************************
+!
+!     Return a monotonic elapsed wall-clock value in seconds.
+!
+!***********************************************************************
+
+  implicit none
+
+  double precision, intent(out) :: walltime
+  integer :: clock_count,clock_rate
+
+  call system_clock(clock_count,clock_rate)
+  walltime=dble(clock_count)/dble(clock_rate)
+
+  return
+
+ end subroutine wall_time_world
  
  subroutine bcast_world_i(buffer)
  

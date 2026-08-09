@@ -23,6 +23,35 @@ a list of statistical data can be printed on computer terminal using
 the directive \texttt{print list} followed by the symbolic strings
 of Tab \ref{tab:outputlist}.
 
+At normal termination, the terminal also reports the wall-clock duration of
+the temporal integration loop and its throughput in integration steps per
+second. The timer starts immediately before the loop and stops immediately
+after it; input parsing, initial allocation, restart loading, and output-file
+setup are therefore excluded. Integration, bead insertion and removal,
+statistics, and scheduled output executed inside the loop are included. In
+MPI builds, ranks are synchronized at both boundaries and rank zero reports
+the elapsed duration of the slowest participating rank. This loop-only wall
+time is the recommended measurement for CPU, MPI, and accelerator performance
+comparisons.
+
+For performance diagnosis, setting the environment variable
+\texttt{JETSPIN\_PROFILE=1} prints an optional wall-clock breakdown for the
+integrator, Coulomb calculation, bead topology operations, statistics,
+scheduled output, and restart output. Profiling is disabled by default. The
+Coulomb value is a nested part of the integrator total and must not be added
+to it when interpreting percentages. The profiler prints cumulative wall
+time, percentage of the complete temporal-loop time, and call count on the
+terminal; it does not write a profiling file. These are explicitly
+instrumented regions rather than an automatic measurement of every Fortran
+subroutine. Region timings are inclusive, so the integrator value includes
+the Coulomb calls.
+
+In MPI execution, the detailed region breakdown is local to rank zero and is
+not reduced to the maximum over all ranks. The synchronized complete-loop
+wall time should be used for MPI scaling. Since clock reads add a small
+overhead, performance comparisons should enable profiling in both runs or
+disable it in both runs.
+
 The file \texttt{traj.xyz} is written as a continuous series of XYZ
 format frames taken at time interval, so that can be read by suitable
 visualization programs (e.g. VMD-Visual Molecular Dynamics \cite{humphrey1996vmd},

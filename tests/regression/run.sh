@@ -3,7 +3,6 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-baseline_dir="$repo_root/tests/regression/baselines"
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/jetspin-regression.XXXXXX")
 if [ "${JETSPIN_REGRESSION_KEEP:-0}" = 1 ]; then
     echo "Keeping regression files in $work_dir"
@@ -11,16 +10,57 @@ else
     trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 fi
 
-action=${1:-check}
+backend=${1:-gfortran}
+action=${2:-check}
+case "$backend" in
+    check|update)
+        # Preserve the original `run.sh update` interface.
+        action=$backend
+        backend=gfortran
+        ;;
+esac
+case "$backend" in
+    gfortran)
+        baseline_dir="$repo_root/tests/regression/baselines"
+        serial_target=gfortran
+        comparison_target=gfortran-mpi
+        comparison_mode=mpi
+        comparison_label="two-rank MPI"
+        ;;
+    nvfortran)
+        baseline_dir="$repo_root/tests/regression/baselines/nvfortran"
+        serial_target=nvfortran
+        comparison_target=nvfortran-mpi
+        comparison_mode=mpi
+        comparison_label="two-rank MPI/NVFORTRAN"
+        ;;
+    openacc)
+        baseline_dir="$repo_root/tests/regression/baselines/nvfortran"
+        serial_target=nvfortran
+        comparison_target=nvfortran-openacc
+        comparison_mode=serial
+        comparison_label="NVFORTRAN OpenACC"
+        if [ "$action" = update ]; then
+            echo "Use '$0 nvfortran update' to update NVFORTRAN CPU baselines" >&2
+            exit 2
+        fi
+        ;;
+    *)
+        echo "Usage: $0 [gfortran|nvfortran|openacc] [check|update]" >&2
+        exit 2
+        ;;
+esac
 case "$action" in
     check|update) ;;
-    *) echo "Usage: $0 [check|update]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [gfortran|nvfortran|openacc] [check|update]" >&2; exit 2 ;;
 esac
 
 rtol=${JETSPIN_REGRESSION_RTOL:-1e-7}
 atol=${JETSPIN_REGRESSION_ATOL:-1e-10}
 mpi_rtol=${JETSPIN_MPI_REGRESSION_RTOL:-1e-6}
 mpi_atol=${JETSPIN_MPI_REGRESSION_ATOL:-1e-9}
+openacc_rtol=${JETSPIN_OPENACC_REGRESSION_RTOL:-1e-6}
+openacc_atol=${JETSPIN_OPENACC_REGRESSION_ATOL:-1e-9}
 timeout_seconds=${JETSPIN_REGRESSION_TIMEOUT:-30}
 mpiexec_command=${MPIEXEC:-mpirun}
 mpi_fc=${JETSPIN_MPIFC:-mpif90}
@@ -35,25 +75,30 @@ if [ "$first_case" -lt 1 ] || [ "$last_case" -gt 8 ] || \
     exit 2
 fi
 
-mkdir -p "$work_dir/serial-source" "$work_dir/mpi-source"
+mkdir -p "$work_dir/serial-source" "$work_dir/comparison-source"
 cp "$repo_root"/source/*.f90 "$work_dir/serial-source/"
-cp "$repo_root"/source/*.f90 "$work_dir/mpi-source/"
+cp "$repo_root"/source/*.f90 "$work_dir/comparison-source/"
 cp "$repo_root/build/Makefile" "$work_dir/serial-source/Makefile"
-cp "$repo_root/build/Makefile" "$work_dir/mpi-source/Makefile"
-mkdir -p "$work_dir/serial-bin" "$work_dir/mpi-bin"
+cp "$repo_root/build/Makefile" "$work_dir/comparison-source/Makefile"
+mkdir -p "$work_dir/serial-bin" "$work_dir/comparison-bin"
 
-echo "Building serial regression executable"
-make -C "$work_dir/serial-source" gfortran BINROOT="$work_dir/serial-bin"
-if printf 'end\n' | "$mpi_fc" -fallow-argument-mismatch -x f95 \
-    -c -o "$work_dir/mpi-flag-test.o" - >/dev/null 2>&1; then
-    mpi_compat_flag=-fallow-argument-mismatch
-else
-    mpi_compat_flag=-Wno-argument-mismatch
+echo "Building $backend serial CPU regression executable"
+make -C "$work_dir/serial-source" "$serial_target" \
+    BINROOT="$work_dir/serial-bin"
+mpi_compat_flag=
+if [ "$backend" = gfortran ]; then
+    if printf 'end\n' | "$mpi_fc" -fallow-argument-mismatch -x f95 \
+        -c -o "$work_dir/mpi-flag-test.o" - >/dev/null 2>&1; then
+        mpi_compat_flag=-fallow-argument-mismatch
+    else
+        mpi_compat_flag=-Wno-argument-mismatch
+    fi
 fi
-echo "Building MPI regression executable"
-make -C "$work_dir/mpi-source" gfortran-mpi \
-    BINROOT="$work_dir/mpi-bin" MPI_COMPAT_FLAG="$mpi_compat_flag" \
-    MPIFC="$mpi_fc"
+echo "Building $comparison_label regression executable"
+make -C "$work_dir/comparison-source" "$comparison_target" \
+    BINROOT="$work_dir/comparison-bin" MPI_COMPAT_FLAG="$mpi_compat_flag" \
+    MPIFC="$mpi_fc" GPUCC="${GPUCC:-80}" \
+    CUDA_VERSION="${CUDA_VERSION:-12.3}"
 
 prepare_case() {
     case_number=$1
@@ -110,10 +155,10 @@ run_case() {
 case_number=$first_case
 while [ "$case_number" -le "$last_case" ]; do
     serial_dir="$work_dir/serial-$case_number"
-    mpi_dir="$work_dir/mpi-$case_number"
+    comparison_dir="$work_dir/comparison-$case_number"
     prepare_case "$case_number" "$serial_dir"
-    prepare_case "$case_number" "$mpi_dir"
-    echo "Running serial regression case $case_number"
+    prepare_case "$case_number" "$comparison_dir"
+    echo "Running $backend serial CPU regression case $case_number"
     run_case "$work_dir/serial-bin/main.x" "$serial_dir" serial
 
     baseline="$baseline_dir/case-$case_number.statout"
@@ -127,12 +172,20 @@ while [ "$case_number" -le "$last_case" ]; do
             --rtol "$rtol" --atol "$atol" "$baseline" "$serial_dir/statout.dat"
     fi
 
-    echo "Running two-rank MPI regression case $case_number"
-    run_case "$work_dir/mpi-bin/main.x" "$mpi_dir" mpi
+    echo "Running $comparison_label regression case $case_number"
+    run_case "$work_dir/comparison-bin/main.x" "$comparison_dir" \
+        "$comparison_mode"
+    if [ "$backend" = openacc ]; then
+        comparison_rtol=$openacc_rtol
+        comparison_atol=$openacc_atol
+    else
+        comparison_rtol=$mpi_rtol
+        comparison_atol=$mpi_atol
+    fi
     python3 "$repo_root/tests/regression/compare_statout.py" \
-        --rtol "$mpi_rtol" --atol "$mpi_atol" \
-        "$serial_dir/statout.dat" "$mpi_dir/statout.dat"
+        --rtol "$comparison_rtol" --atol "$comparison_atol" \
+        "$serial_dir/statout.dat" "$comparison_dir/statout.dat"
     case_number=$((case_number + 1))
 done
 
-echo "Numerical regression suite passed for serial and MPI cases $first_case..$last_case"
+echo "Numerical regression suite passed for $backend cases $first_case..$last_case"

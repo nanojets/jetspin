@@ -70,6 +70,11 @@ tests/smoke/run.sh mpi
 The same modes run in GitHub Actions, together with compilation of the
 LaTeX manual.
 
+The longer [Test Case 9 benchmark](docs/examples/test-9.md) is intentionally
+excluded from the smoke and numerical-regression suites. It provides a fixed
+1,000-bead workload for CPU/GPU performance measurements and optional
+region-level profiling during OpenACC development.
+
 ## Citation
 
 If JETSPIN contributes to published work, please cite:

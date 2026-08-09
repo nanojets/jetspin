@@ -40,6 +40,7 @@
  public :: finalize_world
  public :: abort_world
  public :: time_world
+ public :: wall_time_world
  public :: bcast_world_i
  public :: bcast_world_l
  public :: bcast_world_d
@@ -507,6 +508,26 @@
   return
   
  end subroutine time_world
+
+ subroutine wall_time_world(walltime)
+
+!***********************************************************************
+!
+!     Return MPI's elapsed wall-clock value in seconds.
+!
+!***********************************************************************
+
+  implicit none
+
+  include 'mpif.h'
+
+  double precision, intent(out) :: walltime
+
+  walltime=MPI_WTIME()
+
+  return
+
+ end subroutine wall_time_world
  
  subroutine bcast_world_i(argument)
  

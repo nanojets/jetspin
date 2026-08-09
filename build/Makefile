@@ -22,7 +22,7 @@ MAKEFILE_PATH := $(lastword $(MAKEFILE_LIST))
 
 OBJ_MOD = serial_version_mod.o parallel_version_mod.o host_accelerator_mod.o \
 	openacc_accelerator_mod.o parse_mod.o error_mod.o \
-	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
+	profiling_mod.o utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
 	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o
@@ -186,24 +186,24 @@ intel-mpidebugger:
 	TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
 
-seq:serial_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o utility_mod.o \
+seq:serial_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
-	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o \
+	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
 	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 	
-mpi:parallel_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o utility_mod.o \
+mpi:parallel_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o utility_mod.o \
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
-	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o $(ACCOBJ) parse_mod.o error_mod.o \
+	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
@@ -221,6 +221,9 @@ host_accelerator_mod.o:host_accelerator_mod.f90
 
 openacc_accelerator_mod.o:openacc_accelerator_mod.f90
 	$(FC) $(FFLAGS) openacc_accelerator_mod.f90
+
+profiling_mod.o:profiling_mod.f90
+	$(FC) $(FFLAGS) profiling_mod.f90
 	
 parse_mod.o:parse_mod.f90
 	$(FC) $(FFLAGS) parse_mod.f90

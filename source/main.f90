@@ -41,8 +41,15 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
   use version_mod,    only : init_world,get_rank_world,get_size_world,&
-                       alloc_domain,time_world,time_world,finalize_world
+                       alloc_domain,time_world,wall_time_world, &
+                       get_sync_world,finalize_world,idrank
   use utility_mod,    only : init_random_seed
+  use accelerator_mod, only : accelerator_prepare
+  use profiling_mod, only : profiling_initialize,profiling_reset, &
+                       profiling_start,profiling_stop,profiling_report, &
+                       prof_integrator,prof_add_bead,prof_remove_bead, &
+                       prof_breakup,prof_statistics,prof_erase_bead, &
+                       prof_output,prof_restart
   use nanojet_mod,    only : inpjet,npjet,linserted,myseed,systype, &
                        tstep,xyzrescale,set_resolution_length, &
                        allocate_jet,set_initial_jet,add_jetbead, &
@@ -79,6 +86,7 @@
   
   double precision :: mytime
   double precision :: itime,ctime,ftime
+  double precision :: loop_start_time,loop_end_time,loop_elapsed_time
   
   logical :: ladd,lrem,lremdat,ldorefinment,lrecycle
   
@@ -170,6 +178,14 @@
 !***********************************************************************
 !     start the time integration
 !***********************************************************************
+! Initialize an accelerator runtime before the measured region. This is a
+! no-op for CPU builds and excludes one-time device setup from loop timing.
+  call accelerator_prepare()
+  call profiling_initialize()
+  call profiling_reset()
+  call get_sync_world()
+  call wall_time_world(loop_start_time)
+
   do while (lrecycle)
   
 !   update the counter
@@ -179,31 +195,46 @@
     lrecycle=((dble(nstep)*tstep)<endtime)
     
 !   integrate the system
+    call profiling_start(prof_integrator)
     if(lKVfluid.and.levaporation)then
       call driver_integrator_KV_ev(mytime,tstep,nstep,ldorefinment)
     else
       call driver_integrator(mytime,tstep,nstep,ldorefinment)
     endif
+    call profiling_stop(prof_integrator)
     
 !   check if a new bead should be added and/or removed
+    call profiling_start(prof_add_bead)
     call add_jetbead(nstep,mytime,ladd)
+    call profiling_stop(prof_add_bead)
+    call profiling_start(prof_remove_bead)
     call remove_jetbead(nstep,nremoved,mytime,lrem,lremdat)
+    call profiling_stop(prof_remove_bead)
     
 !   check if the filament is breaking up between two beads
+    call profiling_start(prof_breakup)
     call ckeck_breakup(mytime)
+    call profiling_stop(prof_breakup)
     
 !   compute statistical quanities
+    call profiling_start(prof_statistics)
     call statistic_driver(mytime,tstep,nstep,nremoved,ladd,lrem)
+    call profiling_stop(prof_statistics)
     
 !   print on the binary file the jet bead which have hit the collector 
 !   (only for developers)
+    call profiling_start(prof_output)
     call write_datrem_frame(lprintdat,122,nstep,mytime,iprintdat, &
      inpjet,npjet,sprintdat,systype,lremdat,nremoved)
+    call profiling_stop(prof_output)
     
 !   erase the bead beyond the collector if the variable lrem is .true.
+    call profiling_start(prof_erase_bead)
     call erase_jetbead(nstep,mytime,ladd,lrem,nremoved)
+    call profiling_stop(prof_erase_bead)
     
 !   print data on terminal and output 'statdat.dat' file
+    call profiling_start(prof_output)
     call outprint_driver(nstep,mytime)
     
 !   print the jet geometry on the XYZ formatted output file
@@ -221,9 +252,12 @@
 !   print the jet geometry on the binary file (only for developers)
     call write_dat_frame(lprintdat,130,nstep,mytime,iprintdat, &
      inpjet,npjet,sprintdat,systype,linserted)
+    call profiling_stop(prof_output)
      
 !   print restart file
+    call profiling_start(prof_restart)
     call write_restart_file(nrestartdump,135,'save.dat',nstep,mytime)
+    call profiling_stop(prof_restart)
     
 !   cycle time check
     call time_world(ctime)
@@ -232,6 +266,19 @@
     lrecycle=(lrecycle .and. timjob-ctime>timcls)
     
   enddo
+
+  call get_sync_world()
+  call wall_time_world(loop_end_time)
+  loop_elapsed_time=loop_end_time-loop_start_time
+  if(idrank==0)then
+    write(6,'(/,a,f14.6,a)') &
+     'Time-integration loop wall time: ',loop_elapsed_time,' s'
+    if(loop_elapsed_time>0.d0)then
+      write(6,'(a,f14.3,a/)')'Time-integration throughput: ', &
+       dble(nstep)/loop_elapsed_time,' steps/s'
+    endif
+  endif
+  call profiling_report(loop_elapsed_time,idrank)
 !***********************************************************************
 !     end of the time integration
 !***********************************************************************
@@ -261,9 +308,6 @@
 
  end program JetSpin
   
-
-
-
 
 
 

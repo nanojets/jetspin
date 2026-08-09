@@ -26,7 +26,7 @@
                              lmultisteperror,multisteperror,lremove, &
                              jetfm,nmulstepdone,nmultisteperror, &
                              ldcutoff,incnpjet,maxdispl,lmaxdispl, &
-                             doallocate,cp0,levaporation
+                             doallocate,cp0,levaporation,icrossec,jetvl
  use support_functions_mod, only : beadlength1d,beadlength, &
                              compute_crosssec
  
@@ -35,7 +35,9 @@
  private
  
  logical, save :: lcomputfder=.false.
- logical, save :: lmscomputed=.false.
+logical, save :: lmscomputed=.false.
+ logical, save :: accelerator_persistent_mode=.false.
+ logical, save :: accelerator_coulomb_mapped=.false.
  
  integer, save :: ncoulforce=0
  integer, save :: maxneighlist=50
@@ -63,9 +65,16 @@
  
  public :: smooth_charge
  public :: restore_charge
- public :: compute_coulomelec_driver
+public :: compute_coulomelec_driver
+ public :: set_coulomb_accelerator_persistent
  
- contains
+contains
+
+ subroutine set_coulomb_accelerator_persistent(enabled)
+  implicit none
+  logical, intent(in) :: enabled
+  accelerator_persistent_mode=enabled
+ end subroutine set_coulomb_accelerator_persistent
  
  subroutine allocate_coulcrossec(imiomax)
  
@@ -211,7 +220,9 @@
       endif
     end select
   else
-    call compute_crosssec(yxx,yyy,yzz,yvl,coulcrossec)
+    if(.not.accelerator_persistent_mode)then
+      call compute_crosssec(yxx,yyy,yzz,yvl,coulcrossec)
+    endif
     select case(systype)
     case(1)
       if(lmultiplestep)then
@@ -340,7 +351,16 @@
 
 #ifdef _OPENACC
       if(accelerator_enabled .and. mxrank==1)then
-        call compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz)
+        if(accelerator_persistent_mode .and. &
+         .not.accelerator_coulomb_mapped)then
+          coulcrossec(:)=0.d0
+#ifdef _OPENACC
+!$acc enter data copyin(ycf(0:ncoulforce,1:3), &
+!$acc& coulcrossec(0:ncoulcrossec))
+#endif
+          accelerator_coulomb_mapped=.true.
+        endif
+        call compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz,jetvl)
         return
       endif
 #endif
@@ -404,6 +424,7 @@
   
  end subroutine compute_coulomelec
 
+#ifdef _OPENACC
  subroutine compute_coulomelec_openacc_1d(ycf,yxx)
 
   implicit none
@@ -457,12 +478,13 @@
 
  end subroutine compute_coulomelec_openacc_1d
 
- subroutine compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz)
+ subroutine compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz,yvl)
 
   implicit none
 
   double precision, allocatable, intent(inout) :: ycf(:,:)
   double precision, allocatable, intent(in) :: yxx(:),yyy(:),yzz(:)
+  double precision, allocatable, intent(in) :: yvl(:)
 
   integer :: ipoint,jpoint,ihigh
   double precision :: dx,dy,dz,distance,denominator,coefficient
@@ -470,8 +492,23 @@
 
 !$acc data copyin(yxx(0:ncoulforce),yyy(0:ncoulforce), &
 !$acc& yzz(0:ncoulforce),jetch(0:ncoulforce),jetms(0:ncoulforce), &
-!$acc& jetfr(0:ncoulforce),coulcrossec(0:ncoulforce)) &
+!$acc& jetfr(0:ncoulforce),yvl(0:ncoulforce), &
+!$acc& coulcrossec(0:ncoulforce)) &
 !$acc& copy(ycf(0:ncoulforce,1:3))
+  if(accelerator_persistent_mode)then
+!$acc parallel loop gang vector
+    do ipoint=inpjet,npjet
+      if(ipoint<npjet)then
+        distance=dsqrt((yxx(ipoint)-yxx(ipoint+1))**2.d0+ &
+         (yyy(ipoint)-yyy(ipoint+1))**2.d0+ &
+         (yzz(ipoint)-yzz(ipoint+1))**2.d0)
+        coulcrossec(ipoint)=dsqrt(yvl(ipoint)/(distance*Pi))
+      else
+        coulcrossec(ipoint)=icrossec
+      endif
+    enddo
+!$acc end parallel loop
+  endif
 !$acc parallel loop gang vector private(dx,dy,dz,distance,denominator, &
 !$acc& coefficient,forcex,forcey,forcez,ihigh,xmirror)
   do ipoint=inpjet,npjet
@@ -523,6 +560,7 @@
 !$acc end data
 
  end subroutine compute_coulomelec_openacc_3d
+#endif
  
  subroutine compute_coulomelec_multistep(nstep,timesub,ycf,yxx,yyy,yzz)
   

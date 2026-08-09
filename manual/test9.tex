@@ -90,5 +90,23 @@ RK updates represented less than one percent of the A30 loop. The complete
 saved trajectory passed the
 A30 baseline comparison with relative tolerance $10^{-6}$ and absolute
 tolerance $10^{-9}$; the worst normalized difference was $7.82\,10^{-5}$.
-The kernel uses call-scoped transfers and is restricted to the fixed Test 9
+That first EOM milestone used call-scoped transfers and was restricted to the fixed Test 9
 configuration; other configurations retain the CPU path.
+
+The subsequent persistent-data milestone maps the complete Test 9 state,
+Coulomb force, equation-of-motion derivatives, and Runge--Kutta scratch arrays
+once and retains them on the A30 across timesteps. Cross sections and all four
+Runge--Kutta updates are computed on the device, and the Coulomb result is
+consumed directly by the equation-of-motion kernel. The existing CPU
+statistics still require one update of the seven primary state arrays after
+each timestep, corresponding to 56,056 bytes per step for 1,001 beads.
+
+In a representative profiled run, the persistent complete loop took 2.451978
+s, compared with 3.159748 s for the call-scoped A30 implementation and
+38.616119 s for the paired NVFORTRAN CPU run. The persistent Coulomb,
+equation-of-motion, and Runge--Kutta regions took 2.006970 s, 0.112892 s, and
+0.191860 s, respectively. The Runge--Kutta region includes the once-per-step
+full-state update to the host. The complete-loop speedup over the CPU was
+15.75. The trajectory passed the unchanged A30 baseline with relative
+tolerance $10^{-6}$ and absolute tolerance $10^{-9}$; its worst normalized
+difference was $7.8\,10^{-5}$.

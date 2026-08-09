@@ -12,7 +12,9 @@ contains
 
  subroutine accelerator_prepare()
   implicit none
+#ifdef _OPENACC
 !$acc init
+#endif
   return
  end subroutine accelerator_prepare
 
@@ -48,6 +50,7 @@ contains
   if(nfieldtype/=0 .or. firstpoint/=0 .or. lastpoint/=npjet)return
   nout=lastpoint-firstpoint
 
+#ifdef _OPENACC
 !$acc parallel loop gang vector copyin(yxx(0:npjet),yyy(0:npjet), &
 !$acc& yzz(0:npjet),yst(0:npjet),yvx(0:npjet),yvy(0:npjet), &
 !$acc& yvz(0:npjet),yvl(0:npjet),ycf(0:npjet,1:3), &
@@ -59,6 +62,7 @@ contains
 !$acc& nbx,nby,nbz,lnb,b,c,t,scale1,scale2,ccx,ccy,ccz,rcx,rcy, &
 !$acc& rcz,radius,curvature,factor1,factor2,factor3,factor4,factor5, &
 !$acc& fvet,kst,attt,lit,veltangent,straight)
+#endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
     fxx(j)=0.d0
@@ -188,7 +192,9 @@ contains
     fvy(j)=fvy(j)-lit*factor5*rcy
     fvz(j)=fvz(j)-lit*factor5*rcz
   enddo
+#ifdef _OPENACC
 !$acc end parallel loop
+#endif
 
   accelerator_eom3_stage=.true.
  end function accelerator_eom3_stage

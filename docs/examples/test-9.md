@@ -157,10 +157,40 @@ instrumented separately.
 
 The full six-snapshot, fourteen-column trajectory passed against the A30
 baseline with `rtol=1e-6` and `atol=1e-9`; its worst normalized difference was
-`7.82e-5`. The current kernel is deliberately limited to the fixed Test 9
-configuration and uses call-scoped data transfers. Unsupported configurations
+`7.82e-5`. That initial EOM kernel was deliberately limited to the fixed Test 9
+configuration and used call-scoped data transfers. Unsupported configurations
 retain the CPU EOM path. Absolute timings vary with system load; preserve the
 compiler, profiler setting, and execution order when repeating the comparison.
+
+## Persistent-data milestone
+
+The next milestone retains the complete Test 9 state, Coulomb force, EOM
+derivatives, and RK4 scratch arrays on the A30 across timesteps. Cross-section
+calculation and all four RK updates also execute on the device. Coulomb output
+is consumed directly by EOM and never crosses back to the host.
+
+The existing CPU statistics require the primary state after every timestep,
+so the final RK stage still updates seven arrays on the host once per step.
+This is about 56 kB per step for 1,001 beads; no stage intermediate is
+transferred. A representative profiled run produced:
+
+| Region | Call-scoped A30 | Persistent A30 | Change |
+| --- | ---: | ---: | ---: |
+| Complete temporal loop | `3.159748 s` | `2.451978 s` | `1.29x` faster |
+| Integrator total | `3.152703 s` | `2.445458 s` | `1.29x` faster |
+| Coulomb, nested | `2.250507 s` | `2.006970 s` | `1.12x` faster |
+| EOM evaluation, nested | `0.736914 s` | `0.112892 s` | `6.53x` faster |
+| RK update, nested | `0.030343 s` | `0.191860 s` | includes host synchronization |
+
+The complete loop is `15.75x` faster than the paired NVFORTRAN CPU run of
+`38.616119 s`. The persistent EOM time demonstrates the benefit of eliminating
+four sets of input/output mappings per step. RK time increases because its
+timer now includes the single full-state device-to-host synchronization; it
+should not be interpreted as slower RK arithmetic.
+
+The persistent trajectory passes the unchanged A30 baseline with `rtol=1e-6`
+and `atol=1e-9`. Its worst normalized difference is `7.8e-5`, and it differs
+from the preceding call-scoped GPU trajectory by at most `2.0e-7` normalized.
 
 ## Versioned numerical records
 

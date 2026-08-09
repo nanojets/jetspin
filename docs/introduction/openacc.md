@@ -64,16 +64,25 @@ Coordinates, bead properties, cross sections, and the Coulomb force array are
 named explicitly in each OpenACC data region. No managed/unified-memory build
 mode is used.
 
-At this milestone, the RK state updates and dynamic bead operations still run
-on the CPU. Coordinates change at every integrator stage, while Coulomb and
-the supported EOM assembly use separate call-scoped data regions. Their
-current inputs are therefore copied to the device and their results back to
-the host on every stage. Keeping these arrays permanently resident is a later
-milestone that must account explicitly for host-side reallocation.
+Configurations outside the fixed Test 9 gate continue to use separate
+call-scoped Coulomb and EOM data regions. This remains safe when insertion,
+removal, or dynamic refinement changes `mxnpjet`: the next call maps the new
+host allocation and capacity.
 
-This call-scoped data region also makes the current implementation safe when
-insertion, removal, or dynamic refinement changes `mxnpjet`: the next call
-maps the newly allocated host arrays and their new capacity.
+Test 9 now uses an explicit persistent-data path. The primary jet state,
+static bead properties, Coulomb force, four sets of EOM derivatives, and RK4
+intermediate arrays are mapped once and remain resident across all timesteps.
+Each Coulomb stage computes its cross sections on the device; EOM consumes the
+device Coulomb force directly, and all four RK updates execute on the device.
+The host no longer receives stage intermediates or Coulomb forces.
+
+The existing statistics and output routines still execute on the CPU and read
+the complete primary state. The final RK kernel therefore updates the seven
+coordinate, stress, and velocity arrays on the host once per timestep. For
+1,001 beads this is 56,056 bytes per step, or about 53.5 MiB over the complete
+1,000-step benchmark. Removing that last recurring transfer requires porting
+the per-step statistics/reductions or computing their compact observables on
+the device. Dynamic topology remains outside persistent mode.
 
 ## Numerical validation
 
@@ -106,13 +115,15 @@ regression above and cannot establish GPU performance.
 ## Next porting stages
 
 1. Port the evaporation-specific direct Coulomb kernel.
-2. Extend the equation-of-motion kernel beyond the fixed Test 9 gate, then
-   move RK updates into the device region.
-3. Add explicit device teardown/recreation hooks around capacity changes and
+2. Port the Test 9 statistics and output reductions so that the host needs an
+   update only on scheduled output and checkpoint steps.
+3. Extend persistent equation-of-motion and RK support beyond the fixed Test
+   9 gate.
+4. Add explicit device teardown/recreation hooks around capacity changes and
    synchronize only topology metadata and requested output fields.
-4. Port the local Akima coefficient loops, replace the interpolation interval
+5. Port the local Akima coefficient loops, replace the interpolation interval
    scan with a GPU-suitable search, and then address dynamic refinement.
-5. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
+6. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 
 The intended steady state is a persistent device-resident simulation with

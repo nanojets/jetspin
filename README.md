@@ -76,7 +76,8 @@ excluded from the smoke and numerical-regression suites. It provides a fixed
 region-level profiling during OpenACC development. The current single-GPU
 milestone offloads direct Coulomb interactions and, for the fixed Test 9
 configuration, the three-dimensional equation-of-motion assembly including
-its local curvature calculation. See the
+its local curvature calculation. Test 9 keeps its state and RK4 scratch data
+resident on the device across timesteps. See the
 [OpenACC porting status](docs/introduction/openacc.md) for supported
 configurations, numerical constraints, and remaining work.
 

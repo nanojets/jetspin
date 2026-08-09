@@ -230,7 +230,7 @@ host_accelerator_mod.o:host_accelerator_mod.f90
 	$(FC) $(FFLAGS) host_accelerator_mod.f90
 
 openacc_accelerator_mod.o:openacc_accelerator_mod.f90
-	$(FC) $(FFLAGS) openacc_accelerator_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) openacc_accelerator_mod.f90
 
 profiling_mod.o:profiling_mod.f90
 	$(FC) $(FFLAGS) profiling_mod.f90

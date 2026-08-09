@@ -60,7 +60,8 @@
                        remove_jetbead,erase_jetbead,lengthscale, &
                        pdbrescale,lreadrest,lKVfluid,levaporation, &
                        jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-                       topology_add_total,topology_remove_total
+                       jetms,jetch,jetvl,jetfr,topology_add_total, &
+                       topology_remove_total
   use breaking_mod,   only : ckeck_breakup
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
@@ -97,6 +98,8 @@
   
   logical :: ladd,lrem,lremdat,ldorefinment,lrecycle
   logical :: lfullhostoutput
+  logical :: ltopologysnapshot
+  character(len=32) :: topology_snapshot_env
   
   integer :: i,j,k,atype
 
@@ -198,6 +201,13 @@
   call profiling_reset()
   call get_sync_world()
   call wall_time_world(loop_start_time)
+  topology_snapshot_env=''
+  call get_environment_variable('JETSPIN_TOPOLOGY_SNAPSHOT', &
+   topology_snapshot_env)
+  ltopologysnapshot=trim(topology_snapshot_env)=='1'
+  if(ltopologysnapshot .and. idrank==0)then
+    open(unit=151,file='topology-state.dat',status='replace',action='write')
+  endif
 
   do while (lrecycle)
   
@@ -226,6 +236,19 @@
     if(idrank==0 .and. (ladd .or. lrem))then
       write(6,'(a,i0,a,l1,a,i0,a,i0)')'Topology event: step=',nstep, &
        ' add=',ladd,' remove=',merge(nremoved,0,lrem),' active=',npjet-inpjet
+    endif
+    if(ltopologysnapshot .and. idrank==0 .and. (ladd .or. lrem))then
+#ifdef _OPENACC
+      if(accelerator_is_persistent())call accelerator_update_host_state( &
+       npjet,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,nstep)
+#endif
+      write(151,'(a,4(1x,i0),1x,l1)')'event',nstep,inpjet,npjet, &
+       npjet-inpjet,ladd
+      do i=inpjet,npjet
+        write(151,'(i0,1x,l1,10(1x,es24.16))')i,jetfr(i),jetxx(i), &
+         jetyy(i),jetzz(i),jetst(i),jetvx(i),jetvy(i),jetvz(i), &
+         jetms(i),jetch(i),jetvl(i)
+      enddo
     endif
     
 !   check if the filament is breaking up between two beads
@@ -346,6 +369,7 @@
     
 ! close the binary file (only for developers) 
   call close_dat_file(lprintdat,130)
+  if(ltopologysnapshot .and. idrank==0)close(151)
   
 ! close the communications
   call finalize_world()

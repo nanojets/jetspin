@@ -74,6 +74,11 @@ capacity growth, and compaction remain host-side, while force kernels use the
 safe call-scoped path. CPU and A30 executions reproduce all 26 topology events
 at identical timesteps. This versioned sequence is the acceptance baseline for
 moving those operations into a persistent device allocation.
+An optional full-state snapshot at every topology event verified exact bead
+metadata and properties. Component-isolation switches showed that the growing
+trajectory difference originates primarily in device EOM/curvature arithmetic;
+the OpenACC EOM run on the host matches the original CPU path near machine
+precision. See the [Test 13 record](../examples/test-13.md).
 
 Tests 9--12 use an explicit persistent-data path. The primary jet state,
 static bead properties, Coulomb force, EOM derivatives, and integrator scratch

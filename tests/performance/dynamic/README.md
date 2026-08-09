@@ -15,6 +15,29 @@ amplifies small floating-point differences, so the paired observable check
 uses `rtol=3e-4` and `atol=1e-6`; this is deliberately separate from the
 normal `1e-6` regression criterion.
 
+## Full-state diagnosis
+
+Set `JETSPIN_TOPOLOGY_SNAPSHOT=1` to write `topology-state.dat`. At every
+event it records every active bead's index, frozen flag, position, stress,
+velocity, mass, charge, and volume. Compare two files with:
+
+```sh
+tests/performance/dynamic/compare_state.py CPU/topology-state.dat \
+  GPU/topology-state.dat --rtol 3e-4 --atol 1e-6
+```
+
+The diagnostic comparison found the first device difference at step 40 in a
+transverse quantity near machine zero. Indices, flags, masses, charges, and
+volumes remained bit-for-bit identical at every event. Running the OpenACC
+kernel on the CPU and comparing it with the original CPU EOM gave differences
+of only about `3e-16`, which rules out a material algorithm mismatch in the
+accelerator EOM. Runtime isolation also showed that GPU EOM/curvature is the
+main source; GPU Coulomb with CPU EOM diverges later and much less.
+
+For diagnosis, `JETSPIN_OPENACC_DISABLE_EOM=1` and
+`JETSPIN_OPENACC_DISABLE_COULOMB=1` independently force those components back
+to their CPU implementations. These switches are disabled by default.
+
 Compare a new paired run with:
 
 ```sh

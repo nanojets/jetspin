@@ -38,6 +38,10 @@
 logical, save :: lmscomputed=.false.
  logical, save :: accelerator_persistent_mode=.false.
  logical, save :: accelerator_coulomb_mapped=.false.
+#ifdef _OPENACC
+ logical, save :: accelerator_coulomb_env_checked=.false.
+ logical, save :: accelerator_coulomb_disabled=.false.
+#endif
  
  integer, save :: ncoulforce=0
  integer, save :: maxneighlist=50
@@ -292,7 +296,17 @@ contains
       ycf(0:ncoulforce,1:1)=0.d0
 
 #ifdef _OPENACC
-      if(accelerator_enabled .and. mxrank==1)then
+      if(.not.accelerator_coulomb_env_checked)then
+        block
+          character(len=16) :: env
+          env=''
+          call get_environment_variable('JETSPIN_OPENACC_DISABLE_COULOMB',env)
+          accelerator_coulomb_disabled=trim(env)=='1'
+        end block
+        accelerator_coulomb_env_checked=.true.
+      endif
+      if(accelerator_enabled .and. mxrank==1 .and. &
+       .not.accelerator_coulomb_disabled)then
         call compute_coulomelec_openacc_1d(ycf,yxx)
         return
       endif

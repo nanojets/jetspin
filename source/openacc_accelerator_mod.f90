@@ -6,6 +6,8 @@ module accelerator_mod
  logical, parameter, public :: accelerator_enabled=.true.
  logical, save :: accelerator_persistent=.false.
  logical, save :: accelerator_statistics_mapped=.false.
+ logical, save :: accelerator_eom_env_checked=.false.
+ logical, save :: accelerator_eom_disabled=.false.
  double precision, save :: statistics_step_max=-huge(0.d0)
  integer, save :: statistics_step_index=-1
  integer, save :: accelerator_last_host_sync_step=-huge(0)
@@ -565,6 +567,16 @@ contains
   logical :: straight
 
   accelerator_eom3_stage=.false.
+  if(.not.accelerator_eom_env_checked)then
+    block
+      character(len=16) :: env
+      env=''
+      call get_environment_variable('JETSPIN_OPENACC_DISABLE_EOM',env)
+      accelerator_eom_disabled=trim(env)=='1'
+    end block
+    accelerator_eom_env_checked=.true.
+  endif
+  if(accelerator_eom_disabled)return
   if(.not.linserted .or. .not.lairdrag .or. lflorentz .or. luppot)return
   if(nfieldtype/=0 .or. firstpoint/=0 .or. lastpoint/=npjet)return
   nout=lastpoint-firstpoint

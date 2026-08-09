@@ -20,5 +20,13 @@ An initial NVFORTRAN 24.3/A30 comparison measured `40.659696 s` on CPU and
 observables pass with `rtol=3e-4` and `atol=1e-6`; the looser dedicated
 tolerance accounts for curvature amplification after repeated topology events.
 
+A full-state event-by-event diagnosis confirmed exact bead indices, frozen
+flags, masses, charges, volumes, and event metadata. The first CPU/device
+difference occurs in a transverse quantity close to zero at step 40. The same
+OpenACC EOM executed on the CPU agrees with the original CPU implementation to
+about machine precision, identifying device floating-point evaluation of the
+EOM/curvature kernel—not insertion or removal—as the source subsequently
+amplified by the dynamic trajectory.
+
 - [Input file](../../examples/input-13/input.dat)
 - [Comparison record](../../tests/performance/dynamic/README.md)

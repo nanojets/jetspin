@@ -21,3 +21,13 @@ on CPU and 3.834931 s with OpenACC. The topology streams were identical. The
 sampled physical observables passed with relative tolerance $3\,10^{-4}$ and
 absolute tolerance $10^{-6}$; curvature after repeated topology changes is
 more sensitive to floating-point ordering than the fixed benchmarks.
+
+With the environment variable
+\texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT=1}, JETSPIN writes the complete active
+state at every topology event. This diagnostic showed identical bead indices,
+frozen flags, masses, charges, volumes, and event metadata. The first device
+difference appears in a transverse quantity close to zero at step 40. Running
+the same OpenACC equation-of-motion kernel on the CPU agreed with the original
+CPU implementation near machine precision. The observed growth therefore
+originates primarily from device floating-point evaluation of curvature and
+is not evidence of an insertion or removal indexing error.

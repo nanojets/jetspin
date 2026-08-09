@@ -33,7 +33,9 @@ module utility_mod
  double precision, allocatable,save :: gaussianbuffer(:)
  double precision, public, allocatable, save :: gaussianhistory(:)
  integer,save :: ngaussianbuffer=-1
- integer,save :: ngaussianhistory=-1,nhistorysteps=-1
+ integer,save :: ngaussianhistory=-1
+ integer, public, save :: gaussianhistorysteps=-1
+ integer, public, parameter :: maxgaussianhistory=100000000
  double precision,save :: hwiener
  integer,save :: winenernodes
  
@@ -298,12 +300,14 @@ module utility_mod
   if(mxpnt<0 .or. nsteps<1)stop "Invalid Gaussian-history extent"
   if(ndim<1 .or. ndim>3)stop "Invalid Gaussian-history dimension"
   nperstep=(mxpnt+1)*3*2
-  nvalues=nperstep*nsteps
+  gaussianhistorysteps=min(nsteps,maxgaussianhistory/nperstep)
+  if(gaussianhistorysteps<1)stop "One Gaussian timestep exceeds history limit"
+  nvalues=nperstep*gaussianhistorysteps
   if(allocated(gaussianhistory))deallocate(gaussianhistory)
   allocate(gaussianhistory(0:nvalues-1))
   gaussianhistory(:)=0.d0
   if(idrank==0)then
-    do istep=1,nsteps
+    do istep=1,gaussianhistorysteps
       do ipoint=inpnt,npnt
         do icomponent=1,ndim
           do idraw=1,2
@@ -317,21 +321,21 @@ module utility_mod
   endif
   call bcast_world_darr(gaussianhistory,nvalues)
   ngaussianhistory=mxpnt
-  nhistorysteps=nsteps
  end subroutine prepare_gaussian_history
 
  function gaussian_history_value(istep,ipoint,icomponent,idraw)
   implicit none
   integer, intent(in) :: istep,ipoint,icomponent,idraw
-  integer :: nperstep,index
+  integer :: nperstep,index,cycle_step
   double precision :: gaussian_history_value
   if(.not.allocated(gaussianhistory))stop "Gaussian history is not prepared"
-  if(istep<1 .or. istep>nhistorysteps)stop "Invalid Gaussian-history step"
+  if(istep<1)stop "Invalid Gaussian-history step"
   if(ipoint<0 .or. ipoint>ngaussianhistory)stop "Invalid Gaussian bead index"
   if(icomponent<1 .or. icomponent>3)stop "Invalid Gaussian component"
   if(idraw<1 .or. idraw>2)stop "Invalid Gaussian draw index"
   nperstep=(ngaussianhistory+1)*3*2
-  index=(istep-1)*nperstep+ipoint+(ngaussianhistory+1)* &
+  cycle_step=mod(istep-1,gaussianhistorysteps)+1
+  index=(cycle_step-1)*nperstep+ipoint+(ngaussianhistory+1)* &
    ((icomponent-1)+3*(idraw-1))
   gaussian_history_value=gaussianhistory(index)
  end function gaussian_history_value

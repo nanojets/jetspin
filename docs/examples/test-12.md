@@ -11,6 +11,8 @@ Before loop timing, rank 0 generates the complete Gaussian history in a fixed
 precision values (48,048,000 bytes). CPU integration reads this same layout;
 the OpenACC build copies it to the device once during initialization. No noise
 generation or noise transfer occurs inside the temporal loop.
+The implementation caps a pre-generated history at 100,000,000 values; longer
+fixed runs reuse it cyclically. Test 12 is below this limit and never wraps.
 
 The persistent GPU path performs the three Platen force evaluations,
 positive/negative predictors, stochastic velocity update, Heun position and

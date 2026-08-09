@@ -19,7 +19,7 @@ module integrator_mod
  use utility_mod,       only : wiener_process1,wiener_process2, &
                          prepare_gaussian_buffer,gaussian_buffer_value, &
                          prepare_gaussian_history,gaussian_history_value, &
-                         gaussianhistory
+                         gaussianhistory,gaussianhistorysteps
  use nanojet_mod,       only : doallocate,mxnpjet,npjet,inpjet,systype,&
                          jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetst, &
                          jetms,jetch,jetvl,compute_posnoinserted, &
@@ -77,7 +77,8 @@ contains
   nsteps=nint((endtime-initime)/h)
   call prepare_gaussian_history(inpjet,npjet,mxnpjet,3,nsteps)
 #ifdef _OPENACC
-!$acc enter data copyin(gaussianhistory(0:(mxnpjet+1)*6*nsteps-1))
+!$acc enter data copyin(gaussianhistory(0:(mxnpjet+1)*6* &
+!$acc& gaussianhistorysteps-1))
 #endif
  end subroutine prepare_integrator_random_history
 
@@ -1739,7 +1740,8 @@ contains
          d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
-        call accelerator_platen_velocity(mystart,myend,mxnpjet,k,h, &
+        call accelerator_platen_velocity(mystart,myend,mxnpjet, &
+         gaussianhistorysteps,k,h, &
          airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
          f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz)
         call accelerator_platen_positions(mystart,myend,npjet,h,pfreq, &

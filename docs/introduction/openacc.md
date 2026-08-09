@@ -81,6 +81,9 @@ on the CPU before loop timing in a fixed step/bead/component/draw order. Test
 this history once during initialization and indexes it on the device; the CPU
 path indexes the same layout. No random generation or noise transfer occurs
 inside the measured loop.
+The history is capped at 100,000,000 doubles (about 763 MiB). Longer fixed
+runs wrap to its beginning, preserving CPU/GPU reproducibility while making
+the noise periodic after the stored interval.
 The host no longer receives stage intermediates or Coulomb forces.
 
 The per-step path-length and maximum-stress reductions are fused with each

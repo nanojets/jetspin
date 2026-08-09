@@ -53,6 +53,12 @@ This guarantees identical Gaussian assignments without a per-step host/device
 transfer. General Platen simulations with dynamic topology continue to use the
 per-step block described above.
 
+The pre-generated history is capped at 100,000,000 double precision values
+(about 763 MiB). If a fixed simulation needs more timesteps than fit in that
+limit, timestep addressing wraps to the first stored block. CPU and GPU remain
+reproducible, but the Gaussian sequence then repeats periodically and should
+not be interpreted as independent noise beyond that period.
+
 ## Other random paths
 
 Nozzle perturbation draws are generated on rank 0 and broadcast as scalar

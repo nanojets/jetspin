@@ -79,21 +79,23 @@ contains
 #endif
  end subroutine accelerator_platen_predict
 
- subroutine accelerator_platen_velocity(firstpoint,lastpoint,mxnpjet,k,h, &
+ subroutine accelerator_platen_velocity(firstpoint,lastpoint,mxnpjet, &
+   historysteps,k,h, &
    airamp,noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
    f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz)
   implicit none
-  integer, intent(in) :: firstpoint,lastpoint,mxnpjet,k
+  integer, intent(in) :: firstpoint,lastpoint,mxnpjet,historysteps,k
   double precision, intent(in) :: h,airamp,noisediff,jetms(0:)
   double precision, intent(in) :: gaussianhistory(0:)
   double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
   double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
   double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
   double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
-  integer :: ipoint,j,component,nperstep,index1,index2
+  integer :: ipoint,j,component,nperstep,index1,index2,cycle_step
   double precision :: dsqrh,tsqh,prefactor,stoc,u1,u2,ww,zz
   dsqrh=dsqrt(dabs(h)); tsqh=dsqrh**3.d0; prefactor=0.5d0/dsqrh
   nperstep=(mxnpjet+1)*6
+  cycle_step=mod(k-1,historysteps)+1
 #ifdef _OPENACC
 !$acc parallel loop gang vector present(jetms,gaussianhistory,jetvx,jetvy, &
 !$acc& jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz) &
@@ -104,22 +106,22 @@ contains
     stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
     if(ipoint==lastpoint)stoc=0.d0
     component=1
-    index1=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
-    index2=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
+    index1=(cycle_step-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
+    index2=(cycle_step-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
     u1=gaussianhistory(index1); u2=gaussianhistory(index2)
     ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
     jetvx(ipoint)=jetvx(ipoint)+stoc*ww+prefactor*(f2vx(j)-f3vx(j))*zz+ &
      0.25d0*h*(f2vx(j)+2.d0*f1vx(j)+f3vx(j))
     component=2
-    index1=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
-    index2=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
+    index1=(cycle_step-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
+    index2=(cycle_step-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
     u1=gaussianhistory(index1); u2=gaussianhistory(index2)
     ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
     jetvy(ipoint)=jetvy(ipoint)+stoc*ww+prefactor*(f2vy(j)-f3vy(j))*zz+ &
      0.25d0*h*(f2vy(j)+2.d0*f1vy(j)+f3vy(j))
     component=3
-    index1=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
-    index2=(k-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
+    index1=(cycle_step-1)*nperstep+ipoint+(mxnpjet+1)*(component-1)
+    index2=(cycle_step-1)*nperstep+ipoint+(mxnpjet+1)*(component-1+3)
     u1=gaussianhistory(index1); u2=gaussianhistory(index2)
     ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
     jetvz(ipoint)=jetvz(ipoint)+stoc*ww+prefactor*(f2vz(j)-f3vz(j))*zz+ &

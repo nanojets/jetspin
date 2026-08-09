@@ -81,6 +81,10 @@ resident on the device across timesteps. See the
 [OpenACC porting status](docs/introduction/openacc.md) for supported
 configurations, numerical constraints, and remaining work.
 
+[Test Case 13](docs/examples/test-13.md) adds a 1,024-bead dynamic-topology
+baseline with insertion and removal. Topology is still host-managed in this
+milestone; its versioned event sequence guides the persistent dynamic port.
+
 ## Citation
 
 If JETSPIN contributes to published work, please cite:

@@ -162,6 +162,7 @@
  logical, allocatable, public, save :: jetfr(:)
  logical, allocatable, public, save :: jetfm(:)
  integer, allocatable, public, save :: jetlb(:)
+ integer, public, save :: topology_add_total=0,topology_remove_total=0
  double precision, allocatable, public, save :: jetpt(:)
  double precision, allocatable, public, save :: jetxx(:)
  double precision, allocatable, public, save :: jetyy(:)
@@ -1152,6 +1153,7 @@
       if(ltrackbeads .and. idrank==0)jetlb(npjet-1)=trackbeads_number()
       ladd=.true.
       naddtrack=naddtrack+1
+      topology_add_total=topology_add_total+1
       timedeposition=0.d0
       if(lmultiplestep)lneighlistdo=.true.
 !     the new bead is blocked until a given condition is not satisfied
@@ -1269,6 +1271,7 @@
     if(lrem)then
       nremoved=newinpjet-inpjet+1
       nremtrack=nremtrack+nremoved
+      topology_remove_total=topology_remove_total+nremoved
       inpjet=newinpjet+1
       lremdat=.true.
     else
@@ -1296,6 +1299,7 @@
     if(lrem)then
       nremoved=newinpjet-inpjet+1
       nremtrack=nremtrack+nremoved
+      topology_remove_total=topology_remove_total+nremoved
       inpjet=newinpjet+1
       lremdat=.true.
     else
@@ -1521,4 +1525,3 @@
  end function trackbeads_number
  
  end module nanojet_mod
-

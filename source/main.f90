@@ -59,7 +59,8 @@
                        allocate_jet,set_initial_jet,add_jetbead, &
                        remove_jetbead,erase_jetbead,lengthscale, &
                        pdbrescale,lreadrest,lKVfluid,levaporation, &
-                       jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz
+                       jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+                       topology_add_total,topology_remove_total
   use breaking_mod,   only : ckeck_breakup
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
@@ -222,6 +223,10 @@
     call profiling_start(prof_remove_bead)
     call remove_jetbead(nstep,nremoved,mytime,lrem,lremdat)
     call profiling_stop(prof_remove_bead)
+    if(idrank==0 .and. (ladd .or. lrem))then
+      write(6,'(a,i0,a,l1,a,i0,a,i0)')'Topology event: step=',nstep, &
+       ' add=',ladd,' remove=',merge(nremoved,0,lrem),' active=',npjet-inpjet
+    endif
     
 !   check if the filament is breaking up between two beads
     call profiling_start(prof_breakup)
@@ -311,6 +316,11 @@
     endif
   endif
   call profiling_report(loop_elapsed_time,idrank)
+  if(idrank==0)then
+    write(6,'(a,i0)')'Topology additions: ',topology_add_total
+    write(6,'(a,i0)')'Topology removals: ',topology_remove_total
+    write(6,'(a,i0)')'Topology active beads: ',npjet-inpjet
+  endif
 !***********************************************************************
 !     end of the time integration
 !***********************************************************************

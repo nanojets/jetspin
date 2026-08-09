@@ -69,6 +69,12 @@ call-scoped Coulomb and EOM data regions. This remains safe when insertion,
 removal, or dynamic refinement changes `mxnpjet`: the next call maps the new
 host allocation and capacity.
 
+Test 13 records the first dynamic-topology milestone. Its insertion, removal,
+capacity growth, and compaction remain host-side, while force kernels use the
+safe call-scoped path. CPU and A30 executions reproduce all 26 topology events
+at identical timesteps. This versioned sequence is the acceptance baseline for
+moving those operations into a persistent device allocation.
+
 Tests 9--12 use an explicit persistent-data path. The primary jet state,
 static bead properties, Coulomb force, EOM derivatives, and integrator scratch
 arrays are mapped once and remain resident across all timesteps.

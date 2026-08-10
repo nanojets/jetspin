@@ -38,6 +38,7 @@
 logical, save :: lmscomputed=.false.
  logical, save :: accelerator_persistent_mode=.false.
  logical, save :: accelerator_coulomb_mapped=.false.
+ logical, save :: accelerator_coulomb_reset_pending=.false.
 #ifdef _OPENACC
  logical, save :: accelerator_coulomb_env_checked=.false.
  logical, save :: accelerator_coulomb_disabled=.false.
@@ -71,6 +72,7 @@ logical, save :: lmscomputed=.false.
  public :: restore_charge
 public :: compute_coulomelec_driver
  public :: set_coulomb_accelerator_persistent
+ public :: reset_coulomb_accelerator
  
 contains
 
@@ -79,6 +81,22 @@ contains
   logical, intent(in) :: enabled
   accelerator_persistent_mode=enabled
  end subroutine set_coulomb_accelerator_persistent
+
+ subroutine reset_coulomb_accelerator(ycf)
+  implicit none
+  double precision, allocatable, intent(inout), optional :: ycf(:,:)
+#ifdef _OPENACC
+  if(accelerator_coulomb_mapped)then
+!$acc exit data delete(coulcrossec)
+    if(present(ycf))then
+!$acc exit data delete(ycf)
+    endif
+  endif
+#endif
+  accelerator_coulomb_mapped=.false.
+  accelerator_persistent_mode=.false.
+  accelerator_coulomb_reset_pending=.not.present(ycf)
+end subroutine reset_coulomb_accelerator
  
  subroutine allocate_coulcrossec(imiomax)
  
@@ -199,6 +217,10 @@ contains
   double precision, allocatable, intent(in) ::  yyy(:)
   double precision, allocatable, intent(in) ::  yzz(:)
   double precision, allocatable, intent(in), optional ::  yve(:)
+
+  if(accelerator_coulomb_reset_pending)then
+    call reset_coulomb_accelerator(ycf)
+  endif
 
   call profiling_start(prof_coulomb)
   

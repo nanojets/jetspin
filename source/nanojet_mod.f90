@@ -30,7 +30,7 @@
  integer, public, save :: npjet
  integer, public, save :: mxnpjet
  integer, public, parameter :: incnpjet=100
- integer, public, parameter :: reallocation_increment=1000
+ integer, public, parameter :: reallocation_increment=100
  integer, public, save :: systype
  integer, public, save :: units
  integer, public, save :: insertmode

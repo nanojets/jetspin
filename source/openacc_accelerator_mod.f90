@@ -17,6 +17,8 @@ module accelerator_mod
  public :: accelerator_set_persistent
  public :: accelerator_is_persistent
  public :: accelerator_update_host_state
+ public :: accelerator_update_host_capacity_state
+ public :: accelerator_release_jet_capacity
  public :: accelerator_update_host_point
  public :: accelerator_remove_bead
  public :: accelerator_update_device_removed
@@ -34,6 +36,20 @@ module accelerator_mod
  public :: accelerator_platen_stress_statistics
 
 contains
+
+ subroutine accelerator_release_jet_capacity(jetxx,jetyy,jetzz,jetst,jetvx, &
+   jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+  implicit none
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
+  logical, intent(inout) :: jetfr(0:)
+#ifdef _OPENACC
+!$acc exit data delete(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+!$acc& jetms,jetch,jetvl,jetfr)
+#endif
+  accelerator_persistent=.false.
+ end subroutine accelerator_release_jet_capacity
 
  subroutine accelerator_platen_predict(firstpoint,lastpoint,h,airamp,noisediff, &
    jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
@@ -474,14 +490,30 @@ contains
   return
  end subroutine accelerator_update_host_state
 
- subroutine accelerator_add_bead(npjet,mxnpjet,linserted,ladd, &
+ subroutine accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz, &
+   jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+  implicit none
+  integer, intent(in) :: npjet
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
+  logical, intent(inout) :: jetfr(0:)
+  if(.not.accelerator_persistent)return
+#ifdef _OPENACC
+!$acc update self(jetxx(0:npjet),jetyy(0:npjet),jetzz(0:npjet), &
+!$acc& jetst(0:npjet),jetvx(0:npjet),jetvy(0:npjet),jetvz(0:npjet), &
+!$acc& jetms(0:npjet),jetch(0:npjet),jetvl(0:npjet),jetfr(0:npjet))
+#endif
+ end subroutine accelerator_update_host_capacity_state
+
+ subroutine accelerator_add_bead(npjet,mxnpjet,linserted,ladd,lresize, &
    resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
    ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
    jetvz,jetms,jetch,jetvl,jetfr)
   implicit none
   integer, intent(inout) :: npjet
   integer, intent(in) :: mxnpjet
-  logical, intent(inout) :: linserted,ladd
+  logical, intent(inout) :: linserted,ladd,lresize
   double precision, intent(in) :: resolution,dresolution,thresolution
   double precision, intent(in) :: ivelocity,istress,imassa,icharge,ivolume
   double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
@@ -491,9 +523,10 @@ contains
   double precision :: dx,dy,dz,distance,scale
 
   ladd=.false.
+  lresize=.false.
 #ifdef _OPENACC
 !$acc serial present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
-!$acc& jetch,jetvl,jetfr) copy(npjet,linserted,ladd) &
+!$acc& jetch,jetvl,jetfr) copy(npjet,linserted,ladd,lresize) &
 !$acc& private(dx,dy,dz,distance,scale)
 #endif
   if(.not.linserted)then
@@ -513,7 +546,9 @@ contains
     dy=jetyy(npjet-1)-jetyy(npjet)
     dz=jetzz(npjet-1)-jetzz(npjet)
     distance=dsqrt(dx*dx+dy*dy+dz*dz)
-    if(distance>=thresolution .and. npjet<mxnpjet)then
+    if(distance>=thresolution .and. npjet>=mxnpjet)then
+      lresize=.true.
+    elseif(distance>=thresolution)then
       npjet=npjet+1
       jetfr(npjet)=jetfr(npjet-1)
       jetxx(npjet)=jetxx(npjet-1)

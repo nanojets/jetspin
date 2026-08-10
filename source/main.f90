@@ -47,6 +47,8 @@
 #ifdef _OPENACC
   use accelerator_mod, only : accelerator_prepare, &
                          accelerator_update_host_state, &
+                         accelerator_update_host_capacity_state, &
+                         accelerator_release_jet_capacity, &
                          accelerator_is_persistent, &
                          accelerator_remove_bead, &
                          accelerator_update_device_removed, &
@@ -60,6 +62,7 @@
   use nanojet_mod,    only : inpjet,npjet,linserted,linserting,lremove,myseed,systype, &
                        tstep,xyzrescale,set_resolution_length, &
                        allocate_jet,set_initial_jet,add_jetbead, &
+                       reallocate_jet, &
                        remove_jetbead,erase_jetbead,lengthscale, &
                        pdbrescale,lreadrest,lKVfluid,levaporation, &
                        jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
@@ -73,7 +76,8 @@
                                set_refinement_threshold, &
                                refbeadstartfit
   use integrator_mod, only : initime,endtime,driver_integrator, &
-                            prepare_integrator_random_history
+                            prepare_integrator_random_history, &
+                            reset_persistent_integrator
   use integrator_kv_ev_mod, only : driver_integrator_KV_ev
   use statistic_mod,  only : statistic_driver
   use io_mod,         only : iprintdat,iprintxyz,lprintdat,lprintxyz,&
@@ -102,7 +106,7 @@
   double precision :: itime,ctime,ftime
   double precision :: loop_start_time,loop_end_time,loop_elapsed_time
   
-  logical :: ladd,lrem,lremdat,ldorefinment,lrecycle
+  logical :: ladd,lresize,lrem,lremdat,ldorefinment,lrecycle
   logical :: lfullhostoutput
   logical :: ltopologysnapshot
   character(len=32) :: topology_snapshot_env
@@ -167,6 +171,7 @@
 ! initialize variables which keep trace if a bead is added and/or removed
 ! after the integration step
   ladd=.false.
+  lresize=.false.
   lrem=.false.
   
 ! read the restart file if requested
@@ -234,13 +239,24 @@
     
 !   check if a new bead should be added and/or removed
     call profiling_start(prof_add_bead)
+    lresize=.false.
 #ifdef _OPENACC
     if(accelerator_is_persistent() .and. linserting)then
       timedeposition=timedeposition+tstep
-      call accelerator_add_bead(npjet,mxnpjet,linserted,ladd,resolution, &
+      call accelerator_add_bead(npjet,mxnpjet,linserted,ladd,lresize,resolution, &
        dresolution,thresolution,ivelocity,istress,imassa,icharge,ivolume, &
        jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
        jetms,jetch,jetvl,jetfr)
+      if(lresize)then
+        call accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz, &
+         jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+        call accelerator_release_jet_capacity(jetxx,jetyy,jetzz,jetst, &
+         jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+        npjet=npjet+1
+        call reallocate_jet()
+        npjet=npjet-1
+        call reset_persistent_integrator()
+      endif
       if(ladd)then
         naddtrack=naddtrack+1
         topology_add_total=topology_add_total+1
@@ -255,7 +271,7 @@
     call profiling_stop(prof_add_bead)
     call profiling_start(prof_remove_bead)
 #ifdef _OPENACC
-    if(accelerator_is_persistent() .and. linserting .and. lremove)then
+    if(accelerator_is_persistent() .and. .not.lresize .and. linserting .and. lremove)then
       call accelerator_remove_bead(inpjet,npjet,h,jetxx,jetyy,jetzz,jetst, &
        jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nremoved,lrem)
       lremdat=lrem

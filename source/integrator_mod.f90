@@ -48,7 +48,8 @@ module integrator_mod
  use electric_field_mod, only : nfieldtype
  use coulomb_force_mod, only : smooth_charge,restore_charge, &
                          coulforce,compute_coulomelec_driver, &
-                         set_coulomb_accelerator_persistent
+                         set_coulomb_accelerator_persistent, &
+                         reset_coulomb_accelerator
  use driver_eom_mod,    only : xpsys,xpsys_pos,xpsys_stress, &
                          xpsys_KV_pos_v,xpsys_KV_st,xpsys_ev, &
                          xpsys_pos_ev,xpsys_stress_ev
@@ -59,6 +60,7 @@ module integrator_mod
  
  integer, public, save :: integrator
  logical, public, save :: lintegrator=.false.
+ logical, save :: persistent_reset_requested=.false.
  
  double precision, public, save :: initime = 0.d0
  double precision, public, save :: endtime = 5.d0
@@ -66,8 +68,14 @@ module integrator_mod
  
  public :: driver_integrator
  public :: prepare_integrator_random_history
+ public :: reset_persistent_integrator
 
 contains
+
+ subroutine reset_persistent_integrator()
+  implicit none
+  persistent_reset_requested=.true.
+ end subroutine reset_persistent_integrator
 
  subroutine prepare_integrator_random_history(h)
   implicit none
@@ -475,7 +483,7 @@ contains
   double precision ::  fvx
   double precision ::  fvy
   double precision ::  fvz
-  
+
   logical, save :: lfirstsub=.true.
   logical, save :: persistent_acc=.false.
   logical :: used_acc_eom
@@ -844,6 +852,20 @@ contains
   double precision ::  fvx
   double precision ::  fvy
   double precision ::  fvz
+
+#ifdef _OPENACC
+  if(persistent_reset_requested .and. persistent_acc)then
+!$acc exit data delete(yxx,yyy,yzz,yst,yvx,yvy,yvz, &
+!$acc& f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f2xx,f2yy,f2zz,f2st, &
+!$acc& f2vx,f2vy,f2vz,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz, &
+!$acc& f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz)
+    call reset_coulomb_accelerator()
+    call accelerator_set_persistent(.false.)
+    call set_coulomb_accelerator_persistent(.false.)
+    persistent_acc=.false.
+  endif
+  persistent_reset_requested=.false.
+#endif
   
 ! check and eventually reallocate the service arrays
   if(doallocate)then

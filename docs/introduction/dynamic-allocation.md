@@ -19,6 +19,7 @@ reallocation in
 | `npjet` | Index of the last active bead/current active upper endpoint |
 | `mxnpjet` | Allocated upper bound of the fundamental jet arrays |
 | `incnpjet` | Capacity-growth increment; currently 100 beads |
+| `reallocation_increment` | Capacity increase applied by `reallocate_jet`; currently 100 beads |
 | `mxchunk` | Maximum size of a rank-local MPI work chunk |
 | `doallocate` | Signals that capacity-dependent work arrays may need resizing |
 | `doreorder` | Signals that bead indices have been rebased or remapped |

@@ -20,7 +20,7 @@
  gravity yes
  points 100
  initial length 16.d0
- nozzle velocity 2000.d0
+ nozzle velocity 200000.d0
  nozzle stress 0.d0
  yield stress 0.d0
  nozzle cross 0.005d0

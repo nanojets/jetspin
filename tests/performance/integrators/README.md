@@ -1,5 +1,9 @@
 # Euler, RK2, and Platen 1,000-bead benchmarks
 
+The compiler version, module initialization, and exact CPU/GPU flags for
+these records are maintained in
+[`../BUILD-PROVENANCE.md`](../BUILD-PROVENANCE.md).
+
 Tests 10 and 11 reuse the fixed 1,000-bead geometry and physics of Test 9,
 but select the explicit Euler and second-order Heun integrators respectively.
 Each case executes 1,000 steps and samples the trajectory every 200 steps.

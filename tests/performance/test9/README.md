@@ -6,6 +6,10 @@ the normal regression suite because Test 9 takes much longer than Cases 1--8.
 
 ## Provenance
 
+The exact compiler, module setup, and CPU/GPU flags are recorded in
+[`../BUILD-PROVENANCE.md`](../BUILD-PROVENANCE.md). Use that record before
+regenerating these files.
+
 - source state: the repository state committed together with these records;
 - source parent before the benchmark work: `53463bb4d05259da9c81bc11b79154be0ab263c9`;
 - date: 2026-08-09;

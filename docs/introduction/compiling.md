@@ -121,3 +121,5 @@ make -C source -f ../build/Makefile clean
 
 The complete build rules are in [`build/Makefile`](../../build/Makefile).
 See also the corresponding [LaTeX section](../../manual/compiling.tex).
+Benchmark-specific compiler provenance and exact effective flags are recorded
+in [`tests/performance/BUILD-PROVENANCE.md`](../../tests/performance/BUILD-PROVENANCE.md).

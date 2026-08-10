@@ -30,6 +30,7 @@
  integer, public, save :: npjet
  integer, public, save :: mxnpjet
  integer, public, parameter :: incnpjet=100
+ integer, public, parameter :: reallocation_increment=1000
  integer, public, save :: systype
  integer, public, save :: units
  integer, public, save :: insertmode
@@ -163,6 +164,7 @@
  logical, allocatable, public, save :: jetfm(:)
  integer, allocatable, public, save :: jetlb(:)
  integer, public, save :: topology_add_total=0,topology_remove_total=0
+ integer, public, save :: reallocate_total=0
  double precision, allocatable, public, save :: jetpt(:)
  double precision, allocatable, public, save :: jetxx(:)
  double precision, allocatable, public, save :: jetyy(:)
@@ -353,7 +355,12 @@
   mxnpjet=max(mxnpjet,npjet)
 ! Reserve headroom for the large dynamic OpenACC benchmark.  Keeping the
 ! allocation stable is required while the jet arrays are mapped on a device.
-  if(linserting .and. npjet>=1000)mxnpjet=max(mxnpjet,1280)
+  if(linserting .and. npjet>=1000)then
+    mxnpjet=max(mxnpjet,1280)
+! Keep a bounded reserve for larger dynamic-topology benchmarks. This avoids
+! reallocating arrays while they are persistently mapped on the device.
+    mxnpjet=max(mxnpjet,npjet+256)
+  endif
   
   call set_mxchunk(mxnpjet)
   allocate(jetfr(0:mxnpjet))
@@ -439,11 +446,13 @@
 !***********************************************************************
   
   implicit none
-  
+
   integer :: oldinpjet,oldnpjet,oldmxnpjet
   integer :: newinpjet,newnpjet
   integer :: oldinit,oldend
   integer :: newinit,newend,ncutoffsub
+
+  reallocate_total=reallocate_total+1
   
   
   ncutoffsub=1
@@ -461,9 +470,9 @@
     newinpjet=oldinpjet-oldinit
     newnpjet=oldnpjet-oldinit
     
-    if((oldend-newend)<incnpjet)then
+    if((oldend-newend)<reallocation_increment)then
       oldmxnpjet=mxnpjet
-      mxnpjet=oldmxnpjet+incnpjet
+      mxnpjet=oldmxnpjet+reallocation_increment
       call set_mxchunk(mxnpjet)
       doallocate=.true.
     endif
@@ -478,9 +487,9 @@
     newinpjet=oldinpjet-oldinit
     newnpjet=oldnpjet-oldinit
     
-    if((oldend-newend)<incnpjet)then
+    if((oldend-newend)<reallocation_increment)then
       oldmxnpjet=mxnpjet
-      mxnpjet=oldmxnpjet+incnpjet
+      mxnpjet=oldmxnpjet+reallocation_increment
       call set_mxchunk(mxnpjet)
       doallocate=.true.
     endif

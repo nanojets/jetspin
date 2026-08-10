@@ -64,7 +64,8 @@
                        pdbrescale,lreadrest,lKVfluid,levaporation, &
                        jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
                        jetms,jetch,jetvl,jetfr,topology_add_total, &
-                       topology_remove_total,nremtrack,naddtrack,h,mxnpjet, &
+                       topology_remove_total,nremtrack,naddtrack,reallocate_total, &
+                       h,mxnpjet, &
                        resolution,dresolution,thresolution,ivelocity,istress, &
                        imassa,icharge,ivolume,timedeposition
   use breaking_mod,   only : ckeck_breakup
@@ -383,7 +384,8 @@
   call profiling_report(loop_elapsed_time,idrank)
   if(idrank==0)then
     write(6,'(a,i0)')'Topology additions: ',topology_add_total
-    write(6,'(a,i0)')'Topology removals: ',topology_remove_total
+  write(6,'(a,i0)')'Topology removals: ',topology_remove_total
+  write(6,'(a,i0)')'Array reallocations: ',reallocate_total
     write(6,'(a,i0)')'Topology active beads: ',npjet-inpjet
   endif
 !***********************************************************************

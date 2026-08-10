@@ -1,0 +1,10 @@
+\section{Test Case 15: forced array reallocation}
+
+Test Case 15 is a CPU-side allocation check. It starts with 100 beads and no
+spare initial capacity. The first insertion exceeds \texttt{mxnpjet} and calls
+\texttt{reallocate\_jet}. The program reports \texttt{Array reallocations:}
+at shutdown; the acceptance condition is a value greater than zero and at
+least one topology addition. Each subsequent reallocation grows the capacity
+by 1,000 slots; the initial allocation remains governed by the normal
+100-slot increment. The input is stored in
+\texttt{examples/input-15/input.dat}.

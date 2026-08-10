@@ -18,6 +18,9 @@ module accelerator_mod
  public :: accelerator_is_persistent
  public :: accelerator_update_host_state
  public :: accelerator_update_host_point
+ public :: accelerator_remove_bead
+ public :: accelerator_update_device_removed
+ public :: accelerator_add_bead
  public :: accelerator_host_state_is_current
  public :: accelerator_store_statistics
  public :: accelerator_update_host_statistics
@@ -444,8 +447,10 @@ contains
   double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
   if(.not.accelerator_persistent)return
 #ifdef _OPENACC
-!$acc update self(jetxx(ipoint),jetyy(ipoint),jetzz(ipoint), &
-!$acc& jetst(ipoint),jetvx(ipoint),jetvy(ipoint),jetvz(ipoint))
+! The collector radius also needs the adjacent active bead.
+!$acc update self(jetxx(ipoint:ipoint+1),jetyy(ipoint:ipoint+1), &
+!$acc& jetzz(ipoint:ipoint+1),jetst(ipoint),jetvx(ipoint), &
+!$acc& jetvy(ipoint),jetvz(ipoint))
 #endif
   return
  end subroutine accelerator_update_host_point
@@ -468,6 +473,147 @@ contains
   if(present(nstep))accelerator_last_host_sync_step=nstep
   return
  end subroutine accelerator_update_host_state
+
+ subroutine accelerator_add_bead(npjet,mxnpjet,linserted,ladd, &
+   resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
+   ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
+   jetvz,jetms,jetch,jetvl,jetfr)
+  implicit none
+  integer, intent(inout) :: npjet
+  integer, intent(in) :: mxnpjet
+  logical, intent(inout) :: linserted,ladd
+  double precision, intent(in) :: resolution,dresolution,thresolution
+  double precision, intent(in) :: ivelocity,istress,imassa,icharge,ivolume
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
+  logical, intent(inout) :: jetfr(0:)
+  double precision :: dx,dy,dz,distance,scale
+
+  ladd=.false.
+#ifdef _OPENACC
+!$acc serial present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
+!$acc& jetch,jetvl,jetfr) copy(npjet,linserted,ladd) &
+!$acc& private(dx,dy,dz,distance,scale)
+#endif
+  if(.not.linserted)then
+    dx=jetxx(npjet-2)-jetxx(npjet)
+    dy=jetyy(npjet-2)-jetyy(npjet)
+    dz=jetzz(npjet-2)-jetzz(npjet)
+    distance=dsqrt(dx*dx+dy*dy+dz*dz)
+    if(distance>=dresolution)then
+      linserted=.true.
+      jetst(npjet-1)=0.d0
+      jetvx(npjet-1)=ivelocity
+      jetvy(npjet-1)=0.d0
+      jetvz(npjet-1)=0.d0
+    endif
+  else
+    dx=jetxx(npjet-1)-jetxx(npjet)
+    dy=jetyy(npjet-1)-jetyy(npjet)
+    dz=jetzz(npjet-1)-jetzz(npjet)
+    distance=dsqrt(dx*dx+dy*dy+dz*dz)
+    if(distance>=thresolution .and. npjet<mxnpjet)then
+      npjet=npjet+1
+      jetfr(npjet)=jetfr(npjet-1)
+      jetxx(npjet)=jetxx(npjet-1)
+      jetyy(npjet)=jetyy(npjet-1)
+      jetzz(npjet)=jetzz(npjet-1)
+      jetst(npjet)=jetst(npjet-1)
+      jetvx(npjet)=jetvx(npjet-1)
+      jetvy(npjet)=jetvy(npjet-1)
+      jetvz(npjet)=jetvz(npjet-1)
+      jetms(npjet)=jetms(npjet-1)
+      jetch(npjet)=jetch(npjet-1)
+      jetvl(npjet)=jetvl(npjet-1)
+      jetfr(npjet-1)=.false.
+      jetst(npjet-1)=istress
+      jetvx(npjet-1)=ivelocity
+      jetvy(npjet-1)=0.d0
+      jetvz(npjet-1)=0.d0
+      jetms(npjet-1)=imassa*ivolume
+      jetch(npjet-1)=icharge*ivolume
+      jetvl(npjet-1)=ivolume
+      dx=jetxx(npjet-2)-jetxx(npjet)
+      dy=jetyy(npjet-2)-jetyy(npjet)
+      dz=jetzz(npjet-2)-jetzz(npjet)
+      distance=dsqrt(dx*dx+dy*dy+dz*dz)
+      scale=resolution/distance
+      jetxx(npjet-1)=jetxx(npjet)+scale*dx
+      jetyy(npjet-1)=jetyy(npjet)+scale*dy
+      jetzz(npjet-1)=jetzz(npjet)+scale*dz
+      ladd=.true.
+      linserted=.false.
+    endif
+  endif
+#ifdef _OPENACC
+!$acc end serial
+  if(ladd)then
+!$acc update self(jetxx(npjet-1:npjet),jetyy(npjet-1:npjet), &
+!$acc& jetzz(npjet-1:npjet),jetst(npjet-1:npjet),jetvx(npjet-1:npjet), &
+!$acc& jetvy(npjet-1:npjet),jetvz(npjet-1:npjet),jetms(npjet-1:npjet), &
+!$acc& jetch(npjet-1:npjet),jetvl(npjet-1:npjet),jetfr(npjet-1:npjet))
+  endif
+#endif
+ end subroutine accelerator_add_bead
+
+ subroutine accelerator_remove_bead(inpjet,npjet,h,jetxx,jetyy,jetzz,jetst, &
+   jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nremoved,lrem)
+  implicit none
+  integer, intent(inout) :: inpjet
+  integer, intent(in) :: npjet
+  integer, intent(out) :: nremoved
+  double precision, intent(in) :: h
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
+  logical, intent(inout) :: jetfr(0:)
+  logical, intent(out) :: lrem
+  integer :: ipoint,remove_one
+  remove_one=0
+#ifdef _OPENACC
+!$acc parallel loop present(jetxx,jetfr)
+#endif
+  do ipoint=inpjet,npjet
+    if(jetxx(ipoint)>=h)then
+      jetfr(ipoint)=.true.
+      jetxx(ipoint)=h
+    endif
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+!$acc serial present(jetxx) copy(remove_one)
+#endif
+  if(jetxx(inpjet)>=h .and. jetxx(inpjet+1)>=h)remove_one=1
+#ifdef _OPENACC
+!$acc end serial
+#endif
+  nremoved=remove_one
+  lrem=remove_one==1
+  if(lrem)inpjet=inpjet+1
+#ifdef _OPENACC
+  if(lrem)then
+! Removal observables need both the removed bead and its active neighbour.
+!$acc update self(jetxx(inpjet-1:inpjet),jetyy(inpjet-1:inpjet), &
+!$acc& jetzz(inpjet-1:inpjet), &
+!$acc& jetst(inpjet-1),jetvx(inpjet-1),jetvy(inpjet-1),jetvz(inpjet-1), &
+!$acc& jetms(inpjet-1),jetch(inpjet-1),jetvl(inpjet-1),jetfr(inpjet-1))
+  endif
+#endif
+ end subroutine accelerator_remove_bead
+
+ subroutine accelerator_update_device_removed(first,last,jetst,jetvx,jetvy, &
+   jetvz,jetms,jetch,jetvl)
+  implicit none
+  integer, intent(in) :: first,last
+  double precision, intent(in) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(in) :: jetms(0:),jetch(0:),jetvl(0:)
+  if(.not.accelerator_persistent .or. last<first)return
+#ifdef _OPENACC
+!$acc update device(jetst(first:last),jetvx(first:last),jetvy(first:last), &
+!$acc& jetvz(first:last),jetms(first:last),jetch(first:last),jetvl(first:last))
+#endif
+ end subroutine accelerator_update_device_removed
 
  subroutine accelerator_store_statistics(inpjet,npjet,jetxx,jetyy, &
    jetzz,jetst,counterlpath,ncounterlpath,maxstress,maxstressposx)
@@ -577,8 +723,8 @@ contains
     accelerator_eom_env_checked=.true.
   endif
   if(accelerator_eom_disabled)return
-  if(.not.linserted .or. .not.lairdrag .or. lflorentz .or. luppot)return
-  if(nfieldtype/=0 .or. firstpoint/=0 .or. lastpoint/=npjet)return
+  if(.not.lairdrag .or. lflorentz .or. luppot)return
+  if(nfieldtype/=0 .or. lastpoint/=npjet)return
   nout=lastpoint-firstpoint
 
 #ifdef _OPENACC
@@ -605,6 +751,7 @@ contains
     fvz(j)=0.d0
 
     if(jetfr(ipoint))cycle
+    if(ipoint==npjet-1 .and. .not.linserted)cycle
     if(ipoint==npjet)then
       if(liniperturb)then
         fyy(j)=-pfreq*yzz(ipoint)

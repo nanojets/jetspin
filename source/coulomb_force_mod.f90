@@ -20,7 +20,7 @@
  use error_mod
  use utility_mod,           only : Pi,modulvec,cross,dot,sig
  use nanojet_mod,           only : jetch,jetfr,h,inpjet,npjet,q,&
-                             linserted,dresolution,jetms,systype,fcut, &
+                             linserted,linserting,dresolution,jetms,systype,fcut, &
                              thresolution,lmirror,mxnpjet,nmulstep, &
                              lmultiplestep,dcutoff,lneighlistdo,tstep, &
                              lmultisteperror,multisteperror,lremove, &
@@ -202,7 +202,9 @@ contains
 
   call profiling_start(prof_coulomb)
   
-  call allocate_coulcrossec(npjet)
+! Allocate to the jet capacity so a persistent device mapping remains valid
+! while dynamic insertion changes the active upper bound.
+  call allocate_coulcrossec(mxnpjet)
   if(levaporation)then
     if(.not. present(yve))call error(19)
     call compute_crosssec(yxx,yyy,yzz,yve,coulcrossec)
@@ -512,7 +514,9 @@ contains
   if(accelerator_persistent_mode)then
 !$acc parallel loop gang vector
     do ipoint=inpjet,npjet
-      if(ipoint<npjet)then
+      if((.not.linserting .and. ipoint<npjet) .or. &
+       (linserting .and. linserted .and. ipoint<npjet-1) .or. &
+       (linserting .and. .not.linserted .and. ipoint<npjet-2))then
         distance=dsqrt((yxx(ipoint)-yxx(ipoint+1))**2.d0+ &
          (yyy(ipoint)-yyy(ipoint+1))**2.d0+ &
          (yzz(ipoint)-yzz(ipoint+1))**2.d0)

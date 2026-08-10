@@ -47,21 +47,26 @@
 #ifdef _OPENACC
   use accelerator_mod, only : accelerator_prepare, &
                          accelerator_update_host_state, &
-                         accelerator_is_persistent
+                         accelerator_is_persistent, &
+                         accelerator_remove_bead, &
+                         accelerator_update_device_removed, &
+                         accelerator_add_bead
 #endif
   use profiling_mod, only : profiling_initialize,profiling_reset, &
                        profiling_start,profiling_stop,profiling_report, &
                        prof_integrator,prof_add_bead,prof_remove_bead, &
                        prof_breakup,prof_statistics,prof_erase_bead, &
                        prof_output,prof_restart
-  use nanojet_mod,    only : inpjet,npjet,linserted,myseed,systype, &
+  use nanojet_mod,    only : inpjet,npjet,linserted,linserting,lremove,myseed,systype, &
                        tstep,xyzrescale,set_resolution_length, &
                        allocate_jet,set_initial_jet,add_jetbead, &
                        remove_jetbead,erase_jetbead,lengthscale, &
                        pdbrescale,lreadrest,lKVfluid,levaporation, &
                        jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
                        jetms,jetch,jetvl,jetfr,topology_add_total, &
-                       topology_remove_total
+                       topology_remove_total,nremtrack,naddtrack,h,mxnpjet, &
+                       resolution,dresolution,thresolution,ivelocity,istress, &
+                       imassa,icharge,ivolume,timedeposition
   use breaking_mod,   only : ckeck_breakup
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
@@ -228,10 +233,41 @@
     
 !   check if a new bead should be added and/or removed
     call profiling_start(prof_add_bead)
+#ifdef _OPENACC
+    if(accelerator_is_persistent() .and. linserting)then
+      timedeposition=timedeposition+tstep
+      call accelerator_add_bead(npjet,mxnpjet,linserted,ladd,resolution, &
+       dresolution,thresolution,ivelocity,istress,imassa,icharge,ivolume, &
+       jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+       jetms,jetch,jetvl,jetfr)
+      if(ladd)then
+        naddtrack=naddtrack+1
+        topology_add_total=topology_add_total+1
+        timedeposition=0.d0
+      endif
+    else
+      call add_jetbead(nstep,mytime,ladd)
+    endif
+#else
     call add_jetbead(nstep,mytime,ladd)
+#endif
     call profiling_stop(prof_add_bead)
     call profiling_start(prof_remove_bead)
+#ifdef _OPENACC
+    if(accelerator_is_persistent() .and. linserting .and. lremove)then
+      call accelerator_remove_bead(inpjet,npjet,h,jetxx,jetyy,jetzz,jetst, &
+       jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nremoved,lrem)
+      lremdat=lrem
+      if(lrem)then
+        nremtrack=nremtrack+nremoved
+        topology_remove_total=topology_remove_total+nremoved
+      endif
+    else
+      call remove_jetbead(nstep,nremoved,mytime,lrem,lremdat)
+    endif
+#else
     call remove_jetbead(nstep,nremoved,mytime,lrem,lremdat)
+#endif
     call profiling_stop(prof_remove_bead)
     if(idrank==0 .and. (ladd .or. lrem))then
       write(6,'(a,i0,a,l1,a,i0,a,i0)')'Topology event: step=',nstep, &
@@ -291,6 +327,12 @@
 !   erase the bead beyond the collector if the variable lrem is .true.
     call profiling_start(prof_erase_bead)
     call erase_jetbead(nstep,mytime,ladd,lrem,nremoved)
+#ifdef _OPENACC
+    if(accelerator_is_persistent() .and. linserting .and. nremoved>0)then
+      call accelerator_update_device_removed(inpjet-nremoved,inpjet-1, &
+       jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl)
+    endif
+#endif
     call profiling_stop(prof_erase_bead)
     
 !   print data on terminal and output 'statdat.dat' file

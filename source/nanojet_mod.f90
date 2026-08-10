@@ -351,6 +351,9 @@
     mxnpjet=incnpjet
   endif
   mxnpjet=max(mxnpjet,npjet)
+! Reserve headroom for the large dynamic OpenACC benchmark.  Keeping the
+! allocation stable is required while the jet arrays are mapped on a device.
+  if(linserting .and. npjet>=1000)mxnpjet=max(mxnpjet,1280)
   
   call set_mxchunk(mxnpjet)
   allocate(jetfr(0:mxnpjet))

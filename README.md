@@ -82,8 +82,10 @@ resident on the device across timesteps. See the
 configurations, numerical constraints, and remaining work.
 
 [Test Case 13](docs/examples/test-13.md) adds a 1,024-bead dynamic-topology
-baseline with insertion and removal. Topology is still host-managed in this
-milestone; its versioned event sequence guides the persistent dynamic port.
+benchmark with insertion and removal. Its bounded OpenACC path keeps RK4 and
+force data resident in a preallocated 1,280-slot mapping and performs both
+nozzle insertion and collector removal on the device. Its
+versioned event sequence guards subsequent dynamic-port changes.
 
 ## Citation
 

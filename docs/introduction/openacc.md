@@ -64,16 +64,21 @@ Coordinates, bead properties, cross sections, and the Coulomb force array are
 named explicitly in each OpenACC data region. No managed/unified-memory build
 mode is used.
 
-Configurations outside the fixed Tests 9--12 gate continue to use separate
-call-scoped Coulomb and EOM data regions. This remains safe when insertion,
-removal, or dynamic refinement changes `mxnpjet`: the next call maps the new
-host allocation and capacity.
+Configurations outside Tests 9--13 continue to use separate call-scoped
+Coulomb and EOM data regions.
 
-Test 13 records the first dynamic-topology milestone. Its insertion, removal,
-capacity growth, and compaction remain host-side, while force kernels use the
-safe call-scoped path. CPU and A30 executions reproduce all 26 topology events
-at identical timesteps. This versioned sequence is the acceptance baseline for
-moving those operations into a persistent device allocation.
+Test 13 now records the bounded persistent dynamic-topology milestone. It
+preallocates 1,280 slots, keeps RK4 and force data resident as `inpjet` and
+`npjet` change, and performs collector detection and clamping on the device.
+The host receives one removal decision and, when needed, the removed record.
+Nozzle insertion, including threshold checks, blocked-bead release, record
+initialization, and `npjet` update, also runs on the device. The host receives
+topology scalars and synchronizes the two tail records only on an actual
+event. Reallocation and general compaction remain outside this path. The
+persistent A30 execution retains all 26 events and the same final topology,
+but GPU RK4 rounding moves insertion threshold crossings progressively
+earlier. The call-scoped and persistent A30 streams are versioned separately;
+`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` restores the former exactly.
 An optional full-state snapshot at every topology event verified exact bead
 metadata and properties. Component-isolation switches showed that the growing
 trajectory difference originates primarily in device EOM/curvature arithmetic;
@@ -107,7 +112,8 @@ restart events request a complete state explicitly. With the standard Test 9
 input, the five scheduled samples transfer 420 bytes in total and the final
 restart performs the only 56,056-byte full-state download. The accelerator
 records the last synchronized timestep so coincident output and restart events
-never duplicate a transfer. Dynamic topology remains outside persistent mode.
+never duplicate a transfer. Test 13 uses its separate bounded dynamic transfer
+policy described above.
 
 ## Numerical validation
 
@@ -141,13 +147,11 @@ regression above and cannot establish GPU performance.
 1. Port the evaporation-specific direct Coulomb kernel.
 2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
-3. Extend persistent equation-of-motion and integrator support beyond the
-   fixed Tests 9--12 gate.
-4. Add explicit device teardown/recreation hooks around capacity changes and
-   synchronize only topology metadata and requested output fields.
-5. Port the local Akima coefficient loops, replace the interpolation interval
+3. Add explicit device teardown/recreation hooks around capacity changes and
+   implement general device-side compaction.
+4. Port the local Akima coefficient loops, replace the interpolation interval
    scan with a GPU-suitable search, and then address dynamic refinement.
-6. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
+5. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 
 The intended steady state is a persistent device-resident simulation with

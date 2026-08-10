@@ -7,20 +7,29 @@ An intentionally artificial nozzle velocity of 2,000 cm/s forces multiple
 topology events during a short 1,000-step run. Its input is stored in
 \texttt{examples/input-13/input.dat}.
 
-The reference event sequence contains 13 insertions and 13 removals. CPU and
-OpenACC executions perform every event at the same timestep, finish with
-1,024 active beads, and remain between 1,023 and 1,025 active beads. A
+Both call-scoped and persistent executions contain 13 insertions and 13
+removals, finish with 1,024 active beads, and remain between 1,023 and 1,025
+active beads. A
 structured \texttt{Topology event:} line is printed whenever insertion or
 removal occurs.
 
-This is the baseline for future persistent dynamic-data development.
-Insertion, removal, capacity growth, and compaction currently execute on the
-host, while accelerator force evaluations use call-scoped mappings. An
-initial paired NVFORTRAN 24.3 and NVIDIA A30 measurement required 40.659696 s
-on CPU and 3.834931 s with OpenACC. The topology streams were identical. The
-sampled physical observables passed with relative tolerance $3\,10^{-4}$ and
-absolute tolerance $10^{-6}$; curvature after repeated topology changes is
-more sensitive to floating-point ordering than the fixed benchmarks.
+The current dynamic milestone reserves capacity for 1,280 beads and keeps the
+RK4 state, Coulomb data, derivatives, and scratch arrays persistently mapped
+while the active lower and upper bead indices change. Collector detection and
+clamping run on the device and return one decision scalar. Nozzle distance
+checks, blocked-bead release, new-record initialization, and the
+\texttt{npjet} update also execute on the device. The host receives topology
+scalars each step and the two new tail records only when insertion occurs.
+Removed records are synchronized
+individually for output and cleared on both host and device. Reallocation
+beyond the reserved capacity and general compaction remain future work. An
+initial call-scoped NVFORTRAN 24.3 and NVIDIA A30 measurement required
+40.659696 s on CPU and 3.834931 s with OpenACC. The bounded persistent path
+with host insertion required 2.829376 s. Device-side insertion reduces this
+to 2.623558 s, or 381.162 steps/s. Moving RK4 intermediate updates from
+host to device changes floating-point rounding. The insertion threshold
+amplifies this into progressively earlier additions, while addition and
+removal counts, active bounds, and final bead count remain unchanged.
 
 With the environment variable
 \texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT=1}, JETSPIN writes the complete active
@@ -30,4 +39,14 @@ difference appears in a transverse quantity close to zero at step 40. Running
 the same OpenACC equation-of-motion kernel on the CPU agreed with the original
 CPU implementation near machine precision. The observed growth therefore
 originates primarily from device floating-point evaluation of curvature and
-is not evidence of an insertion or removal indexing error.
+is not evidence of an insertion or removal indexing error. The persistent
+dynamic control path retains all 26 events but has a separate versioned A30
+event stream. Setting
+\texttt{JETSPIN\_OPENACC\_DISABLE\_PERSISTENT=1} restores the call-scoped
+path and exactly restores the previous event timesteps on the same A30. A
+separate diagnostic using the historical host cross-section computation did
+not change the persistent stream, isolating the timing shift to GPU RK4
+arithmetic rather than insertion, removal, or Coulomb indexing.
+Moving the insertion distance test to the GPU shifts one later threshold
+crossing from step 910 to step 909, without changing event counts, active
+bounds, or final topology.

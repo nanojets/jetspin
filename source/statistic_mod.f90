@@ -186,6 +186,7 @@ module statistic_mod
   integer, save :: nmulstepdoneold=0
   
   double precision, dimension(3) :: vext
+  double precision :: selected_length
   logical :: complete_host_state
 
   complete_host_state=.true.
@@ -204,6 +205,15 @@ module statistic_mod
 ! compute all the observables
   if(complete_host_state)then
     call compute_crosssec(jetxx,jetyy,jetzz,jetvl,jetcr)
+  else
+    if(systype==1 .or. systype==2)then
+      selected_length=jetxx(inpjet)-jetxx(inpjet+1)
+    else
+      selected_length=dsqrt((jetxx(inpjet)-jetxx(inpjet+1))**2.d0+ &
+       (jetyy(inpjet)-jetyy(inpjet+1))**2.d0+ &
+       (jetzz(inpjet)-jetzz(inpjet+1))**2.d0)
+    endif
+    jetcr(inpjet)=dsqrt(jetvl(inpjet)/(selected_length*Pi))
   endif
   if(levaporation)then
     call compute_crosssec(jetxx,jetyy,jetzz,jetve,jetce)

@@ -26,8 +26,9 @@ module integrator_mod
                          jetpt,lKVfluid,levaporation,jetve,evlim,jetfr, &
                          linserted,liniperturb,lairdrag,lflorentz,luppot, &
                          pfreq,consistency,findex,yieldstress,att,fve,gr, &
-                         ks,li,v,velext,linserting,lmultiplestep, &
-                         airdragamp,noisediff,noisefric
+                         ks,li,v,velext,linserting,lremove,lmultiplestep, &
+                         airdragamp,noisediff,noisefric,ldragvel,typemass, &
+                         ltrackbeads,ltagbeads,lbreakup
  use dynamic_refinement_mod, only : driver_dynamic_refinement
  use profiling_mod, only : profiling_start,profiling_stop,prof_eom, &
                          prof_rk_update
@@ -95,6 +96,26 @@ contains
   implicit none
   fixed_accelerator_eligible=systype.eq.3 .and. fixed_accelerator_geometry()
  end function fixed_accelerator_eligible
+
+ logical function dynamic_rk4_accelerator_eligible()
+  implicit none
+  character(len=16) :: disable_persistent
+  disable_persistent=''
+  call get_environment_variable('JETSPIN_OPENACC_DISABLE_PERSISTENT', &
+   disable_persistent)
+  if(trim(disable_persistent)=='1')then
+    dynamic_rk4_accelerator_eligible=.false.
+    return
+  endif
+  dynamic_rk4_accelerator_eligible=systype.eq.3 .and. npjet>=1000 .and. &
+   mxnpjet>=1280 .and. mxrank.eq.1 .and. mystart.eq.inpjet .and. &
+   myend.eq.npjet .and. linserting .and. lremove .and. &
+   .not.lmultiplestep .and. &
+   .not.levaporation .and. lairdrag .and. .not.lflorentz .and. &
+   .not.luppot .and. nfieldtype.eq.0 .and. .not.ldragvel .and. &
+   typemass.eq.0 .and. .not.ltrackbeads .and. .not.ltagbeads .and. &
+   .not.lbreakup
+ end function dynamic_rk4_accelerator_eligible
   
  subroutine driver_integrator(timesub,h,k,dorefinment)
  
@@ -938,13 +959,10 @@ contains
   endif
 
 #ifdef _OPENACC
-! The first persistent milestone is deliberately restricted to Test 9's
-! fixed 1,000-bead configuration. Dynamic topology remains on the CPU path.
-  if(.not.persistent_acc .and. systype.eq.3 .and. npjet.eq.1000 .and. &
-   mxrank.eq.1 .and. mystart.eq.0 .and. myend.eq.npjet .and. &
-   linserted .and. .not.linserting .and. .not.lmultiplestep .and. &
-   .not.levaporation .and. lairdrag .and. .not.lflorentz .and. &
-   .not.luppot .and. nfieldtype.eq.0)then
+! RK4 supports both the fixed 1,000-bead benchmark and the bounded dynamic
+! topology benchmark.  The latter reserves enough capacity before mapping.
+  if(.not.persistent_acc .and. (fixed_accelerator_eligible() .or. &
+   dynamic_rk4_accelerator_eligible()))then
 !$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
 !$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
 !$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &

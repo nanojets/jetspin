@@ -115,15 +115,26 @@ contains
     dynamic_rk4_accelerator_eligible=.false.
     return
   endif
-  dynamic_rk4_accelerator_eligible=systype.eq.3 .and. npjet>=1000 .and. &
+  dynamic_rk4_accelerator_eligible=(systype.eq.3 .and. npjet>=1000 .and. &
    mxnpjet>=1280 .and. mxrank.eq.1 .and. mystart.eq.inpjet .and. &
    myend.eq.npjet .and. linserting .and. lremove .and. &
    .not.lmultiplestep .and. &
    .not.levaporation .and. lairdrag .and. .not.lflorentz .and. &
    .not.luppot .and. nfieldtype.eq.0 .and. .not.ldragvel .and. &
    typemass.eq.0 .and. .not.ltrackbeads .and. .not.ltagbeads .and. &
-   .not.lbreakup
+   .not.lbreakup) .or. small_dynamic_test_eligible()
  end function dynamic_rk4_accelerator_eligible
+
+ logical function small_dynamic_test_eligible()
+  implicit none
+  small_dynamic_test_eligible=systype.eq.3 .and. npjet>=100 .and. &
+   mxnpjet>=100 .and. mxrank.eq.1 .and. mystart.eq.inpjet .and. &
+   myend.eq.npjet .and. linserting .and. .not.lremove .and. &
+   .not.lmultiplestep .and. .not.levaporation .and. lairdrag .and. &
+   .not.lflorentz .and. .not.luppot .and. nfieldtype.eq.0 .and. &
+   .not.ldragvel .and. typemass.eq.0 .and. .not.ltrackbeads .and. &
+   .not.ltagbeads .and. .not.lbreakup
+ end function small_dynamic_test_eligible
   
  subroutine driver_integrator(timesub,h,k,dorefinment)
  

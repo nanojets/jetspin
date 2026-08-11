@@ -1,6 +1,6 @@
 \section{Test Case 15: forced array reallocation}
 
-Test Case 15 is a CPU-side allocation check. It starts with 100 beads and no
+Test Case 15 is a dynamic allocation check. It starts with 100 beads and no
 spare initial capacity. The nozzle velocity is set to 200,000 cm/s to produce
 repeated insertions in the short run. The first insertion exceeds
 \texttt{mxnpjet} and calls
@@ -8,5 +8,9 @@ repeated insertions in the short run. The first insertion exceeds
 at shutdown; the acceptance condition is a value greater than zero and at
 least one topology addition. Each subsequent reallocation grows the capacity
 by 100 slots; the initial allocation remains governed by the normal
-100-slot increment. The input is stored in
+100-slot increment. The small persistent GPU topology path is also enabled so
+that capacity growth and device remapping are exercised. The high insertion
+speed amplifies GPU rounding, so acceptance checks completion, topology
+additions, and a positive reallocation count rather than bead-for-bead
+trajectory identity. The input is stored in
 \texttt{examples/input-15/input.dat}.

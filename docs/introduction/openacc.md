@@ -74,7 +74,9 @@ The host receives one removal decision and, when needed, the removed record.
 Nozzle insertion, including threshold checks, blocked-bead release, record
 initialization, and `npjet` update, also runs on the device. The host receives
 topology scalars and synchronizes the two tail records only on an actual
-event. Reallocation and general compaction remain outside this path. The
+event. Test 15 additionally exercises small-capacity teardown, host
+reallocation, and device remapping. General device-side compaction remains
+outside this path. The
 persistent A30 execution retains all 26 events and the same final topology,
 but GPU RK4 rounding moves insertion threshold crossings progressively
 earlier. The call-scoped and persistent A30 streams are versioned separately;

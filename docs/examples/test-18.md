@@ -15,7 +15,10 @@ final numerical state before using it as a GPU regression baseline.
 - [Test 16 comparison](test-16.md)
 
 The NVFORTRAN CPU reference completed in about 14.2 s with 500 additions,
-899 removals, three reallocations, and 401 active beads. An exploratory A30
-run completed in about 4.1 s, but produced a different topology trajectory
-(498 additions, 262 removals, five reallocations, 1036 active beads); it is
-therefore a performance/porting probe, not yet a numerical regression case.
+899 removals, three reallocations, and 401 active beads. A fresh NVFORTRAN
+24.3/A30 standard run completed normally with 499 additions, 898 removals,
+three reallocations, and 401 active beads. Both the complete-force oracle and
+the Coulomb-only oracle produced 499 additions, 899 removals, three
+reallocations, and 400 active beads. This near-event agreement confirms the
+case's extreme sensitivity to direct-Coulomb summation order, but it remains a
+performance/porting probe rather than a strict pointwise regression case.

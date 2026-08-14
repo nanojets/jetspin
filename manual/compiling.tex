@@ -79,18 +79,24 @@ an NVIDIA device is unavailable and is not a GPU performance build. Before a
 device run, \texttt{nvidia-smi} and \texttt{nvaccelinfo} should both
 confirm that the selected GPU is visible.
 
-Target \texttt{nvfortran-openacc-host-forces} is a development-only GPU build
-that evaluates the evaporative Coulomb and Maxwell geometric forces with the
-trusted host routines and copies their results back to the device. It is useful
-for numerical isolation, but the per-stage transfers make it unsuitable for
-performance measurements or production simulations.
+Target \texttt{nvfortran-openacc-force-oracle} is a model-independent,
+development-only GPU build. For supported Euler, RK2, RK4, and fixed-topology
+Platen paths, with or without evaporation, it downloads the current force
+evaluation state, evaluates the complete trusted host equations, uploads only
+their derivatives, and leaves integration updates and dynamic topology on the
+GPU. It enables the single
+\texttt{JETSPIN\_DEV\_HOST\_FORCE\_ORACLE} macro and covers non-evaporative
+Platen, Maxwell evaporative Platen, and both deterministic evaporation
+rheologies.
 
-Target \texttt{nvfortran-openacc-kv-host-forces} provides the corresponding
-development-only diagnostic for Kelvin--Voigt evaporation. Every force stage
-is evaluated by the trusted host routines and only its derivatives are copied
-to the device; Runge--Kutta state updates remain on the GPU. The deliberate
-per-stage transfers likewise make this target unsuitable for production or
-performance measurements.
+Target \texttt{nvfortran-openacc-coulomb-oracle} is the narrower diagnostic.
+It enables only \texttt{JETSPIN\_DEV\_HOST\_COULOMB\_ORACLE}, transfers the
+state required by the direct Coulomb sum, evaluates that sum on the host in
+its established order, and uploads the force array. Its semantics are the same
+with or without evaporation. Every other force term and the integration
+updates remain on the GPU. The two targets are deliberately distinct, and
+their per-stage transfers make both unsuitable for production or performance
+measurements.
 
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
@@ -130,10 +136,10 @@ with NVIDIA Fortran; OpenACC offloading is disabled.\tabularnewline
 nvfortran-openacc & compile a single-GPU OpenACC executable; configure the
 device with \texttt{GPUCC} and \texttt{CUDA\_VERSION}.\tabularnewline
 nvfortran-openacc-host & compile the OpenACC code path for host-only validation.\tabularnewline
-nvfortran-openacc-host-forces & compile the GPU path with development-only
-host force evaluation and per-stage transfers.\tabularnewline
-nvfortran-openacc-kv-host-forces & compile the Kelvin--Voigt GPU path with
-development-only host force evaluation and per-stage transfers.\tabularnewline
+nvfortran-openacc-force-oracle & compile supported Euler, RK2, RK4, or Platen
+paths with the complete development-only host-force oracle.\tabularnewline
+nvfortran-openacc-coulomb-oracle & compile supported Euler, RK2, RK4, or Platen
+paths with only the direct Coulomb sum evaluated on the host.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
 \hline
 \end{tabular}

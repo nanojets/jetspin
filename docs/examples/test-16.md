@@ -28,11 +28,12 @@ A transfer audit with all development macros disabled shows only topology
 decision scalars on ordinary timesteps. Bead records are transferred on actual
 insertion/removal and output events; complete active arrays are synchronized
 only for the two capacity reallocations and the final checkpoint. The
-`nvfortran-openacc-host-forces` target remains available solely to isolate
-forces during development. For Euler and RK2 it reproduces the CPU pre-event
-XYZ geometry and the accepted topology totals while leaving state updates on
-the GPU. Its deliberate per-stage transfers make it unsuitable for
-performance measurements.
+rheology-independent `nvfortran-openacc-force-oracle` target isolates complete
+force stages during development. The narrower
+`nvfortran-openacc-coulomb-oracle` target evaluates only the direct Coulomb
+sum on the host. Both reproduce the accepted 1,000-step topology totals for
+Euler, RK2, and RK4 while leaving state updates on the GPU. Their deliberate
+per-stage transfers make them unsuitable for performance measurements.
 
 Run the complete Maxwell and Kelvin--Voigt deterministic validation with:
 
@@ -41,7 +42,7 @@ tests/performance/dynamic/validate_evaporation.sh
 ```
 
 The script builds independent NVFORTRAN CPU and standard OpenACC executables;
-the GPU build does not enable the diagnostic host-force macros.
+the GPU build does not enable either diagnostic oracle macro.
 
 - [Input file](../../examples/input-16/input.dat)
 - [Input-file notes](../../examples/input-16/README.md)

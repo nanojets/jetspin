@@ -9,13 +9,13 @@ from Test Case 7. Two coupled features are deliberately removed:
 
 - the orthogonal rotating field is replaced by a constant axial electric
   potential;
-- evaporation is disabled because its direct Coulomb routine has not yet
-  been ported to OpenACC.
+- evaporation is disabled so this case isolates the non-evaporative force and
+  integration paths.
 
 Insertion, removal, multiple-step Coulomb summation, and dynamic refinement
 are disabled, keeping the workload fixed at 1,000 beads. This makes the case
-suitable for comparing the current direct O(N²) Coulomb implementations
-without topology changes or CPU fallback from the evaporation model.
+suitable for comparing the direct O(N²) Coulomb implementations without
+topology or evaporation coupling.
 
 Build and run CPU and GPU executables with:
 
@@ -67,6 +67,25 @@ The measured speedup was `10.742x`. Both trajectories retained exactly 1,000
 beads and passed the numerical comparison (`rtol=1e-6`, `atol=1e-9`), with a
 maximum observed absolute difference of `1.7e-15`. These timings are an
 initial reference, not a portable performance guarantee.
+
+## Development oracles
+
+The OpenACC diagnostic targets use the same interface as the evaporation
+tests:
+
+```sh
+make -C source -f ../build/Makefile nvfortran-openacc-force-oracle GPUCC=80
+make -C source -f ../build/Makefile nvfortran-openacc-coulomb-oracle GPUCC=80
+```
+
+The complete-force oracle evaluates all four RK4 force stages through the
+trusted CPU equations and uploads their derivatives. The Coulomb-only oracle
+moves only the four direct sums to the host. In the current A30 check against
+the versioned NVFORTRAN CPU output, the standard GPU path, complete-force
+oracle, and Coulomb-only oracle had worst normalized differences of
+`7.97e-5`, `3.00e-7`, and `8.52e-5`, respectively. This shows that the Test 9
+RK4 discrepancy is not dominated by Coulomb accumulation order. Both oracle
+builds deliberately transfer data at every stage and must not be benchmarked.
 
 ## Subroutine profiling
 

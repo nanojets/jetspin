@@ -33,12 +33,13 @@ identity.
 
 The historical CPU Kelvin--Voigt evaporation equation omits aerodynamic drag
 and lift even when \texttt{airdrag yes} is present.  The GPU implementation
-preserves this established semantics.  The development-only target
-\texttt{nvfortran-openacc-kv-host-forces} evaluates every force stage through
-the trusted host equations and uploads its derivatives.  This diagnostic is
-useful for isolating floating-point differences but is unsuitable for
-performance measurements.  The input is stored in
-\texttt{examples/input-17/input.dat}.
+preserves this established semantics. The rheology-independent
+\texttt{nvfortran-openacc-force-oracle} target evaluates every force stage
+through the trusted host equations and uploads its derivatives. The narrower
+\texttt{nvfortran-openacc-coulomb-oracle} target moves only the direct
+Coulomb sum to the host. Both leave Runge--Kutta updates on the device and are
+useful for numerical isolation, but unsuitable for performance measurements.
+The input is stored in \texttt{examples/input-17/input.dat}.
 
 The paired CPU/GPU checks for all three deterministic integrators are
 automated by

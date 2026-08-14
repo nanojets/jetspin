@@ -258,7 +258,7 @@ module integrator_kv_ev_mod
         call eom1_KV_st_ev(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
          coulforce,ax,ay,az,dve(j),ds(j),tstage,k)
       case(3)
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_KV_FORCES)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE)
         if(accelerator_enabled .and. mxrank==1)then
           ds(j)=0.d0
         else
@@ -273,7 +273,7 @@ module integrator_kv_ev_mod
     j=j+1
   enddo
 
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_KV_FORCES)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE)
   if(accelerator_enabled .and. systype==3 .and. mxrank==1)then
     call accelerator_kv_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
      jetfr,dve,ds,xs,ys,zs,vxs,vys,vzs,ax,ay,az,ss,jetvl,ves,evairv, &
@@ -315,19 +315,15 @@ module integrator_kv_ev_mod
   integer :: nactive
 
   nactive=myend-mystart
-#ifdef JETSPIN_DEV_HOST_KV_FORCES
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
   ! Development oracle: bring the current stage to the host, evaluate the
   ! trusted CPU Kelvin--Voigt equations, and upload only the derivatives.
-  ! The accompanying Makefile target also enables host Coulomb evaluation.
+  ! JETSPIN_DEV_HOST_FORCE_ORACLE also selects host Coulomb evaluation.
 !$acc update self(xs(0:npjet),ys(0:npjet),zs(0:npjet),ss(0:npjet), &
 !$acc& vxs(0:npjet),vys(0:npjet),vzs(0:npjet),ves(0:npjet), &
-!$acc& jetvl(0:npjet),jetms(0:npjet),jetfr(0:npjet)) if_present
+!$acc& jetvl(0:npjet),jetms(0:npjet),jetch(0:npjet),jetfr(0:npjet)) if_present
   call eval_stage(tstage,k,xs,ys,zs,ss,vxs,vys,vzs,ves, &
    dx,dy,dz,ds,dve,ax,ay,az)
-  ! The host Coulomb helper uploads the temporarily smoothed nozzle charge.
-  ! Restore its device copy after eval_stage has restored the trusted host
-  ! value, otherwise the next stage would smooth an already smoothed charge.
-!$acc update device(jetch(0:npjet)) if_present
   if(mystart>0)then
     ax(0:nactive)=ax(mystart:myend)
     ay(0:nactive)=ay(mystart:myend)

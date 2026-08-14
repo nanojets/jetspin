@@ -94,18 +94,29 @@ This executes the OpenACC code path on the host. It does not measure GPU
 performance. See [OpenACC porting status](openacc.md) for the implemented
 kernel, data movement, limitations, and validation expectations.
 
-Two development-only GPU targets isolate force-kernel numerical differences
-by evaluating trusted force routines on the CPU and uploading their results at
-every RK stage:
+Two model-independent development targets isolate force-kernel numerical
+differences in the supported serial three-dimensional Euler, RK2, RK4, and
+fixed-topology stochastic Platen paths, with or without evaporation:
 
 ```sh
-make -C source -f ../build/Makefile nvfortran-openacc-host-forces GPUCC=80
-make -C source -f ../build/Makefile nvfortran-openacc-kv-host-forces GPUCC=80
+make -C source -f ../build/Makefile nvfortran-openacc-force-oracle GPUCC=80
+make -C source -f ../build/Makefile nvfortran-openacc-coulomb-oracle GPUCC=80
 ```
 
-The first target diagnoses the Maxwell evaporation path and the second the
-Kelvin–Voigt path. Their deliberate per-stage transfers make them unsuitable
-for production or performance measurements.
+`nvfortran-openacc-force-oracle` enables
+`JETSPIN_DEV_HOST_FORCE_ORACLE`. It downloads the current RK stage, evaluates
+the complete trusted CPU force equations, uploads the derivatives, and leaves
+integration updates and dynamic topology on the GPU. The same interface
+covers non-evaporative simulations, Maxwell and Kelvin–Voigt deterministic
+evaporation, and Maxwell stochastic Platen evaporation.
+
+`nvfortran-openacc-coulomb-oracle` enables only
+`JETSPIN_DEV_HOST_COULOMB_ORACLE`. It downloads the state required by the direct
+Coulomb sum, evaluates that sum on the CPU in its established order, uploads
+`ycf`, and keeps every other force term on the GPU. The two macros are not
+aliases: the first is a complete force oracle and the second isolates only
+Coulomb accumulation. Their deliberate per-stage transfers make both targets
+unsuitable for production or performance measurements.
 
 ## Other targets
 
@@ -123,8 +134,8 @@ for production or performance measurements.
 | `nvfortran-mpi` | MPI CPU build with the HPC SDK NVFORTRAN wrapper |
 | `nvfortran-openacc` | Single-GPU OpenACC build; configurable with `GPUCC` and `CUDA_VERSION` |
 | `nvfortran-openacc-host` | OpenACC code-path validation on the host |
-| `nvfortran-openacc-host-forces` | Development-only Maxwell host-force diagnostic |
-| `nvfortran-openacc-kv-host-forces` | Development-only Kelvin–Voigt host-force diagnostic |
+| `nvfortran-openacc-force-oracle` | Development-only complete host-force oracle for all supported integrators, with or without evaporation |
+| `nvfortran-openacc-coulomb-oracle` | Development-only host direct-Coulomb oracle, with or without evaporation |
 | `help` | Display available targets |
 | `clean` | Remove objects and module files from `source/` |
 

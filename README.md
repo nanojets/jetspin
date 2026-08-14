@@ -96,6 +96,12 @@ timesteps return only topology control scalars.
 The paired local validation is automated by
 [`tests/performance/dynamic/validate_evaporation.sh`](tests/performance/dynamic/validate_evaporation.sh).
 
+[Test Case 20](docs/examples/test-20.md) covers fixed-topology stochastic
+Platen integration with Maxwell evaporation. Its Gaussian history and complete
+integration sequence remain device-resident. The development-only complete
+force and Coulomb-only oracle builds use the same interfaces for Euler, RK2,
+RK4, and Platen, with or without evaporation.
+
 ## Citation
 
 If JETSPIN contributes to published work, please cite:

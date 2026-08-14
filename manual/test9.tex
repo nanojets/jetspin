@@ -8,10 +8,10 @@ refinement are disabled, so the workload remains fixed.
 
 The material, aerodynamic, gravity, and perturbation parameters are retained
 from Test Case 7. The orthogonal rotating field is replaced by a constant
-axial electric potential. Evaporation is disabled because its direct Coulomb
-routine is not yet accelerated by the initial OpenACC implementation. The
-case therefore exercises the direct $O(N^2)$ Coulomb kernel without an
-evaporation fallback or topology changes.
+axial electric potential. Evaporation is disabled so that the case isolates
+the non-evaporative force and integration paths. The case therefore exercises
+the direct $O(N^2)$ Coulomb kernel without evaporation coupling or topology
+changes.
 
 Test Case 9 is intended for performance comparison rather than as an
 additional physical validation baseline. CPU and accelerator runs should be
@@ -63,6 +63,16 @@ measurement are versioned in
 later CPU and GPU results with relative tolerance $10^{-6}$ and absolute
 tolerance $10^{-9}$. These records remain outside the automatic regression
 matrix because of the benchmark's longer execution time.
+
+The development targets \texttt{nvfortran-openacc-force-oracle} and
+\texttt{nvfortran-openacc-coulomb-oracle} also cover this non-evaporative RK4
+case. The first evaluates all four trusted host force stages and uploads their
+derivatives; the second evaluates only the four direct Coulomb sums on the
+host. Against the versioned NVFORTRAN CPU output, the standard GPU path,
+complete-force oracle, and Coulomb-only oracle produced worst normalized
+differences of $7.97\,10^{-5}$, $3.00\,10^{-7}$, and $8.52\,10^{-5}$,
+respectively. Thus Coulomb accumulation order is not the dominant Test Case 9
+RK4 difference. Oracle builds are not performance configurations.
 
 A subsequent profiler refinement measured 2.026551 s (56.28%) in Coulomb,
 1.420609 s (39.45%) in the equation-of-motion evaluations, and 0.014712 s

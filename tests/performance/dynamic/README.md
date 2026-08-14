@@ -88,12 +88,13 @@ With `NVCOMPILER_ACC_NOTIFY=2`, the normal build shows no jet-state, Coulomb,
 force, stress, or derivative-array transfer between stages for Euler, RK2, or
 RK4. Ordinary steps exchange only topology decision scalars. New/removed
 records, selected statistical samples, capacity rebinds, and the final
-checkpoint account for the remaining data traffic. The host-force target is a
-diagnostic exception and deliberately copies stage state and derivatives.
+checkpoint account for the remaining data traffic. The complete-force and
+Coulomb-only oracle targets are diagnostic exceptions and deliberately copy
+their required stage data.
 
 Three-step CPU/GPU `statout.dat` and XYZ geometry comparisons for Euler, RK2,
 and RK4 are identical before the first topology event. The CPU crosses the
-first insertion threshold at step 4 and both standard GPU and host-force paths
+first insertion threshold at step 4 and both standard GPU and oracle paths
 at step 5. The bending instability then amplifies roundoff, so aggregate
 topology, pre-event agreement, and the transfer audit are the acceptance
 criteria.
@@ -111,8 +112,10 @@ The standard transfer policy is the same as Test 16: no jet-state, force,
 stress, or RK-derivative array moves between stages. Only topology decisions
 cross every timestep; event records, output samples, capacity rebinds, and the
 final checkpoint cause data movement. The development-only
-`nvfortran-openacc-kv-host-forces` build transfers stage state and derivatives
-to evaluate the trusted CPU equations and is only a numerical-isolation tool.
+`nvfortran-openacc-force-oracle` build transfers stage state and derivatives to
+evaluate the trusted CPU equations for either rheology.
+`nvfortran-openacc-coulomb-oracle` transfers only the state needed by the host
+direct sum and uploads its force array. Both are numerical-isolation tools.
 
 Three-step CPU/GPU trajectories for Euler and RK2 are identical at
 `rtol=1e-12`, `atol=1e-13` before the first topology event, but their insertion
@@ -135,7 +138,7 @@ The script builds isolated NVFORTRAN CPU and standard OpenACC executables,
 then runs Tests 16 and 17 with Euler, RK2, and RK4. It checks the accepted
 1,000-step topology totals and performs strict three-step pre-event CPU/GPU
 comparisons. Test 16 additionally requires byte-identical XYZ geometry. The
-standard GPU target is built without either host-force diagnostic macro.
+standard GPU target is built without either diagnostic oracle macro.
 
 Set `GPUCC` and `CUDA_VERSION` to select another NVIDIA target. Set
 `JETSPIN_DYNAMIC_EVAP_KEEP=1` to retain build logs, inputs, and outputs in the

@@ -1,3 +1,7 @@
+#if defined(JETSPIN_DEV_HOST_COULOMB_ORACLE) || defined(JETSPIN_DEV_HOST_FORCE_ORACLE)
+#define JETSPIN_DEV_HOST_COULOMB_ACTIVE
+#endif
+
  module coulomb_force_mod
  
 !***********************************************************************
@@ -159,12 +163,23 @@ end subroutine reset_coulomb_accelerator
   
   double precision :: dtemp
 
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
   if(accelerator_persistent_mode .and. levaporation .and. systype==3 .and. &
    mxrank==1 .and. .not.lmultiplestep)then
     call accelerator_smooth_charge_3d(npjet,linserted,thresolution,dresolution, &
      yxx,yyy,yzz,jetch)
     return
+  endif
+#endif
+
+#if defined(_OPENACC) && defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+  ! Pull coordinates and charge before applying the trusted host smoothing.
+  ! This precedes the host direct sum for every supported integrator.
+  if(accelerator_persistent_mode .and. (systype==3 .or. systype==4) .and. &
+   mxrank==1 .and. &
+   .not.lmultiplestep)then
+!$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
+!$acc& jetch(0:npjet)) if_present
   endif
 #endif
  
@@ -199,7 +214,7 @@ end subroutine reset_coulomb_accelerator
  
   implicit none
 
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
   if(accelerator_persistent_mode .and. levaporation .and. systype==3 .and. &
    mxrank==1 .and. .not.lmultiplestep)then
     call accelerator_restore_charge(npjet,linserted,jetch)
@@ -209,6 +224,11 @@ end subroutine reset_coulomb_accelerator
  
   if(.not.linserted)then
     jetch(npjet-1)=smoothedcharge
+#if defined(_OPENACC) && defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+    if(accelerator_persistent_mode)then
+!$acc update device(jetch(npjet-1)) if_present
+    endif
+#endif
   endif
   
  return
@@ -244,18 +264,33 @@ end subroutine reset_coulomb_accelerator
   endif
 
   call profiling_start(prof_coulomb)
+
+#if defined(_OPENACC) && defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+  ! Unified host oracle: refresh the active stage before either the
+  ! evaporative or non-evaporative trusted direct sum.  This is the only
+  ! stage-state download required by the Coulomb-only diagnostic.
+  if(accelerator_persistent_mode .and. (systype==3 .or. systype==4) .and. &
+   mxrank==1 .and. &
+   .not.lmultiplestep)then
+!$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
+!$acc& yvl(0:npjet),jetms(0:npjet),jetfr(0:npjet)) if_present
+    if(present(yve))then
+!$acc update self(yve(0:npjet)) if_present
+    endif
+  endif
+#endif
   
 ! Allocate to the jet capacity so a persistent device mapping remains valid
 ! while dynamic insertion changes the active upper bound.
   call allocate_coulcrossec(mxnpjet)
   if(levaporation)then
     if(.not. present(yve))call error(19)
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
     if(.not.(accelerator_persistent_mode .and. systype==3 .and. &
      mxrank==1 .and. .not.lmultiplestep))then
 #endif
     call compute_crosssec(yxx,yyy,yzz,yve,coulcrossec)
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
     endif
 #endif
     select case(systype)
@@ -276,9 +311,13 @@ end subroutine reset_coulomb_accelerator
       endif
     end select
   else
+#ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
+    call compute_crosssec(yxx,yyy,yzz,yvl,coulcrossec)
+#else
     if(.not.accelerator_persistent_mode)then
       call compute_crosssec(yxx,yyy,yzz,yvl,coulcrossec)
     endif
+#endif
     select case(systype)
     case(1)
       if(lmultiplestep)then
@@ -336,7 +375,7 @@ end subroutine reset_coulomb_accelerator
       imiomax=mxnpjet
       if(ncoulforce/=0)then
         if(imiomax>ncoulforce)then
-#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
 #ifdef _OPENACC
           if(accelerator_coulomb_mapped)then
 !$acc exit data delete(ycf)
@@ -355,7 +394,7 @@ end subroutine reset_coulomb_accelerator
   
       ycf(0:ncoulforce,1:1)=0.d0
 
-#ifdef _OPENACC
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
       if(.not.accelerator_coulomb_env_checked)then
         block
           character(len=16) :: env
@@ -430,15 +469,13 @@ end subroutine reset_coulomb_accelerator
       
       ycf(0:ncoulforce,1:3)=0.d0
 
-#ifdef _OPENACC
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
       if(accelerator_enabled .and. mxrank==1)then
         if(accelerator_persistent_mode .and. &
          .not.accelerator_coulomb_mapped)then
           coulcrossec(:)=0.d0
-#ifdef _OPENACC
 !$acc enter data copyin(ycf(0:ncoulforce,1:3), &
 !$acc& coulcrossec(0:ncoulcrossec))
-#endif
           accelerator_coulomb_mapped=.true.
         endif
         call compute_coulomelec_openacc_3d(ycf,yxx,yyy,yzz,jetvl)
@@ -503,7 +540,7 @@ end subroutine reset_coulomb_accelerator
       ! Refresh the persistent device copy used by the Maxwell EOM kernel.
 !$acc update device(jetch(0:ncoulforce))
 #endif
-#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
 #ifdef _OPENACC
       if(.not.accelerator_coulomb_mapped)then
 !$acc enter data copyin(ycf(0:ncoulforce,1:3))
@@ -1848,7 +1885,7 @@ end subroutine reset_coulomb_accelerator
       imiomax=mxnpjet
       if(ncoulforce/=0)then
         if(imiomax>ncoulforce)then
-#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
 #ifdef _OPENACC
           if(accelerator_coulomb_mapped)then
 !$acc exit data delete(ycf)
@@ -1867,7 +1904,7 @@ end subroutine reset_coulomb_accelerator
       
       ycf(0:ncoulforce,1:3)=0.d0
 
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
       if(accelerator_enabled .and. mxrank==1 .and. .not.lmultiplestep)then
         if(accelerator_persistent_mode .and. &
          .not.accelerator_coulomb_mapped)then
@@ -1952,7 +1989,7 @@ end subroutine reset_coulomb_accelerator
       
       imiomax=(ncoulforce+1)*3
       call sum_world_darr(ycf,imiomax)
-#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
 #ifdef _OPENACC
 !$acc update device(jetch(0:ncoulforce))
       ! The developing host-Coulomb path must refresh the persistent device

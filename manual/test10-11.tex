@@ -24,3 +24,10 @@ $10^{-9}$. The worst normalized differences were $4.00\,10^{-7}$ for Euler
 and $8.99\,10^{-7}$ for RK2. Versioned outputs and the comparison helper are
 stored in \texttt{tests/performance/integrators/}. These timings are specific
 to the measured system and are not portable performance guarantees.
+
+The common development targets \texttt{nvfortran-openacc-force-oracle} and
+\texttt{nvfortran-openacc-coulomb-oracle} cover these non-evaporative stages
+as well. For Euler their worst normalized differences from the CPU record were
+$7.00\,10^{-7}$ and $5.00\,10^{-7}$; for RK2 they were $6.00\,10^{-10}$ and
+$1.00\,10^{-7}$. Their per-stage transfers make them numerical diagnostics,
+not performance builds.

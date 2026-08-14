@@ -1,0 +1,23 @@
+\section{Test Case 20: Stochastic Platen Maxwell Evaporation}
+
+Test Case 20 is a fixed-topology CPU/GPU validation of the Maxwell
+evaporation equations with the stochastic Platen integrator
+(\texttt{system 4}, \texttt{integrator 4}). It distributes 1,000 beads over
+16 cm, disables insertion, removal, and dynamic refinement, and executes 100
+timesteps. The input is stored in
+\texttt{examples/input-20/input.dat}.
+
+Before loop timing, the CPU generates 600,600 Gaussian double precision
+values in fixed timestep, bead, component, and draw order. OpenACC transfers
+this history to the accelerator once. The three drift evaluations,
+positive and negative predictors, stochastic velocity update, Heun position,
+volume and stress updates, and statistical reductions then execute in
+persistent device data regions. No Gaussian value or integration-stage array
+crosses the host/device boundary during an ordinary timestep.
+
+Using NVFORTRAN 24.3 on one NVIDIA A30, the 100-step integration loop required
+3.177595 s on the CPU and 0.224058 s with OpenACC, a speedup of 14.18. The
+standard OpenACC output, the complete host-force oracle output, and the
+Coulomb-only oracle output each reproduce all six CPU rows and fourteen
+columns exactly at the written precision. The oracle targets are correctness
+diagnostics and are not performance builds.

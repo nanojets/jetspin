@@ -15,5 +15,11 @@ on CPU and `1.254380 s` with OpenACC, a `15.52x` speedup. The six saved samples
 pass the CPU/GPU comparison with `rtol=1e-6` and `atol=1e-9`; the worst
 normalized difference is `8.99e-7`.
 
+The common development targets `nvfortran-openacc-force-oracle` and
+`nvfortran-openacc-coulomb-oracle` also cover both non-evaporative RK2 stages.
+Against the same CPU record their worst normalized differences were
+`6.00e-10` and `1.00e-7`, respectively. They are numerical diagnostics, not
+performance builds.
+
 - [Input file](../../examples/input-11/input.dat)
 - [Versioned numerical records](../../tests/performance/integrators/README.md)

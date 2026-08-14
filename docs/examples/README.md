@@ -1,7 +1,7 @@
 # Example simulations
 
-JETSPIN includes eight numerical reference cases and five performance
-benchmarks. Each case can be run by copying its
+JETSPIN includes eight numerical reference cases and twelve extended
+validation or performance cases. Each case can be run by copying its
 `input.dat` next to a compiled `main.x`. For quick validation of all cases,
 use the repository smoke suite:
 
@@ -25,7 +25,7 @@ Test Case 18 is the high-resolution Maxwell evaporation performance probe
 with 800 points over 16 cm.
 Test Case 19 is the corresponding high-resolution Kelvin–Voigt evaporation
 performance probe.
-Test Case 20 is a fixed-topology stochastic Platen Maxwell evaporation
-baseline for serial/MPI verification.
+Test Case 20 is the fixed-topology stochastic Platen Maxwell evaporation
+CPU/GPU validation case.
 
 See the individual pages in this directory for the purpose of each case.

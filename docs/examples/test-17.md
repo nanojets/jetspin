@@ -25,11 +25,13 @@ and the bending instability amplifies the roundoff-level perturbation. Equal
 topology totals, pre-event agreement, clean completion, and the absence of
 per-stage array transfers are therefore the acceptance criteria.
 
-For numerical isolation only, the
-`nvfortran-openacc-kv-host-forces` target evaluates every Kelvin–Voigt force
-stage through the trusted CPU equations and uploads the derivatives to the
-device. It must not be used for performance measurements. The standard target
-uses only device force kernels.
+For numerical isolation only, the rheology-independent
+`nvfortran-openacc-force-oracle` target evaluates every Kelvin–Voigt force stage
+through the trusted CPU equations and uploads the derivatives to the device.
+The narrower `nvfortran-openacc-coulomb-oracle` target moves only the direct
+Coulomb sum to the host. Both leave RK updates on the device and must not be
+used for performance measurements. The standard target uses only device
+force kernels.
 
 The established CPU Kelvin–Voigt evaporation equation omits aerodynamic drag
 and lift even when `airdrag yes` appears in the input. The accelerator follows

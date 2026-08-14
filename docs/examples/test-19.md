@@ -15,8 +15,10 @@ bitwise-identical states.
 - [Test 18 Maxwell counterpart](test-18.md)
 
 The NVFORTRAN CPU reference completed in about 14.5 s with 500 additions,
-76 removals, five reallocations, and 1224 active beads. An exploratory A30
-run completed in about 2.7 s with 499 additions, 898 removals, three
-reallocations, and 401 active beads. The topology difference is expected for
-this roundoff-sensitive high-resolution probe and is not currently a strict
-regression failure.
+76 removals, five reallocations, and 1224 active beads. A fresh NVFORTRAN
+24.3/A30 standard run completed normally with 498 additions, 77 removals,
+five reallocations, and 1221 active beads. Both the complete-force oracle and
+the Coulomb-only oracle produced the same aggregate GPU totals. The remaining
+three-bead final-count difference is consistent with threshold-sensitive
+topology after roundoff amplification; this high-resolution case remains a
+porting probe rather than a strict pointwise regression.

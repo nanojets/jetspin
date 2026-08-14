@@ -19,6 +19,13 @@ positive/negative predictors, stochastic velocity update, Heun position and
 stress updates, and statistics on the device. Host synchronization follows
 the same output and restart rules as Tests 9--11.
 
+Both development oracle targets cover the same Platen sequence. The complete
+force oracle evaluates every trusted host force or partial stress evaluation;
+the Coulomb-only oracle replaces only the direct sum. With either target, all
+six statistical rows and fourteen columns match the NVFORTRAN CPU record
+exactly. These oracle builds deliberately transfer stage data and are not
+performance configurations.
+
 An initial NVFORTRAN 24.3 comparison on one NVIDIA A30 measured `29.050473 s`
 on CPU and `1.874810 s` with OpenACC, a `15.50x` speedup. CPU and GPU outputs
 were identical in all six rows and fourteen columns at the written precision.

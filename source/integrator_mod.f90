@@ -45,6 +45,7 @@ module integrator_mod
                          accelerator_compute_posnoinserted_3d, &
                          accelerator_mark_device_state, &
                          accelerator_device_state_is_current, &
+                         accelerator_maxwell_stress_3d, &
                          accelerator_maxwell_evap_stress_3d, &
                          rheology_maxwell, &
                          accelerator_set_persistent, &
@@ -55,8 +56,11 @@ module integrator_mod
                          accelerator_euler_final_statistics, &
                          accelerator_rk2_final_statistics, &
                          accelerator_platen_predict, &
+                         accelerator_platen_evap_predict, &
                          accelerator_platen_velocity, &
+                         accelerator_platen_evap_velocity, &
                          accelerator_platen_positions, &
+                         accelerator_platen_evap_positions, &
                          accelerator_platen_stress_statistics
  use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
                          maxstressposx
@@ -88,7 +92,7 @@ module integrator_mod
 
 #ifdef _OPENACC
  ! Shared persistent workspace for the serial dynamic Maxwell evaporation
- ! Euler/RK2 paths. RK4 retains its historical local workspace below.
+ ! Euler/RK2 paths and the development-oracle RK4 path.
  double precision, allocatable, save :: maxev_fxx(:,:),maxev_fyy(:,:)
  double precision, allocatable, save :: maxev_fzz(:,:),maxev_fst(:,:)
  double precision, allocatable, save :: maxev_fvx(:,:),maxev_fvy(:,:)
@@ -118,7 +122,8 @@ contains
   double precision, intent(in) :: h
   integer :: nsteps
   if(integrator/=4 .or. systype/=4 .or. npjet/=1000)return
-  if(.not.fixed_accelerator_geometry())return
+  if(.not.(fixed_accelerator_geometry() .or. &
+   fixed_evaporative_platen_eligible()))return
   nsteps=nint((endtime-initime)/h)
   call prepare_gaussian_history(inpjet,npjet,mxnpjet,3,nsteps)
 #ifdef _OPENACC
@@ -140,6 +145,15 @@ contains
   implicit none
   fixed_accelerator_eligible=systype.eq.3 .and. fixed_accelerator_geometry()
  end function fixed_accelerator_eligible
+
+ logical function fixed_evaporative_platen_eligible()
+  implicit none
+  fixed_evaporative_platen_eligible=systype.eq.4 .and. levaporation .and. &
+   .not.lKVfluid .and. npjet.eq.1000 .and. mxrank.eq.1 .and. &
+   mystart.eq.0 .and. myend.eq.npjet .and. linserted .and. &
+   .not.linserting .and. .not.lremove .and. .not.lmultiplestep .and. &
+   lairdrag .and. .not.lflorentz .and. .not.luppot .and. nfieldtype.eq.0
+ end function fixed_evaporative_platen_eligible
 
  logical function dynamic_rk4_accelerator_eligible()
   implicit none
@@ -183,6 +197,48 @@ contains
    .not.ldragvel .and. typemass.eq.0 .and. .not.ltrackbeads .and. &
    .not.ltagbeads .and. .not.lbreakup
  end function evaporative_dynamic_accelerator_eligible
+
+#if defined(_OPENACC) && defined(JETSPIN_DEV_HOST_FORCE_ORACLE)
+ logical function non_evap_host_force_oracle(tstage,k,xs,ys,zs,ss, &
+   vxs,vys,vzs,fx,fy,fz,fs,fvxout,fvyout,fvzout)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(in) :: tstage
+  double precision, allocatable, intent(in) :: xs(:),ys(:),zs(:),ss(:)
+  double precision, allocatable, intent(in) :: vxs(:),vys(:),vzs(:)
+  double precision, intent(out) :: fx(0:),fy(0:),fz(0:),fs(0:)
+  double precision, intent(out) :: fvxout(0:),fvyout(0:),fvzout(0:)
+  integer :: ipoint,j
+  double precision :: fstocx,fstocy,fstocz
+
+  non_evap_host_force_oracle=.false.
+  if(systype/=3 .and. systype/=4)return
+
+  ! Coulomb has already refreshed geometry and shared bead data. Download the
+  ! remaining stage state, execute the historical CPU EOM, and upload only
+  ! the derivatives consumed by the device integration update.
+!$acc update self(xs(0:npjet),ys(0:npjet),zs(0:npjet),ss(0:npjet), &
+!$acc& vxs(0:npjet),vys(0:npjet),vzs(0:npjet),jetvl(0:npjet), &
+!$acc& coulforce(0:npjet,1:3)) if_present
+  j=0
+  do ipoint=mystart,myend
+    if(systype==4)then
+      call xpsys(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,coulforce, &
+       fx(j),fy(j),fz(j),fs(j),fvxout(j),fvyout(j),fvzout(j),tstage,k, &
+       fstocx,fstocy,fstocz)
+    else
+      call xpsys(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,coulforce, &
+       fx(j),fy(j),fz(j),fs(j),fvxout(j),fvyout(j),fvzout(j),tstage,k)
+    endif
+    j=j+1
+  enddo
+!$acc update device(fx(0:myend-mystart),fy(0:myend-mystart), &
+!$acc& fz(0:myend-mystart),fs(0:myend-mystart), &
+!$acc& fvxout(0:myend-mystart),fvyout(0:myend-mystart), &
+!$acc& fvzout(0:myend-mystart)) if_present
+  non_evap_host_force_oracle=.true.
+ end function non_evap_host_force_oracle
+#endif
   
  subroutine driver_integrator(timesub,h,k,dorefinment)
  
@@ -439,11 +495,16 @@ contains
       call profiling_start(prof_eom)
       used_acc_eom=.false.
 #ifdef _OPENACC
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+      used_acc_eom=non_evap_host_force_oracle(timesub,k,jetxx,jetyy,jetzz, &
+       jetst,jetvx,jetvy,jetvz,fxx,fyy,fzz,fst,fvx,fvy,fvz)
+#else
       if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx, &
        jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
        jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz,linserted, &
        liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
        consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
+#endif
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -712,11 +773,16 @@ contains
       call profiling_start(prof_eom)
       used_acc_eom=.false.
 #ifdef _OPENACC
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+      used_acc_eom=non_evap_host_force_oracle(timesub,k,jetxx,jetyy,jetzz, &
+       jetst,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz)
+#else
       if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx, &
        jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
        jetch,jetfr,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted, &
        liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
        consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
+#endif
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -792,11 +858,16 @@ contains
       call profiling_start(prof_eom)
       used_acc_eom=.false.
 #ifdef _OPENACC
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+      used_acc_eom=non_evap_host_force_oracle(timesub+h,k,yxx,yyy,yzz, &
+       yst,yvx,yvy,yvz,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz)
+#else
       if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr, &
        f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
        lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
        yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
+#endif
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1055,10 +1126,16 @@ contains
 ! topology benchmark.  The latter reserves enough capacity before mapping.
   if(.not.persistent_acc .and. (fixed_accelerator_eligible() .or. &
    dynamic_rk4_accelerator_eligible()))then
+    ! A capacity rebind performed by the topology driver already owns the
+    ! new jet mapping.  Recreate only the RK workspace in that case; entering
+    ! the jet arrays again would leave a second OpenACC present reference and
+    ! make a later reallocation fail with a partially-present mapping.
+    if(.not.accelerator_is_topology_enabled())then
 !$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
 !$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
 !$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
 !$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetfr(0:mxnpjet))
+    endif
 !$acc enter data create(yxx(0:mxnpjet),yyy(0:mxnpjet), &
 !$acc& yzz(0:mxnpjet),yst(0:mxnpjet),yvx(0:mxnpjet), &
 !$acc& yvy(0:mxnpjet),yvz(0:mxnpjet))
@@ -1200,11 +1277,16 @@ contains
       call profiling_start(prof_eom)
       used_acc_eom=.false.
 #ifdef _OPENACC
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+      used_acc_eom=non_evap_host_force_oracle(timesub,k,jetxx,jetyy,jetzz, &
+       jetst,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz)
+#else
       if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx, &
        jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
        jetch,jetfr,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted, &
        liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
        consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
+#endif
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1266,11 +1348,16 @@ contains
       call profiling_start(prof_eom)
       used_acc_eom=.false.
 #ifdef _OPENACC
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+      used_acc_eom=non_evap_host_force_oracle(timesub+0.5d0*h,k,yxx,yyy,yzz, &
+       yst,yvx,yvy,yvz,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz)
+#else
       if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f2xx, &
        f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
        att,fve,gr,ks,li,v,velext,.false.,0.d0)
+#endif
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1339,11 +1426,16 @@ contains
       call profiling_start(prof_eom)
       used_acc_eom=.false.
 #ifdef _OPENACC
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+      used_acc_eom=non_evap_host_force_oracle(timesub+0.5d0*h,k,yxx,yyy,yzz, &
+       yst,yvx,yvy,yvz,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz)
+#else
       if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f3xx, &
        f3yy,f3zz,f3st,f3vx,f3vy,f3vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
        att,fve,gr,ks,li,v,velext,.false.,0.d0)
+#endif
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1412,11 +1504,16 @@ contains
       call profiling_start(prof_eom)
       used_acc_eom=.false.
 #ifdef _OPENACC
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+      used_acc_eom=non_evap_host_force_oracle(timesub+h,k,yxx,yyy,yzz, &
+       yst,yvx,yvy,yvz,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz)
+#else
       if(systype.eq.3) used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,yxx,yyy, &
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f4xx, &
        f4yy,f4zz,f4st,f4vx,f4vy,f4vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
        att,fve,gr,ks,li,v,velext,.false.,0.d0)
+#endif
 #endif
       if(.not.used_acc_eom)then
         do ipoint=mystart,myend
@@ -1829,38 +1926,70 @@ contains
       if(persistent_acc)then
         call smooth_charge(jetxx,jetyy,jetzz)
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx,jetyy,jetzz)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+        used_acc_eom=non_evap_host_force_oracle(timesub,k,jetxx,jetyy,jetzz, &
+         jetst,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz)
+!$acc update device(f1xx(0:myend-mystart),f1yy(0:myend-mystart), &
+!$acc& f1zz(0:myend-mystart),f1st(0:myend-mystart), &
+!$acc& f1vx(0:myend-mystart),f1vy(0:myend-mystart),f1vz(0:myend-mystart))
+#else
         used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx,jetyy, &
          jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch,jetfr, &
          f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+#endif
         call accelerator_platen_predict(mystart,myend,h,airdragamp(1), &
          noisediff,jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
          f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,y1xx,y1yy,y1zz,y1st, &
          y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y1xx,y1yy,y1zz)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+        used_acc_eom=non_evap_host_force_oracle(timesub,k,y1xx,y1yy,y1zz, &
+         y1st,y1vx,y1vy,y1vz,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz)
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart),f2vz(0:myend-mystart))
+#else
         used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,y1xx,y1yy, &
          y1zz,y1st,y1vx,y1vy,y1vz,jetvl,coulforce,jetms,jetch,jetfr, &
          f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+#endif
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y2xx,y2yy,y2zz)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+        used_acc_eom=non_evap_host_force_oracle(timesub,k,y2xx,y2yy,y2zz, &
+         y2st,y2vx,y2vy,y2vz,d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz)
+!$acc update device(d3xx(0:myend-mystart),d3yy(0:myend-mystart), &
+!$acc& d3zz(0:myend-mystart),d3st(0:myend-mystart), &
+!$acc& d3vx(0:myend-mystart),d3vy(0:myend-mystart),d3vz(0:myend-mystart))
+#else
         used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,y2xx,y2yy, &
          y2zz,y2st,y2vx,y2vy,y2vz,jetvl,coulforce,jetms,jetch,jetfr, &
          d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+#endif
         call accelerator_platen_velocity(mystart,myend,mxnpjet, &
          gaussianhistorysteps,k,h, &
          airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
          f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz)
         call accelerator_platen_positions(mystart,myend,npjet,h,pfreq, &
          liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+        used_acc_eom=non_evap_host_force_oracle(timesub+h,k,jetxx,jetyy,jetzz, &
+         y1st,jetvx,jetvy,jetvz,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz)
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart),f2vz(0:myend-mystart))
+#else
         used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx,jetyy, &
          jetzz,y1st,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch,jetfr, &
          f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+#endif
         call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
          jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
          maxstressposx)
@@ -3150,10 +3279,10 @@ contains
     call reset_coulomb_accelerator(coulforce)
   endif
 
-  allocate(maxev_fxx(0:mxchunk,2),maxev_fyy(0:mxchunk,2))
-  allocate(maxev_fzz(0:mxchunk,2),maxev_fst(0:mxchunk,2))
-  allocate(maxev_fvx(0:mxchunk,2),maxev_fvy(0:mxchunk,2))
-  allocate(maxev_fvz(0:mxchunk,2),maxev_fev(0:mxchunk,2))
+  allocate(maxev_fxx(0:mxchunk,4),maxev_fyy(0:mxchunk,4))
+  allocate(maxev_fzz(0:mxchunk,4),maxev_fst(0:mxchunk,4))
+  allocate(maxev_fvx(0:mxchunk,4),maxev_fvy(0:mxchunk,4))
+  allocate(maxev_fvz(0:mxchunk,4),maxev_fev(0:mxchunk,4))
   allocate(maxev_yxx(0:mxnpjet),maxev_yyy(0:mxnpjet))
   allocate(maxev_yzz(0:mxnpjet),maxev_yst(0:mxnpjet))
   allocate(maxev_yvx(0:mxnpjet),maxev_yvy(0:mxnpjet))
@@ -3180,7 +3309,7 @@ contains
  end subroutine ensure_maxwell_evap_device_workspace
 
  subroutine maxwell_evap_device_stage(tstage,k,xs,ys,zs,ss,vxs,vys,vzs,ves, &
-   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev)
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,stochastic_model)
   implicit none
   integer, intent(in) :: k
   double precision, intent(in) :: tstage
@@ -3189,10 +3318,15 @@ contains
   double precision, allocatable, intent(inout) :: ves(:)
   double precision, intent(inout) :: fxx(0:),fyy(0:),fzz(0:),fst(0:)
   double precision, intent(inout) :: fvx(0:),fvy(0:),fvz(0:),fev(0:)
+  logical, intent(in), optional :: stochastic_model
   integer :: ipoint,j,nactive
+  logical :: stochastic_stage
+  double precision :: fstocx,fstocy,fstocz
 
   nactive=myend-mystart
-#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+  stochastic_stage=.false.
+  if(present(stochastic_model))stochastic_stage=stochastic_model
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
   ! Development oracle: evaluate the complete trusted Maxwell/Yarin EOM on
   ! the host and upload only its derivatives. State updates remain on device.
 !$acc update self(xs(0:npjet),ys(0:npjet),zs(0:npjet),ss(0:npjet), &
@@ -3203,14 +3337,20 @@ contains
   call compute_coulomelec_driver(k,tstage,coulforce,jetvl,xs,ys,zs,ves)
   j=0
   do ipoint=mystart,myend
-    call xpsys_ev_maxwell(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
-     coulforce,fxx(j),fyy(j),fzz(j),fst(j),fvx(j),fvy(j),fvz(j),fev(j), &
-     tstage,k)
+    if(stochastic_stage)then
+      call xpsys_ev(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves,coulforce, &
+       fxx(j),fyy(j),fzz(j),fst(j),fvx(j),fvy(j),fvz(j),fev(j),tstage,k, &
+       fstocx,fstocy,fstocz)
+    else
+      call xpsys_ev_maxwell(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
+       coulforce,fxx(j),fyy(j),fzz(j),fst(j),fvx(j),fvy(j),fvz(j),fev(j), &
+       tstage,k)
+    endif
     j=j+1
   enddo
   call restore_charge()
-!$acc update device(jetch(0:npjet),fxx(0:nactive),fyy(0:nactive), &
-!$acc& fzz(0:nactive),fst(0:nactive),fvx(0:nactive),fvy(0:nactive), &
+!$acc update device(fxx(0:nactive),fyy(0:nactive),fzz(0:nactive), &
+!$acc& fst(0:nactive),fvx(0:nactive),fvy(0:nactive), &
 !$acc& fvz(0:nactive),fev(0:nactive)) if_present
 #else
   call smooth_charge(xs,ys,zs)
@@ -3220,7 +3360,7 @@ contains
    vxs,vys,vzs,jetvl,ves,coulforce,jetms,jetch,jetfr, &
    fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,linserting,linserted,liniperturb, &
    lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
-   yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0,evairv, &
+   yieldstress,att,fve,gr,ks,li,v,velext,stochastic_stage,noisefric,evairv, &
    evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev)
   call restore_charge()
 #endif
@@ -3253,7 +3393,7 @@ contains
    jetvx,jetvy,jetvz,jetve,maxev_fxx(:,1),maxev_fyy(:,1), &
    maxev_fzz(:,1),maxev_fst(:,1),maxev_fvx(:,1),maxev_fvy(:,1), &
    maxev_fvz(:,1),maxev_fev(:,1))
-#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
   ! NVHPC does not reliably resolve an update through the assumed-shape
   ! column aliases used by maxwell_evap_device_stage.  Name the persistent
   ! workspace columns explicitly in the development oracle.
@@ -3283,7 +3423,7 @@ contains
    jetvx,jetvy,jetvz,jetve,maxev_fxx(:,1),maxev_fyy(:,1), &
    maxev_fzz(:,1),maxev_fst(:,1),maxev_fvx(:,1),maxev_fvy(:,1), &
    maxev_fvz(:,1),maxev_fev(:,1))
-#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
 !$acc update device(maxev_fxx(0:myend-mystart,1), &
 !$acc& maxev_fyy(0:myend-mystart,1),maxev_fzz(0:myend-mystart,1), &
 !$acc& maxev_fst(0:myend-mystart,1),maxev_fvx(0:myend-mystart,1), &
@@ -3301,7 +3441,7 @@ contains
    maxev_yst,maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev, &
    maxev_fxx(:,2),maxev_fyy(:,2),maxev_fzz(:,2),maxev_fst(:,2), &
    maxev_fvx(:,2),maxev_fvy(:,2),maxev_fvz(:,2),maxev_fev(:,2))
-#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
 !$acc update device(maxev_fxx(0:myend-mystart,2), &
 !$acc& maxev_fyy(0:myend-mystart,2),maxev_fzz(0:myend-mystart,2), &
 !$acc& maxev_fst(0:myend-mystart,2),maxev_fvx(0:myend-mystart,2), &
@@ -3318,6 +3458,94 @@ contains
    maxev_yvz,maxev_yev,evlim)
   call finish_maxwell_evap_device_step(timesub,h)
  end subroutine rk2sys_maxwell_ev_device
+
+ subroutine rk4sys_maxwell_ev_device(timesub,h,k)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call ensure_maxwell_evap_device_workspace()
+
+  call maxwell_evap_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst, &
+   jetvx,jetvy,jetvz,jetve,maxev_fxx(:,1),maxev_fyy(:,1), &
+   maxev_fzz(:,1),maxev_fst(:,1),maxev_fvx(:,1),maxev_fvy(:,1), &
+   maxev_fvz(:,1),maxev_fev(:,1))
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+!$acc update device(maxev_fxx(0:myend-mystart,1), &
+!$acc& maxev_fyy(0:myend-mystart,1),maxev_fzz(0:myend-mystart,1), &
+!$acc& maxev_fst(0:myend-mystart,1),maxev_fvx(0:myend-mystart,1), &
+!$acc& maxev_fvy(0:myend-mystart,1),maxev_fvz(0:myend-mystart,1), &
+!$acc& maxev_fev(0:myend-mystart,1))
+#endif
+  call accelerator_maxwell_rk4_stage_update(mystart,myend,h,1, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   maxev_fxx(:,1),maxev_fyy(:,1),maxev_fzz(:,1),maxev_fst(:,1), &
+   maxev_fvx(:,1),maxev_fvy(:,1),maxev_fvz(:,1),maxev_fev(:,1), &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy, &
+   maxev_yvz,maxev_yev,evlim)
+
+  call maxwell_evap_device_stage(timesub+0.5d0*h,k,maxev_yxx,maxev_yyy, &
+   maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev, &
+   maxev_fxx(:,2),maxev_fyy(:,2),maxev_fzz(:,2),maxev_fst(:,2), &
+   maxev_fvx(:,2),maxev_fvy(:,2),maxev_fvz(:,2),maxev_fev(:,2))
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+!$acc update device(maxev_fxx(0:myend-mystart,2), &
+!$acc& maxev_fyy(0:myend-mystart,2),maxev_fzz(0:myend-mystart,2), &
+!$acc& maxev_fst(0:myend-mystart,2),maxev_fvx(0:myend-mystart,2), &
+!$acc& maxev_fvy(0:myend-mystart,2),maxev_fvz(0:myend-mystart,2), &
+!$acc& maxev_fev(0:myend-mystart,2))
+#endif
+  call accelerator_maxwell_rk4_stage_update(mystart,myend,h,2, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   maxev_fxx(:,2),maxev_fyy(:,2),maxev_fzz(:,2),maxev_fst(:,2), &
+   maxev_fvx(:,2),maxev_fvy(:,2),maxev_fvz(:,2),maxev_fev(:,2), &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy, &
+   maxev_yvz,maxev_yev,evlim)
+
+  call maxwell_evap_device_stage(timesub+0.5d0*h,k,maxev_yxx,maxev_yyy, &
+   maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev, &
+   maxev_fxx(:,3),maxev_fyy(:,3),maxev_fzz(:,3),maxev_fst(:,3), &
+   maxev_fvx(:,3),maxev_fvy(:,3),maxev_fvz(:,3),maxev_fev(:,3))
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+!$acc update device(maxev_fxx(0:myend-mystart,3), &
+!$acc& maxev_fyy(0:myend-mystart,3),maxev_fzz(0:myend-mystart,3), &
+!$acc& maxev_fst(0:myend-mystart,3),maxev_fvx(0:myend-mystart,3), &
+!$acc& maxev_fvy(0:myend-mystart,3),maxev_fvz(0:myend-mystart,3), &
+!$acc& maxev_fev(0:myend-mystart,3))
+#endif
+  call accelerator_maxwell_rk4_stage_update(mystart,myend,h,3, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   maxev_fxx(:,3),maxev_fyy(:,3),maxev_fzz(:,3),maxev_fst(:,3), &
+   maxev_fvx(:,3),maxev_fvy(:,3),maxev_fvz(:,3),maxev_fev(:,3), &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy, &
+   maxev_yvz,maxev_yev,evlim)
+
+  call maxwell_evap_device_stage(timesub+h,k,maxev_yxx,maxev_yyy,maxev_yzz, &
+   maxev_yst,maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev, &
+   maxev_fxx(:,4),maxev_fyy(:,4),maxev_fzz(:,4),maxev_fst(:,4), &
+   maxev_fvx(:,4),maxev_fvy(:,4),maxev_fvz(:,4),maxev_fev(:,4))
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+!$acc update device(maxev_fxx(0:myend-mystart,4), &
+!$acc& maxev_fyy(0:myend-mystart,4),maxev_fzz(0:myend-mystart,4), &
+!$acc& maxev_fst(0:myend-mystart,4),maxev_fvx(0:myend-mystart,4), &
+!$acc& maxev_fvy(0:myend-mystart,4),maxev_fvz(0:myend-mystart,4), &
+!$acc& maxev_fev(0:myend-mystart,4))
+#endif
+  call accelerator_maxwell_rk4_final_update(mystart,myend,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   maxev_fxx(:,1),maxev_fyy(:,1),maxev_fzz(:,1),maxev_fst(:,1), &
+   maxev_fvx(:,1),maxev_fvy(:,1),maxev_fvz(:,1),maxev_fev(:,1), &
+   maxev_fxx(:,2),maxev_fyy(:,2),maxev_fzz(:,2),maxev_fst(:,2), &
+   maxev_fvx(:,2),maxev_fvy(:,2),maxev_fvz(:,2),maxev_fev(:,2), &
+   maxev_fxx(:,3),maxev_fyy(:,3),maxev_fzz(:,3),maxev_fst(:,3), &
+   maxev_fvx(:,3),maxev_fvy(:,3),maxev_fvz(:,3),maxev_fev(:,3), &
+   maxev_fxx(:,4),maxev_fyy(:,4),maxev_fzz(:,4),maxev_fst(:,4), &
+   maxev_fvx(:,4),maxev_fvy(:,4),maxev_fvz(:,4),maxev_fev(:,4), &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy, &
+   maxev_yvz,maxev_yev,evlim)
+  call finish_maxwell_evap_device_step(timesub,h)
+ end subroutine rk4sys_maxwell_ev_device
 #endif
  
  subroutine eulsys_ev(timesub,h,k)
@@ -3908,8 +4136,8 @@ contains
   double precision, intent(inout) :: timesub
   double precision, intent(in) :: h
   
-  logical, save :: lfirstsub=.true.
-  
+ logical, save :: lfirstsub=.true.
+
   double precision ::  fxx
   double precision ::  fyy
   double precision ::  fzz
@@ -3942,8 +4170,17 @@ contains
   double precision :: compare_comp(8)
 #endif
 
+#ifdef _OPENACC
+#if defined(JETSPIN_DEV_HOST_FORCE_ORACLE) || defined(JETSPIN_DEV_HOST_COULOMB_ORACLE)
+  if(evaporative_dynamic_accelerator_eligible())then
+    call rk4sys_maxwell_ev_device(timesub,h,k)
+    return
+  endif
+#endif
+#endif
+
   device_rk4_chain=.false.
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE1) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE2) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE4) && !defined(JETSPIN_COMPARE_MAXWELL_STAGES) && !defined(JETSPIN_TRACE_MAXWELL_BEAD) && !defined(JETSPIN_PRINT_MAXWELL_STAGE2)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE1) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE2) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE4) && !defined(JETSPIN_COMPARE_MAXWELL_STAGES) && !defined(JETSPIN_TRACE_MAXWELL_BEAD) && !defined(JETSPIN_PRINT_MAXWELL_STAGE2)
   device_rk4_chain=evaporative_dynamic_accelerator_eligible()
 #endif
 
@@ -4456,7 +4693,7 @@ contains
           compare_comp(8)=max(compare_comp(8),abs(f2ev(j)-fev))
         enddo
         write(*,'(a,8(1pe12.4,1x))') 'Stage-2 abs components [xx yy zz st vx vy vz ev]=',compare_comp
-#ifdef JETSPIN_DEV_HOST_MAXWELL_GEOMETRY
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         j=50-mystart
         call xpsys_ev_maxwell(50,yxx,yyy,yzz,yst,yvx,yvy,yvz,jetvl,yev,coulforce, &
          fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,timesub+h/2.d0,k)
@@ -4504,7 +4741,7 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
       call accelerator_maxwell_rk4_stage_update(mystart,myend,h,2,jetxx,jetyy,jetzz,jetst, &
        jetvx,jetvy,jetvz,jetve,jetvl,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
        yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
@@ -4642,7 +4879,7 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
       call accelerator_maxwell_rk4_stage_update(mystart,myend,h,3,jetxx,jetyy,jetzz,jetst, &
        jetvx,jetvy,jetvz,jetve,jetvl,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
        yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
@@ -4804,7 +5041,7 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
-#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
       call accelerator_maxwell_rk4_final_update(mystart,myend,h,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
        f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
        f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev, &
@@ -4922,6 +5159,9 @@ contains
   double precision, allocatable, dimension (:), save ::  y2vy
   double precision, allocatable, dimension (:), save ::  y2vz
   double precision, allocatable, dimension (:), save ::  y2ev
+  double precision, allocatable, dimension (:), save ::  d3xx,d3yy,d3zz
+  double precision, allocatable, dimension (:), save ::  d3st,d3vx,d3vy,d3vz
+  double precision, allocatable, dimension (:), save ::  d3ev
   
   integer, intent(in) :: k
   double precision, intent(inout) :: timesub
@@ -4932,6 +5172,7 @@ contains
   double precision, dimension(1:3) :: ww,zz,utang
   
   logical, save :: lfirstsub=.true.
+  logical, save :: persistent_acc=.false.
   
   double precision ::  fxx
   double precision ::  fyy
@@ -5034,6 +5275,7 @@ contains
         deallocate(y2vy)
         deallocate(y2vz)
         deallocate(y2ev)
+        deallocate(d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz,d3ev)
       endif
       allocate(f1xx(0:mxnpjet))
       allocate(f1yy(0:mxnpjet))
@@ -5070,18 +5312,41 @@ contains
       allocate(y2vy(0:mxnpjet))
       allocate(y2vz(0:mxnpjet))
       allocate(y2ev(0:mxnpjet))
+      allocate(d3xx(0:mxnpjet),d3yy(0:mxnpjet),d3zz(0:mxnpjet))
+      allocate(d3st(0:mxnpjet),d3vx(0:mxnpjet),d3vy(0:mxnpjet))
+      allocate(d3vz(0:mxnpjet),d3ev(0:mxnpjet))
     end select
     lfirstsub=.false.
   endif
+
+#ifdef _OPENACC
+  if(.not.persistent_acc .and. fixed_evaporative_platen_eligible() .and. &
+   allocated(gaussianhistory))then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
+!$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
+!$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
+!$acc& jetve(0:mxnpjet),jetce(0:mxnpjet),jetms(0:mxnpjet), &
+!$acc& jetch(0:mxnpjet),jetfr(0:mxnpjet))
+!$acc enter data create(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev,d3xx,d3yy,d3zz,d3st, &
+!$acc& d3vx,d3vy,d3vz,d3ev,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev, &
+!$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,y2ev)
+    call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(.true.)
+    persistent_acc=.true.
+  endif
+#endif
   
   dsqrh=dsqrt(dabs(h))
   tsqh=dsqrh**3.d0
   prefactor1=0.5d0/dsqrh
 
-  if(systype==1)then
-    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,1)
-  else
-    call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,3)
+  if(.not.allocated(gaussianhistory))then
+    if(systype==1)then
+      call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,1)
+    else
+      call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,3)
+    endif
   endif
 
 ! select the proper system type
@@ -5158,8 +5423,13 @@ contains
         call xpsys_ev(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          y2ev,coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
          timesub,k,f3stocvx,f3stocvy,f3stocvz)
-        u1=gaussian_buffer_value(ipoint,1,1)
-        u2=gaussian_buffer_value(ipoint,1,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,1,1)
+          u2=gaussian_history_value(k,ipoint,1,2)
+        else
+          u1=gaussian_buffer_value(ipoint,1,1)
+          u2=gaussian_buffer_value(ipoint,1,2)
+        endif
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
           
@@ -5226,6 +5496,88 @@ contains
       
       timesub=timesub+h
     case default
+#ifdef _OPENACC
+      if(persistent_acc)then
+        call maxwell_evap_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst, &
+         jetvx,jetvy,jetvz,jetve,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+         f1ev,.true.)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+!$acc update device(f1xx(0:myend-mystart),f1yy(0:myend-mystart), &
+!$acc& f1zz(0:myend-mystart),f1st(0:myend-mystart), &
+!$acc& f1vx(0:myend-mystart),f1vy(0:myend-mystart), &
+!$acc& f1vz(0:myend-mystart),f1ev(0:myend-mystart))
+#endif
+        call accelerator_platen_evap_predict(mystart,myend,h,airdragamp(1), &
+         noisediff,evlim,jetms,jetvl,jetve,jetxx,jetyy,jetzz,jetst,jetvx, &
+         jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,y1xx,y1yy, &
+         y1zz,y1st,y1vx,y1vy,y1vz,y1ev,y2xx,y2yy,y2zz,y2st,y2vx,y2vy, &
+         y2vz,y2ev)
+
+        call maxwell_evap_device_stage(timesub,k,y1xx,y1yy,y1zz,y1st, &
+         y1vx,y1vy,y1vz,y1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+         f2ev,.true.)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart), &
+!$acc& f2vz(0:myend-mystart),f2ev(0:myend-mystart))
+#endif
+        call maxwell_evap_device_stage(timesub,k,y2xx,y2yy,y2zz,y2st, &
+         y2vx,y2vy,y2vz,y2ev,d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz, &
+         d3ev,.true.)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+!$acc update device(d3xx(0:myend-mystart),d3yy(0:myend-mystart), &
+!$acc& d3zz(0:myend-mystart),d3st(0:myend-mystart), &
+!$acc& d3vx(0:myend-mystart),d3vy(0:myend-mystart), &
+!$acc& d3vz(0:myend-mystart),d3ev(0:myend-mystart))
+#endif
+
+        call accelerator_platen_evap_velocity(mystart,myend,mxnpjet, &
+         gaussianhistorysteps,k,h,airdragamp(1),noisediff,jetms,jetvl, &
+         jetve,gaussianhistory,jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx, &
+         f2vy,f2vz,d3vx,d3vy,d3vz)
+
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+        call maxwell_evap_device_stage(timesub+h,k,y1xx,y1yy,y1zz,y1st, &
+         jetvx,jetvy,jetvz,y1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+         f2ev,.true.)
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart), &
+!$acc& f2vz(0:myend-mystart),f2ev(0:myend-mystart))
+#else
+        call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet, &
+         linserting,linserted,jetfr,f2ev,f2st,y1xx,y1yy,y1zz,jetvx,jetvy, &
+         jetvz,y1st,jetvl,y1ev,evairv,evmasscoeff,sqrevsc,evcsvapour, &
+         evumidity,cp0,Bev,mev,tev,consistency,findex,yieldstress)
+#endif
+        call accelerator_platen_evap_positions(mystart,myend,npjet,h,pfreq, &
+         liniperturb,evlim,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetvl,jetve, &
+         f1xx,f1yy,f1zz,f1ev,f2ev)
+
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+        call maxwell_evap_device_stage(timesub+h,k,jetxx,jetyy,jetzz,y1st, &
+         jetvx,jetvy,jetvz,jetve,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+         f2ev,.true.)
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart), &
+!$acc& f2vz(0:myend-mystart),f2ev(0:myend-mystart))
+#else
+        call accelerator_maxwell_stress_3d(mystart,myend,npjet,linserted, &
+         jetfr,f2st,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,y1st,jetvl,jetve, &
+         cp0,Bev,mev,tev,consistency,findex,yieldstress)
+#endif
+        call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
+         jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
+         maxstressposx)
+        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+         jetxx,jetyy,jetzz)
+        call accelerator_mark_device_state(.true.)
+        timesub=timesub+h
+        return
+      endif
+#endif
       call smooth_charge(jetxx,jetyy,jetzz)
       call compute_posnoinserted(jetxx,jetyy,jetzz)
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx, &
@@ -5337,16 +5689,31 @@ contains
         call xpsys_ev(ipoint,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,jetvl, &
          y2ev,coulforce,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
          timesub,k,f3stocvx,f3stocvy,f3stocvz)
-        u1=gaussian_buffer_value(ipoint,1,1)
-        u2=gaussian_buffer_value(ipoint,1,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,1,1)
+          u2=gaussian_history_value(k,ipoint,1,2)
+        else
+          u1=gaussian_buffer_value(ipoint,1,1)
+          u2=gaussian_buffer_value(ipoint,1,2)
+        endif
         ww(1)=(dsqrh*u1)
         zz(1)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gaussian_buffer_value(ipoint,2,1)
-        u2=gaussian_buffer_value(ipoint,2,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,2,1)
+          u2=gaussian_history_value(k,ipoint,2,2)
+        else
+          u1=gaussian_buffer_value(ipoint,2,1)
+          u2=gaussian_buffer_value(ipoint,2,2)
+        endif
         ww(2)=(dsqrh*u1)
         zz(2)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
-        u1=gaussian_buffer_value(ipoint,3,1)
-        u2=gaussian_buffer_value(ipoint,3,2)
+        if(allocated(gaussianhistory))then
+          u1=gaussian_history_value(k,ipoint,3,1)
+          u2=gaussian_history_value(k,ipoint,3,2)
+        else
+          u1=gaussian_buffer_value(ipoint,3,1)
+          u2=gaussian_buffer_value(ipoint,3,2)
+        endif
         ww(3)=(dsqrh*u1)
         zz(3)=0.5d0*tsqh*(u1+1.d0/(dsqrt(3.d0))*u2)
 	    

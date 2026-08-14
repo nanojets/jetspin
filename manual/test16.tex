@@ -28,15 +28,18 @@ this threshold is not used as the acceptance criterion: the target-centric
 direct Coulomb kernel has a different summation order, and the physical
 bending instability amplifies the resulting roundoff-level perturbation.
 
-The development-only \texttt{nvfortran-openacc-host-forces} target evaluates
-the complete trusted Maxwell force stage on the host and copies its
-derivatives back while state updates remain on the GPU.  This oracle reproduces
-the Euler/RK2 CPU pre-event geometry and aggregate topology, but its transfers
-make it unsuitable for production or performance runs.  The input is stored
-in \texttt{examples/input-16/input.dat}.
+The rheology-independent development target
+\texttt{nvfortran-openacc-force-oracle} evaluates each complete trusted
+Maxwell force stage on the host and uploads its derivatives while state
+updates remain on the GPU.  The narrower
+\texttt{nvfortran-openacc-coulomb-oracle} target evaluates only the direct
+Coulomb sum on the host. Both reproduce the accepted 1,000-step topology for
+Euler, RK2, and RK4, but their deliberate transfers make them unsuitable for
+production or performance runs. The input is stored in
+\texttt{examples/input-16/input.dat}.
 
 The local script
 \texttt{tests/performance/dynamic/validate\_evaporation.sh} builds independent
 NVFORTRAN CPU and standard OpenACC executables and repeats the complete paired
 Euler, RK2, and RK4 validation for Test Cases 16 and 17.  The standard GPU
-build used by the script does not enable either host-force diagnostic macro.
+build used by the script does not enable either diagnostic oracle macro.

@@ -7,6 +7,6 @@ used by the dynamic Maxwell cases.
 
 Insertion, removal, and dynamic refinement are disabled deliberately. This
 keeps the comparison focused on the three Platen force evaluations, the
-evaporation-dependent mass scaling, and the rank-independent Gaussian block.
-The case is intended to be run in serial and with two MPI ranks before the
-evaporative Platen GPU port is enabled.
+evaporation-dependent mass scaling, and the rank-independent Gaussian history.
+The case validates serial, two-rank MPI, and persistent OpenACC execution. It
+also exercises the complete-force and Coulomb-only host oracle builds.

@@ -48,8 +48,8 @@ all:
 	@echo "nvfortran-mpi                      "
 	@echo "nvfortran-openacc                  "
 	@echo "nvfortran-openacc-host             "
-	@echo "nvfortran-openacc-host-forces      "
-	@echo "nvfortran-openacc-kv-host-forces   "
+	@echo "nvfortran-openacc-force-oracle     "
+	@echo "nvfortran-openacc-coulomb-oracle   "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -75,8 +75,8 @@ help:
 	@echo "nvfortran-mpi                      "
 	@echo "nvfortran-openacc                  "
 	@echo "nvfortran-openacc-host             "
-	@echo "nvfortran-openacc-host-forces      "
-	@echo "nvfortran-openacc-kv-host-forces   "
+	@echo "nvfortran-openacc-force-oracle     "
+	@echo "nvfortran-openacc-coulomb-oracle   "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -139,24 +139,24 @@ nvfortran-openacc:
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 
-# Development-only OpenACC build: keep the accelerator executable, but force
-# the evaporative Coulomb and Maxwell geometric force evaluations through the
-# trusted host implementations for on-the-fly numerical isolation.
-nvfortran-openacc-host-forces:
+# Development-only OpenACC oracle: evaluate every supported force stage
+# through the trusted host equations, with or without evaporation, upload the
+# derivatives, and leave integration updates and topology on the device.
+nvfortran-openacc-force-oracle:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
-	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_COULOMB_EVAP -DJETSPIN_DEV_HOST_MAXWELL_GEOMETRY $(FPPFLAGS_EXTRA)" \
+	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_FORCE_ORACLE $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 
-# Development-only Kelvin--Voigt validation build.  RK state updates remain
-# on the GPU, while every force stage is evaluated through the trusted CPU
-# equations and only the resulting derivatives are uploaded.
-nvfortran-openacc-kv-host-forces:
+# Narrower development diagnostic: compute only the direct Coulomb sum on the
+# host, with or without evaporation, then upload the resulting force array.
+# All other force terms, integration updates, and topology remain on device.
+nvfortran-openacc-coulomb-oracle:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
-	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_COULOMB_EVAP -DJETSPIN_DEV_HOST_KV_FORCES $(FPPFLAGS_EXTRA)" \
+	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_COULOMB_ORACLE $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq

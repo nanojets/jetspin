@@ -49,8 +49,9 @@ The implementation preserves the existing model conventions, including:
 - mirror-charge contributions and their three-dimensional cutoff.
 
 The three-dimensional equation-of-motion force assembly is offloaded for the
-fixed Tests 9--12 configuration and for the bounded dynamic evaporation paths
-in Tests 16 and 17. One kernel is launched per integrator stage. Its local
+fixed Tests 9--12 and 20 configurations and for the bounded dynamic
+evaporation paths in Tests 16 and 17. One kernel is launched per integrator
+stage. Its local
 three-point curvature calculation is device-side: an iteration reads the
 current bead and its two neighbours. No host curvature array is built or
 transferred. Disabling fused multiply-add preserves the accepted trajectory
@@ -63,8 +64,9 @@ Coordinates, bead properties, cross sections, and the Coulomb force array are
 named explicitly in each OpenACC data region. No managed/unified-memory build
 mode is used.
 
-Configurations outside Tests 9--13 continue to use separate call-scoped
-Coulomb and EOM data regions.
+Configurations outside the explicitly validated persistent gates in Tests
+9--13, 16, 17, and 20 continue to use separate call-scoped Coulomb and EOM
+data regions.
 
 Test 13 now records the bounded persistent dynamic-topology milestone. It
 preallocates 1,280 slots, keeps RK4 and force data resident as `inpjet` and
@@ -105,16 +107,22 @@ arrays are mapped once and remain resident across all timesteps.
 Each Coulomb stage computes its cross sections on the device; EOM consumes the
 device Coulomb force directly, and all integrator updates execute on the device.
 
-For stochastic Platen integration, the complete Gaussian history is generated
-on the CPU before loop timing in a fixed step/bead/component/draw order. Test
-12 requires 6,006,000 doubles (48,048,000 bytes). The OpenACC build transfers
-this history once during initialization and indexes it on the device; the CPU
-path indexes the same layout. No random generation or noise transfer occurs
-inside the measured loop.
+For the fixed stochastic Platen Tests 12 and 20, the complete Gaussian history
+is generated on the CPU before loop timing in a fixed
+step/bead/component/draw order. Test 12 requires 6,006,000 doubles
+(48,048,000 bytes); the 100-step Test 20 requires 600,600 doubles. The OpenACC
+build transfers this history once during initialization and indexes it on the
+device; the CPU path indexes the same layout. No random generation or noise
+transfer occurs inside the measured loop.
 The history is capped at 100,000,000 doubles (about 763 MiB). Longer fixed
 runs wrap to its beginning, preserving CPU/GPU reproducibility while making
 the noise periodic after the stored interval.
 The host no longer receives stage intermediates or Coulomb forces.
+
+The fixed-topology Maxwell Platen evaporation path used by Test 20 also keeps
+its three drift evaluations, stochastic velocity update, Heun position,
+volume and stress updates, and statistics on the device. Its state and
+Gaussian history therefore follow the same persistent-data policy as Test 12.
 
 The Yarin evaporation rate, the evaporation-specific direct Coulomb force, and
 the concentration-dependent constitutive updates are now available in the
@@ -170,39 +178,43 @@ RK2, and Platen trajectories also pass their A30 baselines with `rtol=1e-6` and
 and dynamic allocation without a GPU. It does not replace the real-device
 regression above and cannot establish GPU performance.
 
-For Test 16 Maxwell force isolation, use the development-only target:
+For a complete force-stage oracle, use the development-only target:
 
 ```sh
-make -C source -f ../build/Makefile nvfortran-openacc-host-forces GPUCC=80
+make -C source -f ../build/Makefile nvfortran-openacc-force-oracle GPUCC=80
 ```
 
-This keeps the OpenACC executable but enables both
-`JETSPIN_DEV_HOST_COULOMB_EVAP` and `JETSPIN_DEV_HOST_MAXWELL_GEOMETRY`.
-The evaporative Coulomb and Maxwell geometric forces are evaluated by the
-trusted host routines and copied back to the device at each call. It is a
-diagnostic build only; it is intentionally unsuitable for performance
-measurements or production runs. Additional preprocessor switches can be
-passed through `FPPFLAGS_EXTRA`.
+This enables the single `JETSPIN_DEV_HOST_FORCE_ORACLE` interface. At every
+supported Euler, RK2, RK4, or fixed-topology Platen force evaluation, with or
+without evaporation, the current state is downloaded, the complete trusted
+CPU force equations (including direct Coulomb) are evaluated, and the
+derivatives are uploaded. Maxwell and Kelvin--Voigt deterministic evaporation,
+non-evaporative Platen, and Maxwell evaporative Platen share this interface.
+Integration updates and dynamic topology remain on the GPU. The target is a
+correctness diagnostic only; it is unsuitable for performance measurements or
+production runs.
 
-For the equivalent Test 17 Kelvin--Voigt isolation, use:
+To isolate only direct-Coulomb accumulation, use:
 
 ```sh
-make -C source -f ../build/Makefile nvfortran-openacc-kv-host-forces GPUCC=80
+make -C source -f ../build/Makefile nvfortran-openacc-coulomb-oracle GPUCC=80
 ```
 
-This target enables `JETSPIN_DEV_HOST_COULOMB_EVAP` and
-`JETSPIN_DEV_HOST_KV_FORCES`. Each complete Kelvin--Voigt force stage is
-evaluated with the trusted CPU routines, while RK state updates remain on the
-GPU. It exists only to distinguish force-kernel differences from integrator
-and topology effects.
+This enables only `JETSPIN_DEV_HOST_COULOMB_ORACLE`. It downloads only the
+state required by the trusted direct sum, evaluates Coulomb on the host at
+every supported force evaluation, restores the nozzle charge when evaporation
+is active, and uploads `ycf`; all other force terms and integration updates
+stay on the device. It has the same meaning for Euler, RK2, RK4, and Platen,
+for non-evaporative simulations and for the supported evaporation rheologies.
+It is distinct from the complete force oracle and likewise adds per-stage PCIe
+transfers. Additional preprocessor switches can be passed through
+`FPPFLAGS_EXTRA`.
 
-For development-only diagnosis of CPU/GPU Coulomb differences, compile the
-evaporative Coulomb module with `-DJETSPIN_DEV_HOST_COULOMB_EVAP`. This macro
-disables the device Coulomb kernel, evaluates the full evaporative Coulomb sum
-on the host at every call, and updates the device copy of `ycf` before the
-next device force stage. It is intentionally not enabled by the standard
-Makefile targets because it adds a host/device transfer at every RK stage and
-is unsuitable for performance measurements.
+The unified oracle checks include the fixed 1,000-bead stochastic cases.
+Tests 12 and 20 match their NVFORTRAN CPU statistical outputs exactly in all
+six rows and fourteen columns with both the complete-force oracle and the
+Coulomb-only oracle. These checks also cover the positive and negative Platen
+predictors and the partial Heun position, evaporation, and stress evaluations.
 
 The bounded dynamic-topology path is enabled for Maxwell Euler, RK2, and RK4
 evaporation (Test 16), including insertion, removal, and capacity rebinds.

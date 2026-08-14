@@ -23,5 +23,9 @@ position and stress updates, and statistics on the device. An initial paired
 measurement with NVFORTRAN 24.3 and one NVIDIA A30 required 29.050473 s on the
 CPU and 1.874810 s with OpenACC, a speedup of 15.50. All six rows and fourteen
 columns of the two sampled outputs were identical at the written precision.
+The complete-force and Coulomb-only development oracles cover this same
+Platen sequence. Both reproduce the CPU record exactly in all written rows
+and columns; their intentional per-stage transfers exclude them from timing
+measurements.
 The versioned results and comparison helper are stored in
 \texttt{tests/performance/integrators/}.

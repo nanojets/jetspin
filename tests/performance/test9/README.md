@@ -62,3 +62,14 @@ Do not replace these records merely to make a comparison pass. If an
 intentional numerical change requires new reference data, review every
 observable and commit the updated records together with the responsible code
 change.
+
+## Development-oracle comparison
+
+`nvfortran-openacc-force-oracle` evaluates every RK4 force stage through the
+trusted CPU equations; `nvfortran-openacc-coulomb-oracle` moves only direct
+Coulomb accumulation to the host. In the current NVFORTRAN 24.3/A30 check,
+the standard GPU, complete-force oracle, and Coulomb-only oracle had worst
+normalized differences of `7.97e-5`, `3.00e-7`, and `8.52e-5` from the CPU
+record. This diagnostic indicates that direct-Coulomb summation order is not
+the dominant Test 9 RK4 difference. Oracle runs are intentionally excluded
+from performance comparisons.

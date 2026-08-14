@@ -85,6 +85,13 @@ trusted host routines and copies their results back to the device. It is useful
 for numerical isolation, but the per-stage transfers make it unsuitable for
 performance measurements or production simulations.
 
+Target \texttt{nvfortran-openacc-kv-host-forces} provides the corresponding
+development-only diagnostic for Kelvin--Voigt evaporation. Every force stage
+is evaluated by the trusted host routines and only its derivatives are copied
+to the device; Runge--Kutta state updates remain on the GPU. The deliberate
+per-stage transfers likewise make this target unsuitable for production or
+performance measurements.
+
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
 binary executable file can be run in the \textit{execute} sub-directory.
@@ -125,6 +132,8 @@ device with \texttt{GPUCC} and \texttt{CUDA\_VERSION}.\tabularnewline
 nvfortran-openacc-host & compile the OpenACC code path for host-only validation.\tabularnewline
 nvfortran-openacc-host-forces & compile the GPU path with development-only
 host force evaluation and per-stage transfers.\tabularnewline
+nvfortran-openacc-kv-host-forces & compile the Kelvin--Voigt GPU path with
+development-only host force evaluation and per-stage transfers.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
 \hline
 \end{tabular}

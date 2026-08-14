@@ -23,10 +23,15 @@ module accelerator_mod
  public :: accelerator_prepare
  public :: accelerator_eom3_stage
  public :: accelerator_maxwell_evap_stage
+ public :: accelerator_kv_evap_stage
  public :: accelerator_maxwell_evap_force_correction
  public :: accelerator_maxwell_rk4_stage_update
  public :: accelerator_maxwell_rk4_final_update
  public :: accelerator_maxwell_commit_state
+ public :: accelerator_evap_rk4_stage_update
+ public :: accelerator_evap_rk2_final_update
+ public :: accelerator_evap_rk4_final_update
+ public :: accelerator_evap_commit_state
  public :: accelerator_compute_posnoinserted_3d
  public :: accelerator_smooth_charge_3d
  public :: accelerator_restore_charge
@@ -72,6 +77,19 @@ module accelerator_mod
  public :: accelerator_platen_velocity
  public :: accelerator_platen_positions
  public :: accelerator_platen_stress_statistics
+
+ ! The RK state algebra is common to both evaporation rheologies.  Preserve
+ ! the historical specific procedure names while exposing neutral interfaces
+ ! for the Kelvin--Voigt integrator.
+ interface accelerator_evap_rk4_stage_update
+   module procedure accelerator_maxwell_rk4_stage_update
+ end interface
+ interface accelerator_evap_rk4_final_update
+   module procedure accelerator_maxwell_rk4_final_update
+ end interface
+ interface accelerator_evap_commit_state
+   module procedure accelerator_maxwell_commit_state
+ end interface
 
 contains
 
@@ -197,6 +215,42 @@ contains
    tev=tev,consistency=consistency,findex=findex,yieldstress=yieldstress)
  end subroutine accelerator_maxwell_evap_stage
 
+ subroutine accelerator_kv_evap_stage(firstpoint,lastpoint,npjet, &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf,jetms,jetch,jetfr, &
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,linserting,linserted,liniperturb,lairdrag, &
+   lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
+   att,fveparam,gr,ks,li,vfield,velext,evairv,evmasscoeff,sqrevsc, &
+   evcsvapour,evumidity,cp0,Bev,mev,tev,evlim)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint,npjet,nfieldtype
+  logical, intent(in) :: linserting,linserted,liniperturb,lairdrag
+  logical, intent(in) :: lflorentz,luppot,jetfr(0:)
+  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yst(0:)
+  double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:),yvl(0:),yve(0:)
+  double precision, intent(in) :: ycf(0:,1:),jetms(0:),jetch(0:)
+  double precision, intent(out) :: fxx(0:),fyy(0:),fzz(0:),fst(0:)
+  double precision, intent(out) :: fvx(0:),fvy(0:),fvz(0:),fve(0:)
+  double precision, intent(in) :: pfreq,consistency,findex,yieldstress
+  double precision, intent(in) :: att,fveparam,gr,ks,li,vfield,velext
+  double precision, intent(in) :: evairv,evmasscoeff,sqrevsc
+  double precision, intent(in) :: evcsvapour,evumidity,cp0,Bev,mev,tev,evlim
+  logical :: ok
+
+  ! Reproduce the established CPU eom3_KV_pos_v_ev semantics.  That routine
+  ! does not add air drag or lift, even when airdrag is enabled in the input.
+  ok=accelerator_eom3_stage(firstpoint,lastpoint,npjet,yxx,yyy,yzz,yst, &
+   yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
+   linserted,liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
+   consistency,findex,yieldstress,att,fveparam,gr,ks,li,vfield,velext, &
+   .false.,0.d0,yve,apply_airdrag=.false.,collector_curvature=.true.)
+  if(.not.ok)return
+
+  call accelerator_kv_evap_stress_3d(firstpoint,lastpoint,npjet, &
+   linserting,linserted,jetfr,fve,fst,yxx,yyy,yzz,yvx,yvy,yvz, &
+   fvx,fvy,fvz,yst,yvl,yve,evairv,evmasscoeff,sqrevsc,evcsvapour, &
+   evumidity,cp0,Bev,mev,tev,evlim,acceleration_chunked=.true.)
+ end subroutine accelerator_kv_evap_stage
+
  subroutine accelerator_maxwell_rk4_stage_update(firstpoint,lastpoint,h,stage, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
    fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
@@ -239,6 +293,50 @@ contains
 !$acc end parallel loop
 #endif
  end subroutine accelerator_maxwell_rk4_stage_update
+
+ subroutine accelerator_evap_rk2_final_update(firstpoint,lastpoint,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+   f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint
+  double precision, intent(in) :: h,evlim
+  double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(in) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(in) :: jetve(0:),jetvl(0:)
+  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1st(0:)
+  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:),f1ev(0:)
+  double precision, intent(in) :: f2xx(0:),f2yy(0:),f2zz(0:),f2st(0:)
+  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:),f2ev(0:)
+  double precision, intent(inout) :: yxx(0:),yyy(0:),yzz(0:),yst(0:)
+  double precision, intent(inout) :: yvx(0:),yvy(0:),yvz(0:),yev(0:)
+  integer :: ipoint,j
+  double precision :: scale,ve
+  scale=0.5d0*h
+#ifdef _OPENACC
+!$acc parallel loop gang vector present_or_copyin(jetxx,jetyy,jetzz,jetst, &
+!$acc& jetvx,jetvy,jetvz,jetve,jetvl,f1xx,f1yy,f1zz,f1st,f1vx,f1vy, &
+!$acc& f1vz,f1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev) &
+!$acc& present_or_copyout(yxx,yyy,yzz,yst,yvx,yvy,yvz,yev) private(j,ve)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    yxx(ipoint)=jetxx(ipoint)+scale*(f1xx(j)+f2xx(j))
+    yyy(ipoint)=jetyy(ipoint)+scale*(f1yy(j)+f2yy(j))
+    yzz(ipoint)=jetzz(ipoint)+scale*(f1zz(j)+f2zz(j))
+    yst(ipoint)=jetst(ipoint)+scale*(f1st(j)+f2st(j))
+    yvx(ipoint)=jetvx(ipoint)+scale*(f1vx(j)+f2vx(j))
+    yvy(ipoint)=jetvy(ipoint)+scale*(f1vy(j)+f2vy(j))
+    yvz(ipoint)=jetvz(ipoint)+scale*(f1vz(j)+f2vz(j))
+    ve=jetve(ipoint)+scale*(f1ev(j)+f2ev(j))
+    if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
+    yev(ipoint)=ve
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+ end subroutine accelerator_evap_rk2_final_update
 
  subroutine accelerator_maxwell_rk4_final_update(firstpoint,lastpoint,h, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
@@ -669,7 +767,7 @@ contains
  subroutine accelerator_kv_evap_stress_3d(firstpoint,lastpoint,npjet, &
    linserting,linserted,jetfr,fev,fst,yxx,yyy,yzz,yvx,yvy,yvz,yax,yay,yaz, &
    yst,yvl,yve,evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity, &
-   cp0,Bev,mev,tev,evlim)
+   cp0,Bev,mev,tev,evlim,acceleration_chunked)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,npjet
   logical, intent(in) :: linserting,linserted,jetfr(0:)
@@ -678,19 +776,29 @@ contains
   double precision, intent(in) :: yax(0:),yay(0:),yaz(0:),yst(0:),yvl(0:),yve(0:)
   double precision, intent(in) :: evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity
   double precision, intent(in) :: cp0,Bev,mev,tev,evlim
-  integer :: ipoint,j
+  logical, intent(in), optional :: acceleration_chunked
+  integer :: ipoint,j,ia,ianext
   double precision :: dx,dy,dz,beadlen,vnorm,re,beadvel,beadacc
   double precision :: cp,ratmu,ratg,dcpdt,dratmu,dratg,strain,strainrate,strainacc
+  logical :: chunked_acceleration
+  chunked_acceleration=.false.
+  if(present(acceleration_chunked))chunked_acceleration=acceleration_chunked
 #ifdef _OPENACC
-!$acc parallel loop gang vector copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
-!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yax(0:npjet),yay(0:npjet), &
-!$acc& yaz(0:npjet),yst(0:npjet),yvl(0:npjet),yve(0:npjet),jetfr(0:npjet)) &
+!$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
+!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yax,yay,yaz, &
+!$acc& yst(0:npjet),yvl(0:npjet),yve(0:npjet),jetfr(0:npjet)) &
 !$acc& present_or_copyout(fev(0:lastpoint-firstpoint),fst(0:lastpoint-firstpoint)) &
-!$acc& private(j,dx,dy,dz,beadlen,vnorm,re,beadvel,beadacc,cp,ratmu,ratg, &
+!$acc& private(j,ia,ianext,dx,dy,dz,beadlen,vnorm,re,beadvel,beadacc,cp,ratmu,ratg, &
 !$acc& dcpdt,dratmu,dratg,strain,strainrate,strainacc)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
+    ia=ipoint
+    ianext=ipoint+1
+    if(chunked_acceleration)then
+      ia=j
+      ianext=j+1
+    endif
     fev(j)=0.d0
     fst(j)=0.d0
     if(jetfr(ipoint) .or. ipoint>=npjet)cycle
@@ -712,14 +820,15 @@ contains
       dx=yxx(ipoint)-yxx(npjet); dy=yyy(ipoint)-yyy(npjet); dz=yzz(ipoint)-yzz(npjet)
       beadvel=(yvx(ipoint)-yvx(npjet))*dx+(yvy(ipoint)-yvy(npjet))*dy+ &
        (yvz(ipoint)-yvz(npjet))*dz
-      beadacc=(yax(ipoint)-yax(npjet))*dx+(yay(ipoint)-yay(npjet))*dy+ &
-       (yaz(ipoint)-yaz(npjet))*dz
+      if(chunked_acceleration)ianext=npjet-firstpoint
+      beadacc=(yax(ia)-yax(ianext))*dx+(yay(ia)-yay(ianext))*dy+ &
+       (yaz(ia)-yaz(ianext))*dz
     else
       dx=yxx(ipoint)-yxx(ipoint+1); dy=yyy(ipoint)-yyy(ipoint+1); dz=yzz(ipoint)-yzz(ipoint+1)
       beadvel=(yvx(ipoint)-yvx(ipoint+1))*dx+(yvy(ipoint)-yvy(ipoint+1))*dy+ &
        (yvz(ipoint)-yvz(ipoint+1))*dz
-      beadacc=(yax(ipoint)-yax(ipoint+1))*dx+(yay(ipoint)-yay(ipoint+1))*dy+ &
-       (yaz(ipoint)-yaz(ipoint+1))*dz
+      beadacc=(yax(ia)-yax(ianext))*dx+(yay(ia)-yay(ianext))*dy+ &
+       (yaz(ia)-yaz(ianext))*dz
     endif
     strainrate=beadvel/(beadlen*beadlen)
     strainacc=beadacc/(beadlen*beadlen)
@@ -1738,7 +1847,8 @@ contains
    yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr, &
    fxx,fyy,fzz,fst,fvx,fvy,fvz,linserted,liniperturb,lairdrag, &
    lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-   att,fve,gr,ks,li,vfield,velext,stochastic_model,noisefric,yve)
+   att,fve,gr,ks,li,vfield,velext,stochastic_model,noisefric,yve, &
+   apply_airdrag,collector_curvature)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,npjet,nfieldtype
   logical, intent(in) :: linserted,liniperturb,lairdrag,lflorentz,luppot
@@ -1746,6 +1856,7 @@ contains
   double precision, intent(in) :: pfreq,consistency,findex,yieldstress
   double precision, intent(in) :: att,fve,gr,ks,li,vfield,velext,noisefric
   double precision, intent(in), optional :: yve(0:)
+  logical, intent(in), optional :: apply_airdrag,collector_curvature
   double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yst(0:)
   double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:),yvl(0:)
   double precision, intent(in) :: ycf(0:,1:),jetms(0:),jetch(0:)
@@ -1761,7 +1872,7 @@ contains
   double precision :: ccx,ccy,ccz,rcx,rcy,rcz,radius,curvature
   double precision :: factor1,factor2,factor3,factor4,factor5
   double precision :: fvet,kst,attt,lit,veltangent,cmass,fvolume,fvolume_prev
-  logical :: straight,use_evap
+  logical :: straight,use_evap,use_airdrag,use_collector_curvature
 
   accelerator_eom3_stage=.false.
   if(.not.accelerator_eom_env_checked)then
@@ -1780,6 +1891,10 @@ contains
   ! Evaluate OPTIONAL presence on the host and pass a plain scalar into the
   ! device kernel; PRESENT() itself is not reliable inside OpenACC regions.
   use_evap=present(yve)
+  use_airdrag=lairdrag
+  if(present(apply_airdrag))use_airdrag=apply_airdrag
+  use_collector_curvature=.false.
+  if(present(collector_curvature))use_collector_curvature=collector_curvature
 
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
 !$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
@@ -1796,7 +1911,7 @@ contains
 !$acc& tdx,tdy,tdz,beadvel,v1x,v1y,v1z,v2x,v2y,v2z,l1,l2,dotp, &
 !$acc& nbx,nby,nbz,lnb,b,c,t,scale1,scale2,ccx,ccy,ccz,rcx,rcy, &
 !$acc& rcz,radius,curvature,factor1,factor2,factor3,factor4,factor5, &
-!$acc& fvet,kst,attt,lit,veltangent,cmass,fvolume,fvolume_prev,straight,use_evap)
+!$acc& fvet,kst,attt,lit,veltangent,cmass,fvolume,fvolume_prev,straight)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
@@ -1845,11 +1960,15 @@ contains
     cmass=1.d0
     fvolume=yvl(ipoint)
     fvolume_prev=fvolume
-    if(ipoint>firstpoint)fvolume_prev=yvl(ipoint-1)
+    if(ipoint>firstpoint .or. &
+     (ipoint==firstpoint .and. firstpoint>0 .and. use_collector_curvature)) &
+     fvolume_prev=yvl(ipoint-1)
     if(use_evap)then
       cmass=yve(ipoint)/yvl(ipoint)
       fvolume=yve(ipoint)
-      if(ipoint>firstpoint)fvolume_prev=yve(ipoint-1)
+      if(ipoint>firstpoint .or. &
+       (ipoint==firstpoint .and. firstpoint>0 .and. use_collector_curvature)) &
+       fvolume_prev=yve(ipoint-1)
     endif
     fvet=fve/(jetms(ipoint)*cmass)
     if(stochastic_model .and. yst(ipoint)<=0.d0)then
@@ -1871,20 +1990,24 @@ contains
     fvy(j)=-factor1*tuy+ycf(ipoint,2)
     fvz(j)=-factor1*tuz+ycf(ipoint,3)
 
-    veltangent=(yvx(ipoint)-velext)*tux+yvy(ipoint)*tuy+ &
-     yvz(ipoint)*tuz
-    attt=att/(jetms(ipoint)*cmass)
-    factor4=attt*(dabs(lup)**0.905d0)*(dabs(veltangent)**1.19d0)
-    fvx(j)=fvx(j)-factor4*tux
-    fvy(j)=fvy(j)-factor4*tuy
-    fvz(j)=fvz(j)-factor4*tuz
+    veltangent=0.d0
+    if(use_airdrag)then
+      veltangent=(yvx(ipoint)-velext)*tux+yvy(ipoint)*tuy+ &
+       yvz(ipoint)*tuz
+      attt=att/(jetms(ipoint)*cmass)
+      factor4=attt*(dabs(lup)**0.905d0)*(dabs(veltangent)**1.19d0)
+      fvx(j)=fvx(j)-factor4*tux
+      fvy(j)=fvy(j)-factor4*tuy
+      fvz(j)=fvz(j)-factor4*tuz
+    endif
     if(stochastic_model)then
       fvx(j)=fvx(j)-noisefric*yvx(ipoint)
       fvy(j)=fvy(j)-noisefric*yvy(ipoint)
       fvz(j)=fvz(j)-noisefric*yvz(ipoint)
     endif
 
-    if(ipoint==firstpoint)cycle
+    if(ipoint==firstpoint .and. &
+     (firstpoint==0 .or. .not.use_collector_curvature))cycle
 
     dxd=yxx(ipoint-1)-yxx(ipoint)
     dyd=yyy(ipoint-1)-yyy(ipoint)
@@ -1893,13 +2016,16 @@ contains
     tdx=dxd/ldown
     tdy=dyd/ldown
     tdz=dzd/ldown
-    if(stochastic_model .and. yst(ipoint-1)<=0.d0)then
-      factor2=0.d0
-    else
-      if(use_evap)then
-        factor2=fvet*yve(ipoint-1)*(yst(ipoint-1)/ldown)
+    factor2=0.d0
+    if(ipoint>firstpoint)then
+      if(stochastic_model .and. yst(ipoint-1)<=0.d0)then
+        factor2=0.d0
       else
-        factor2=fvet*yvl(ipoint-1)*(yst(ipoint-1)/ldown)
+        if(use_evap)then
+          factor2=fvet*yve(ipoint-1)*(yst(ipoint-1)/ldown)
+        else
+          factor2=fvet*yvl(ipoint-1)*(yst(ipoint-1)/ldown)
+        endif
       endif
     endif
 
@@ -1964,11 +2090,13 @@ contains
     fvx(j)=fvx(j)+factor2*tdx+kst*curvature*factor3*rcx
     fvy(j)=fvy(j)+factor2*tdy+kst*curvature*factor3*rcy
     fvz(j)=fvz(j)+factor2*tdz+kst*curvature*factor3*rcz
-    lit=li/(jetms(ipoint)*cmass)
-    factor5=factor3*lup*curvature*(veltangent**2.d0)
-    fvx(j)=fvx(j)-lit*factor5*rcx
-    fvy(j)=fvy(j)-lit*factor5*rcy
-    fvz(j)=fvz(j)-lit*factor5*rcz
+    if(use_airdrag)then
+      lit=li/(jetms(ipoint)*cmass)
+      factor5=factor3*lup*curvature*(veltangent**2.d0)
+      fvx(j)=fvx(j)-lit*factor5*rcx
+      fvy(j)=fvy(j)-lit*factor5*rcy
+      fvz(j)=fvz(j)-lit*factor5*rcz
+    endif
   enddo
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
 !$acc end parallel loop

@@ -36,6 +36,8 @@ and documentation-maintenance rules, see the
 - [Test Case 7: evaporation and rotating electric field](examples/test-7.md)
 - [Test Case 8: Yarin 2001 reference parameters](examples/test-8.md)
 - [Test Case 9: 1,000-bead CPU/GPU benchmark](examples/test-9.md)
+- [Test Case 16: dynamic Maxwell GPU evaporation](examples/test-16.md)
+- [Test Case 17: dynamic Kelvin–Voigt GPU evaporation](examples/test-17.md)
 
 ## Scientific model
 

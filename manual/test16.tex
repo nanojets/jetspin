@@ -5,25 +5,38 @@ collector removal, and capacity growth in one serial three-dimensional run.
 It starts with 100 beads and deliberately retains the small initial capacity
 so that the 1,000-step run invokes the reallocation path.
 
-With target \texttt{nvfortran-openacc}, all four RK4 force evaluations, the
-three intermediate state updates, the final weighted update, direct Coulomb
-summation, evaporation, charge smoothing and restoration, nozzle geometry,
-and the final statistics reductions execute on the GPU.  No state, force, or
-RK derivative array is transferred between stages.  Ordinary timesteps return
-only the insertion and removal decision scalars.  Bead records are moved for
-actual topology or output events, while the complete active state is
-synchronized for capacity reallocation and the final checkpoint.
+The stored input selects RK4; changing only \texttt{integrator} to 1 or 2
+selects the Euler or RK2 validation.  With target
+\texttt{nvfortran-openacc}, Euler executes one Maxwell force and stress
+evaluation, RK2 executes two, and RK4 executes four.  Their intermediate and
+final updates, direct Coulomb summation, evaporation, charge smoothing and
+restoration, nozzle geometry, and final statistics reductions execute on the
+GPU.  No state, force, stress, or derivative array is transferred between
+stages.  Ordinary timesteps return only topology decision scalars.  Bead
+records are moved for actual topology or output events, while the complete
+active state is synchronized for capacity reallocation and the final
+checkpoint.
 
-On an NVIDIA A30 the accepted 1,000-step topology contains 111 additions, 122
-removals, two reallocations, and 89 final active beads, equal to the CPU event
-totals.  The saved final OpenACC output is bit-for-bit identical to the
-preceding GPU reference.  A pointwise CPU/GPU trajectory is not used as the
-acceptance criterion: the target-centric direct Coulomb kernel has a different
-floating-point summation order, and the physical bending instability amplifies
-the resulting roundoff-level perturbation.
+On an NVIDIA A30 the accepted 1,000-step topology for Euler, RK2, and RK4
+contains 111 additions, 122 removals, two reallocations, and 89 final active
+beads, equal to the CPU totals.  For Euler, RK2, and RK4, three-step pre-event
+\texttt{statout.dat} comparisons have zero difference with relative tolerance
+$10^{-12}$ and absolute tolerance $10^{-13}$; their written XYZ geometries are
+also byte-identical.  Floating-point ordering moves the first insertion from
+step 4 on the CPU to step 5 on the GPU.  A pointwise CPU/GPU trajectory after
+this threshold is not used as the acceptance criterion: the target-centric
+direct Coulomb kernel has a different summation order, and the physical
+bending instability amplifies the resulting roundoff-level perturbation.
 
 The development-only \texttt{nvfortran-openacc-host-forces} target evaluates
-the evaporative Coulomb and Maxwell geometric forces on the host and copies
-them back on every call.  It is useful for isolating numerical differences,
-but its transfers make it unsuitable for production or performance runs.  The
-input is stored in \texttt{examples/input-16/input.dat}.
+the complete trusted Maxwell force stage on the host and copies its
+derivatives back while state updates remain on the GPU.  This oracle reproduces
+the Euler/RK2 CPU pre-event geometry and aggregate topology, but its transfers
+make it unsuitable for production or performance runs.  The input is stored
+in \texttt{examples/input-16/input.dat}.
+
+The local script
+\texttt{tests/performance/dynamic/validate\_evaporation.sh} builds independent
+NVFORTRAN CPU and standard OpenACC executables and repeats the complete paired
+Euler, RK2, and RK4 validation for Test Cases 16 and 17.  The standard GPU
+build used by the script does not enable either host-force diagnostic macro.

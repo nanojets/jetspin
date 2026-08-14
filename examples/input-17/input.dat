@@ -1,4 +1,4 @@
- !Example JETSPIN input file 17: dynamic topology with KV evaporation (CPU baseline)
+ !Example JETSPIN input file 17: device-resident dynamic topology with KV evaporation
 
  system 3
  integrator 3

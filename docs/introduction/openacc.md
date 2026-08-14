@@ -48,14 +48,14 @@ The implementation preserves the existing model conventions, including:
 - the one-dimensional distance cutoff;
 - mirror-charge contributions and their three-dimensional cutoff.
 
-The three-dimensional equation-of-motion force assembly is also offloaded for
-the fixed Tests 9--12 configuration: insertion state fixed, air drag enabled,
-constant axial field, and no Lorentz or upper-wall force. One kernel is
-launched per integrator stage. Its local three-point curvature calculation is also
-device-side: an iteration reads the current bead and its two neighbours. No
-host curvature array is built or transferred. Disabling fused multiply-add
-preserves the accepted trajectory for the initially straight geometry. Any
-configuration outside this narrow gate uses the original CPU EOM path.
+The three-dimensional equation-of-motion force assembly is offloaded for the
+fixed Tests 9--12 configuration and for the bounded dynamic evaporation paths
+in Tests 16 and 17. One kernel is launched per integrator stage. Its local
+three-point curvature calculation is device-side: an iteration reads the
+current bead and its two neighbours. No host curvature array is built or
+transferred. Disabling fused multiply-add preserves the accepted trajectory
+for the initially straight geometry. Configurations outside the explicitly
+validated gates use the original CPU EOM path.
 
 ## Explicit data region
 
@@ -87,11 +87,17 @@ trajectory difference originates primarily in device EOM/curvature arithmetic;
 the OpenACC EOM run on the host matches the original CPU path near machine
 precision. See the [Test 13 record](../examples/test-13.md).
 
-The Kelvin--Voigt evaporation prototype also exercises GPU insertion,
-collector removal, and capacity rebinding in Test 17. Its topology event count
-is not yet a CPU-equivalent regression criterion because GPU threshold rounding
-changes event timing; Test 17 currently guards clean execution and capacity
-correctness. Test 16 is the corresponding completed Maxwell RK4 path.
+Tests 16 and 17 complete the Maxwell and Kelvin--Voigt evaporation paths for
+Euler, RK2, and RK4. Their one, two, or four force/stress evaluations,
+intermediate states, final state update, topology operations, and capacity
+rebinding use the same persistent-data strategy. CPU and A30 executions of all
+three integrators and both rheologies report 111 additions, 122 removals, two
+reallocations, and 89 active beads. Three-step pre-event CPU/GPU comparisons
+are identical at `rtol=1e-12` and `atol=1e-13`; Maxwell XYZ geometry is also
+byte-identical at written precision. The first insertion threshold occurs at
+step 4 on the CPU and step 5 on the GPU, so aggregate topology and transfer
+behaviour, rather than pointwise trajectory identity, form the dynamic
+acceptance criteria.
 
 Tests 9--12 use an explicit persistent-data path. The primary jet state,
 static bead properties, Coulomb force, EOM derivatives, and integrator scratch
@@ -113,11 +119,12 @@ The host no longer receives stage intermediates or Coulomb forces.
 The Yarin evaporation rate, the evaporation-specific direct Coulomb force, and
 the concentration-dependent constitutive updates are now available in the
 serial 3D OpenACC path. Maxwell stress uses the same neighbour tangent and
-relative velocity convention as the CPU implementation. For Test 16, all four
-Maxwell RK4 force evaluations, all three intermediate state updates, the final
-weighted update, charge smoothing/restoration, nozzle geometry, evaporation
-cross sections, and the final statistics reduction execute on the device.
-Neither RK state nor derivative arrays are transferred between stages.
+relative velocity convention as the CPU implementation. For Test 16, the
+Maxwell Euler, RK2, and RK4 paths execute their one, two, or four force
+evaluations and all intermediate/final state updates on the device. Charge
+smoothing/restoration, nozzle geometry, evaporation cross sections, and the
+final statistics reduction are device-resident as well. Neither state nor
+derivative arrays are transferred between stages.
 Kelvin--Voigt stress uses the corresponding relative acceleration and the full
 product-rule derivative of the concentration-dependent viscosity and modulus.
 These stress kernels are explicit parallel regions; no per-bead host round
@@ -163,7 +170,7 @@ RK2, and Platen trajectories also pass their A30 baselines with `rtol=1e-6` and
 and dynamic allocation without a GPU. It does not replace the real-device
 regression above and cannot establish GPU performance.
 
-For Test 16 force isolation, use the development-only target:
+For Test 16 Maxwell force isolation, use the development-only target:
 
 ```sh
 make -C source -f ../build/Makefile nvfortran-openacc-host-forces GPUCC=80
@@ -177,6 +184,18 @@ diagnostic build only; it is intentionally unsuitable for performance
 measurements or production runs. Additional preprocessor switches can be
 passed through `FPPFLAGS_EXTRA`.
 
+For the equivalent Test 17 Kelvin--Voigt isolation, use:
+
+```sh
+make -C source -f ../build/Makefile nvfortran-openacc-kv-host-forces GPUCC=80
+```
+
+This target enables `JETSPIN_DEV_HOST_COULOMB_EVAP` and
+`JETSPIN_DEV_HOST_KV_FORCES`. Each complete Kelvin--Voigt force stage is
+evaluated with the trusted CPU routines, while RK state updates remain on the
+GPU. It exists only to distinguish force-kernel differences from integrator
+and topology effects.
+
 For development-only diagnosis of CPU/GPU Coulomb differences, compile the
 evaporative Coulomb module with `-DJETSPIN_DEV_HOST_COULOMB_EVAP`. This macro
 disables the device Coulomb kernel, evaluates the full evaporative Coulomb sum
@@ -185,20 +204,27 @@ next device force stage. It is intentionally not enabled by the standard
 Makefile targets because it adds a host/device transfer at every RK stage and
 is unsuitable for performance measurements.
 
-The bounded dynamic-topology prototype is also enabled for Maxwell RK4
+The bounded dynamic-topology path is enabled for Maxwell Euler, RK2, and RK4
 evaporation (Test 16), including insertion, removal, and capacity rebinds.
-The A30 run reproduces the CPU event totals (111 insertions, 122 removals,
-two reallocations, 89 active beads). A runtime transfer audit of the standard
-build (no diagnostic macros) confirms that no state, force, or RK derivative
-array crosses the PCIe boundary between stages. Each timestep exchanges only
-the insertion/removal decision scalars. Insertion, removal, statistical output,
-capacity growth, and the final checkpoint transfer only the records required
-by those events. Full active-state transfers occur at the two reallocations and
-at the final checkpoint. The final OpenACC trajectory is bit-for-bit identical
-to the saved preceding GPU result. CPU/GPU trajectories are not expected to be
-pointwise identical because target-centric Coulomb accumulation and subsequent
-bending instability amplify floating-point ordering differences; topology
-totals remain the acceptance criterion for this dynamic case.
+All three A30 runs reproduce the CPU event totals (111 insertions, 122 removals,
+two reallocations, 89 active beads). Runtime transfer audits of the standard
+build (no diagnostic macros) confirm that no state, force, stress, or
+derivative array crosses the PCIe boundary between stages. Each timestep
+exchanges only topology decision scalars. Insertion, removal, statistical
+output, capacity growth, and the final checkpoint transfer only the records
+required by those events. Full active-state transfers occur at the two
+reallocations and at the final checkpoint. CPU/GPU trajectories are not
+expected to be pointwise identical after the first topology threshold because
+target-centric Coulomb accumulation and the subsequent bending instability
+amplify floating-point ordering differences; topology totals, pre-event
+agreement, and transfer behaviour are the acceptance criteria.
+
+Test 17 applies the same transfer policy to all deterministic Kelvin--Voigt
+evaporation integrators. Runtime transfer audits of Euler, RK2, and RK4 confirm
+the same absence of per-stage array transfers. The historical CPU
+Kelvin--Voigt evaporation EOM omits air drag and lift even when the input
+enables air drag; the device implementation preserves that established
+semantics.
 
 ## Next porting stages
 

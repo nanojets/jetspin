@@ -48,6 +48,8 @@ all:
 	@echo "nvfortran-mpi                      "
 	@echo "nvfortran-openacc                  "
 	@echo "nvfortran-openacc-host             "
+	@echo "nvfortran-openacc-host-forces      "
+	@echo "nvfortran-openacc-kv-host-forces   "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -73,6 +75,8 @@ help:
 	@echo "nvfortran-mpi                      "
 	@echo "nvfortran-openacc                  "
 	@echo "nvfortran-openacc-host             "
+	@echo "nvfortran-openacc-host-forces      "
+	@echo "nvfortran-openacc-kv-host-forces   "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -142,6 +146,17 @@ nvfortran-openacc-host-forces:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
 	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_COULOMB_EVAP -DJETSPIN_DEV_HOST_MAXWELL_GEOMETRY $(FPPFLAGS_EXTRA)" \
+	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
+	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
+
+# Development-only Kelvin--Voigt validation build.  RK state updates remain
+# on the GPU, while every force stage is evaluated through the trusted CPU
+# equations and only the resulting derivatives are uploaded.
+nvfortran-openacc-kv-host-forces:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
+	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_COULOMB_EVAP -DJETSPIN_DEV_HOST_KV_FORCES $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -292,7 +307,7 @@ driver_eom_mod.o: driver_eom_mod.f90
 integrator_mod.o:integrator_mod.f90 statistic_mod.o
 	$(FC) $(FFLAGS) $(FPPFLAGS) integrator_mod.f90
 
-integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90
+integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90 statistic_mod.o
 	$(FC) $(FFLAGS) $(FPPFLAGS) integrator_kv_ev_mod.f90
 
 statistic_mod.o:statistic_mod.f90

@@ -1,0 +1,46 @@
+\section{Test Case 17: dynamic Kelvin--Voigt evaporation on the GPU}
+
+Test Case 17 is the Kelvin--Voigt counterpart of Test Case 16.  It starts
+with 100 beads and combines Yarin evaporation, nozzle insertion, collector
+removal, and forced capacity growth over 1,000 integration steps.  The stored
+input selects RK4; changing only \texttt{integrator} to 1 or 2 selects the
+equivalent Euler or RK2 validation.
+
+With target \texttt{nvfortran-openacc}, Euler executes one Kelvin--Voigt force
+and stress evaluation, RK2 executes two, and RK4 executes four.  All
+intermediate and final updates, direct Coulomb summation, evaporation, charge
+smoothing and restoration, nozzle geometry, and final statistics reductions
+execute on the GPU.  Kelvin--Voigt stress uses relative bead acceleration
+together with the full product-rule derivative of the concentration-dependent
+viscosity and modulus.  The jet state, Coulomb force, stress, and derivative
+arrays remain resident between stages.
+
+Ordinary timesteps transfer only the insertion, removal, and resize decision
+scalars.  Actual topology and output events transfer their required records;
+the complete active state is synchronized only for capacity reallocation and
+the final checkpoint.  A runtime transfer audit confirms two full-state
+rebinds for the two reallocations and no per-stage array transfers.
+
+The accepted 1,000-step CPU and NVIDIA A30 runs for Euler, RK2, and RK4 all
+produce 111 additions, 122 removals, two reallocations, and 89 final active
+beads.  Three-step pre-event CPU/GPU comparisons are identical with relative
+tolerance $10^{-12}$ and absolute tolerance $10^{-13}$.  Floating-point
+ordering moves the first insertion threshold from step 4 on the CPU to step 5
+on the GPU; the physical bending instability then amplifies this perturbation.
+Consequently, equal aggregate topology, pre-event agreement, clean completion,
+and the transfer audit are used instead of pointwise CPU/GPU trajectory
+identity.
+
+The historical CPU Kelvin--Voigt evaporation equation omits aerodynamic drag
+and lift even when \texttt{airdrag yes} is present.  The GPU implementation
+preserves this established semantics.  The development-only target
+\texttt{nvfortran-openacc-kv-host-forces} evaluates every force stage through
+the trusted host equations and uploads its derivatives.  This diagnostic is
+useful for isolating floating-point differences but is unsuitable for
+performance measurements.  The input is stored in
+\texttt{examples/input-17/input.dat}.
+
+The paired CPU/GPU checks for all three deterministic integrators are
+automated by
+\texttt{tests/performance/dynamic/validate\_evaporation.sh}; see Test Case 16
+for the validation criteria and build policy.

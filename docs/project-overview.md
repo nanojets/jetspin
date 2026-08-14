@@ -75,7 +75,7 @@ are documented in
 | `source/` | Fortran source code |
 | `build/` | Program Makefile |
 | `execute/` | Default runtime working directory |
-| `examples/` | Eight reference `input.dat` cases |
+| `examples/` | Reference, regression, and GPU-development `input.dat` cases |
 | `tests/smoke/` | Serial, runtime-debug, and MPI smoke suite |
 | `tests/regression/` | Eight-case numerical baselines and serial/MPI comparisons |
 | `tests/evaporation/` | Yarin and Kelvin–Voigt evaporation checks |

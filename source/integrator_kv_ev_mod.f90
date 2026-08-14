@@ -20,17 +20,34 @@ module integrator_kv_ev_mod
                          jetms,jetch,jetce, &
                          compute_posnoinserted,evlim,linserting,linserted, &
                          jetfr,evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity, &
-                         cp0,Bev,mev,tev
+                         cp0,Bev,mev,tev,resolution,lKVfluid,levaporation, &
+                         liniperturb,lairdrag,lflorentz,luppot,pfreq, &
+                         consistency,findex,yieldstress,att,fve,gr,ks,li,v, &
+                         velext,lremove,lmultiplestep,ldragvel,typemass, &
+                         ltrackbeads,ltagbeads,lbreakup
  use integrator_mod, only : integrator
  use dynamic_refinement_mod, only : driver_dynamic_refinement
  use coulomb_force_mod, only : smooth_charge,restore_charge,coulforce, &
-                               compute_coulomelec_driver
+                               compute_coulomelec_driver, &
+                               set_coulomb_accelerator_persistent, &
+                               reset_coulomb_accelerator
+ use electric_field_mod, only : nfieldtype
  use eom_ev_mod, only : eom1_KV_pos_v_ev,eom1_KV_st_ev, &
                         eom3_KV_pos_v_ev,eom3_KV_st_ev
 #ifdef _OPENACC
  use accelerator_mod, only : accelerator_enabled, &
                              accelerator_kv_evap_stress_3d, &
-                             accelerator_set_topology_enabled
+                             accelerator_kv_evap_stage, &
+                             accelerator_evap_rk4_stage_update, &
+                             accelerator_evap_rk2_final_update, &
+                             accelerator_evap_rk4_final_update, &
+                             accelerator_evap_commit_state, &
+                             accelerator_compute_posnoinserted_3d, &
+                             accelerator_mark_device_state, &
+                             accelerator_set_persistent, &
+                             accelerator_set_topology_enabled, &
+                             accelerator_is_topology_enabled
+ use statistic_mod, only : counterlpath,ncounterlpath,maxstress,maxstressposx
 #endif
 
  implicit none
@@ -52,6 +69,26 @@ module integrator_kv_ev_mod
  integer, save :: workspace_mxchunk=-1
 
  contains
+
+ logical function kv_evap_device_eligible()
+  implicit none
+  character(len=16) :: disable_persistent
+  disable_persistent=''
+  call get_environment_variable('JETSPIN_OPENACC_DISABLE_PERSISTENT', &
+   disable_persistent)
+  if(trim(disable_persistent)=='1')then
+    kv_evap_device_eligible=.false.
+    return
+  endif
+  kv_evap_device_eligible=integrator>=1 .and. integrator<=3 .and. &
+   systype==3 .and. &
+   lKVfluid .and. levaporation .and. npjet>=inpjet .and. mxnpjet>=100 .and. &
+   mxrank==1 .and. mystart==inpjet .and. myend==npjet .and. &
+   linserting .and. lremove .and. .not.lmultiplestep .and. lairdrag .and. &
+   .not.lflorentz .and. .not.luppot .and. nfieldtype==0 .and. &
+   .not.ldragvel .and. typemass==0 .and. .not.ltrackbeads .and. &
+   .not.ltagbeads .and. .not.lbreakup
+ end function kv_evap_device_eligible
 
  subroutine driver_integrator_KV_ev(timesub,h,k,dorefinment)
 
@@ -105,7 +142,15 @@ module integrator_kv_ev_mod
   implicit none
 
   if(lworkspace)then
-    if(workspace_mxnpjet>=mxnpjet .and. workspace_mxchunk>=mxchunk)return
+    if(workspace_mxnpjet>=mxnpjet .and. workspace_mxchunk>=mxchunk)then
+#ifdef _OPENACC
+      if(kv_evap_device_eligible())then
+        call accelerator_set_persistent(.true.)
+        call set_coulomb_accelerator_persistent(.true.)
+      endif
+#endif
+      return
+    endif
 
 #ifdef _OPENACC
   if(workspace_device_mapped)then
@@ -113,6 +158,7 @@ module integrator_kv_ev_mod
 !$acc& f3vx,f3vy,f3vz,f4vx,f4vy,f4vz,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev)
     workspace_device_mapped=.false.
   endif
+  call reset_coulomb_accelerator(coulforce)
 #endif
 
     deallocate(fxx,fyy,fzz,fst,fev)
@@ -131,12 +177,20 @@ module integrator_kv_ev_mod
   allocate(yst(0:mxnpjet),yvx(0:mxnpjet),yvy(0:mxnpjet))
   allocate(yvz(0:mxnpjet),yev(0:mxnpjet))
 #ifdef _OPENACC
-!$acc enter data copyin(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
-!$acc& jetch,jetvl,jetve,jetce,jetfr)
+  if(.not.accelerator_is_topology_enabled())then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet),jetzz(0:mxnpjet), &
+!$acc& jetst(0:mxnpjet),jetvx(0:mxnpjet),jetvy(0:mxnpjet),jetvz(0:mxnpjet), &
+!$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetvl(0:mxnpjet),jetve(0:mxnpjet), &
+!$acc& jetce(0:mxnpjet),jetfr(0:mxnpjet))
+  endif
 !$acc enter data create(fxx,fyy,fzz,fst,fev,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz, &
 !$acc& f3vx,f3vy,f3vz,f4vx,f4vy,f4vz,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev)
   workspace_device_mapped=.true.
   call accelerator_set_topology_enabled(.true.)
+  if(kv_evap_device_eligible())then
+    call accelerator_set_persistent(.true.)
+    call set_coulomb_accelerator_persistent(.true.)
+  endif
 #endif
   workspace_mxnpjet=mxnpjet
   workspace_mxchunk=mxchunk
@@ -204,7 +258,7 @@ module integrator_kv_ev_mod
         call eom1_KV_st_ev(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
          coulforce,ax,ay,az,dve(j),ds(j),tstage,k)
       case(3)
-#ifdef _OPENACC
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_KV_FORCES)
         if(accelerator_enabled .and. mxrank==1)then
           ds(j)=0.d0
         else
@@ -219,14 +273,12 @@ module integrator_kv_ev_mod
     j=j+1
   enddo
 
-#ifdef _OPENACC
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_KV_FORCES)
   if(accelerator_enabled .and. systype==3 .and. mxrank==1)then
     call accelerator_kv_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
      jetfr,dve,ds,xs,ys,zs,vxs,vys,vzs,ax,ay,az,ss,jetvl,ves,evairv, &
      evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev,evlim)
-#ifdef _OPENACC
     !$acc update self(dve(0:myend-mystart),ds(0:myend-mystart))
-#endif
   endif
 #endif
 
@@ -234,6 +286,151 @@ module integrator_kv_ev_mod
 
   return
  end subroutine eval_stage
+
+#ifdef _OPENACC
+ subroutine finish_device_step(timesub,h)
+  implicit none
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call accelerator_evap_commit_state(mystart,myend, &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve, &
+   counterlpath,ncounterlpath,maxstress,maxstressposx)
+  call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+   jetxx,jetyy,jetzz)
+  call accelerator_mark_device_state(.true.)
+  timesub=timesub+h
+ end subroutine finish_device_step
+
+ subroutine eval_device_stage(tstage,k,xs,ys,zs,ss,vxs,vys,vzs,ves, &
+                              dx,dy,dz,ds,dve,ax,ay,az)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(in) :: tstage
+  double precision, allocatable, dimension(:), intent(inout) :: xs,ys,zs
+  double precision, allocatable, dimension(:), intent(inout) :: ss,vxs,vys,vzs,ves
+  double precision, dimension(0:), intent(inout) :: dx,dy,dz,ds,dve
+  double precision, allocatable, dimension(:), intent(inout) :: ax,ay,az
+  integer :: nactive
+
+  nactive=myend-mystart
+#ifdef JETSPIN_DEV_HOST_KV_FORCES
+  ! Development oracle: bring the current stage to the host, evaluate the
+  ! trusted CPU Kelvin--Voigt equations, and upload only the derivatives.
+  ! The accompanying Makefile target also enables host Coulomb evaluation.
+!$acc update self(xs(0:npjet),ys(0:npjet),zs(0:npjet),ss(0:npjet), &
+!$acc& vxs(0:npjet),vys(0:npjet),vzs(0:npjet),ves(0:npjet), &
+!$acc& jetvl(0:npjet),jetms(0:npjet),jetfr(0:npjet)) if_present
+  call eval_stage(tstage,k,xs,ys,zs,ss,vxs,vys,vzs,ves, &
+   dx,dy,dz,ds,dve,ax,ay,az)
+  ! The host Coulomb helper uploads the temporarily smoothed nozzle charge.
+  ! Restore its device copy after eval_stage has restored the trusted host
+  ! value, otherwise the next stage would smooth an already smoothed charge.
+!$acc update device(jetch(0:npjet)) if_present
+  if(mystart>0)then
+    ax(0:nactive)=ax(mystart:myend)
+    ay(0:nactive)=ay(mystart:myend)
+    az(0:nactive)=az(mystart:myend)
+  endif
+!$acc update device(dx(0:nactive),dy(0:nactive),dz(0:nactive),ds(0:nactive), &
+!$acc& dve(0:nactive),ax(0:nactive),ay(0:nactive),az(0:nactive)) if_present
+#else
+  call smooth_charge(xs,ys,zs)
+  call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution,xs,ys,zs)
+  call compute_coulomelec_driver(k,tstage,coulforce,jetvl,xs,ys,zs,ves)
+  call accelerator_kv_evap_stage(mystart,myend,npjet,xs,ys,zs,ss, &
+   vxs,vys,vzs,jetvl,ves,coulforce,jetms,jetch,jetfr, &
+   dx,dy,dz,ds,ax,ay,az,dve,linserting,linserted,liniperturb,lairdrag, &
+   lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
+   att,fve,gr,ks,li,v,velext,evairv,evmasscoeff,sqrevsc,evcsvapour, &
+   evumidity,cp0,Bev,mev,tev,evlim)
+  call restore_charge()
+#endif
+ end subroutine eval_device_stage
+
+ subroutine eulsys_KV_ev_device(timesub,h,k)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call eval_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
+   jetvz,jetve,fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),fev(:,1), &
+   f1vx,f1vy,f1vz)
+  ! Stage 3 of the common RK update uses a full h multiplier, which is the
+  ! Euler final state algebra.
+  call accelerator_evap_rk4_stage_update(mystart,myend,h,3, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),f1vx,f1vy,f1vz,fev(:,1), &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+  call finish_device_step(timesub,h)
+ end subroutine eulsys_KV_ev_device
+
+ subroutine rk2sys_KV_ev_device(timesub,h,k)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call eval_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
+   jetvz,jetve,fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),fev(:,1), &
+   f1vx,f1vy,f1vz)
+  call accelerator_evap_rk4_stage_update(mystart,myend,h,3, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),f1vx,f1vy,f1vz,fev(:,1), &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+
+  call eval_device_stage(timesub+h,k,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+   fxx(:,2),fyy(:,2),fzz(:,2),fst(:,2),fev(:,2),f2vx,f2vy,f2vz)
+  call accelerator_evap_rk2_final_update(mystart,myend,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),f1vx,f1vy,f1vz,fev(:,1), &
+   fxx(:,2),fyy(:,2),fzz(:,2),fst(:,2),f2vx,f2vy,f2vz,fev(:,2), &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+  call finish_device_step(timesub,h)
+ end subroutine rk2sys_KV_ev_device
+
+ subroutine rk4sys_KV_ev_device(timesub,h,k)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call eval_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
+   jetvz,jetve,fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),fev(:,1), &
+   f1vx,f1vy,f1vz)
+  call accelerator_evap_rk4_stage_update(mystart,myend,h,1, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),f1vx,f1vy,f1vz,fev(:,1), &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+
+  call eval_device_stage(timesub+0.5d0*h,k,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+   fxx(:,2),fyy(:,2),fzz(:,2),fst(:,2),fev(:,2),f2vx,f2vy,f2vz)
+  call accelerator_evap_rk4_stage_update(mystart,myend,h,2, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   fxx(:,2),fyy(:,2),fzz(:,2),fst(:,2),f2vx,f2vy,f2vz,fev(:,2), &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+
+  call eval_device_stage(timesub+0.5d0*h,k,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+   fxx(:,3),fyy(:,3),fzz(:,3),fst(:,3),fev(:,3),f3vx,f3vy,f3vz)
+  call accelerator_evap_rk4_stage_update(mystart,myend,h,3, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   fxx(:,3),fyy(:,3),fzz(:,3),fst(:,3),f3vx,f3vy,f3vz,fev(:,3), &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+
+  call eval_device_stage(timesub+h,k,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+   fxx(:,4),fyy(:,4),fzz(:,4),fst(:,4),fev(:,4),f4vx,f4vy,f4vz)
+  call accelerator_evap_rk4_final_update(mystart,myend,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),f1vx,f1vy,f1vz,fev(:,1), &
+   fxx(:,2),fyy(:,2),fzz(:,2),fst(:,2),f2vx,f2vy,f2vz,fev(:,2), &
+   fxx(:,3),fyy(:,3),fzz(:,3),fst(:,3),f3vx,f3vy,f3vz,fev(:,3), &
+   fxx(:,4),fyy(:,4),fzz(:,4),fst(:,4),f4vx,f4vy,f4vz,fev(:,4), &
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+  call finish_device_step(timesub,h)
+ end subroutine rk4sys_KV_ev_device
+#endif
 
  subroutine clamp_ev_volume(ipoint,value)
   implicit none
@@ -289,6 +486,13 @@ module integrator_kv_ev_mod
   double precision, intent(in) :: h
   integer :: ipoint,j
 
+#ifdef _OPENACC
+  if(kv_evap_device_eligible())then
+    call eulsys_KV_ev_device(timesub,h,k)
+    return
+  endif
+#endif
+
   call eval_stage(timesub,k,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
    jetvz,jetve,fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),fev(:,1), &
    f1vx,f1vy,f1vz)
@@ -319,6 +523,13 @@ module integrator_kv_ev_mod
   double precision, intent(inout) :: timesub
   double precision, intent(in) :: h
   integer :: ipoint,j
+
+#ifdef _OPENACC
+  if(kv_evap_device_eligible())then
+    call rk2sys_KV_ev_device(timesub,h,k)
+    return
+  endif
+#endif
 
   call eval_stage(timesub,k,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
    jetvz,jetve,fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),fev(:,1), &
@@ -369,6 +580,13 @@ module integrator_kv_ev_mod
   double precision, intent(inout) :: timesub
   double precision, intent(in) :: h
   integer :: ipoint,j
+
+#ifdef _OPENACC
+  if(kv_evap_device_eligible())then
+    call rk4sys_KV_ev_device(timesub,h,k)
+    return
+  endif
+#endif
 
   call eval_stage(timesub,k,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
    jetvz,jetve,fxx(:,1),fyy(:,1),fzz(:,1),fst(:,1),fev(:,1), &

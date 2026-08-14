@@ -94,6 +94,19 @@ This executes the OpenACC code path on the host. It does not measure GPU
 performance. See [OpenACC porting status](openacc.md) for the implemented
 kernel, data movement, limitations, and validation expectations.
 
+Two development-only GPU targets isolate force-kernel numerical differences
+by evaluating trusted force routines on the CPU and uploading their results at
+every RK stage:
+
+```sh
+make -C source -f ../build/Makefile nvfortran-openacc-host-forces GPUCC=80
+make -C source -f ../build/Makefile nvfortran-openacc-kv-host-forces GPUCC=80
+```
+
+The first target diagnoses the Maxwell evaporation path and the second the
+Kelvin–Voigt path. Their deliberate per-stage transfers make them unsuitable
+for production or performance measurements.
+
 ## Other targets
 
 | Target | Purpose |
@@ -110,6 +123,8 @@ kernel, data movement, limitations, and validation expectations.
 | `nvfortran-mpi` | MPI CPU build with the HPC SDK NVFORTRAN wrapper |
 | `nvfortran-openacc` | Single-GPU OpenACC build; configurable with `GPUCC` and `CUDA_VERSION` |
 | `nvfortran-openacc-host` | OpenACC code-path validation on the host |
+| `nvfortran-openacc-host-forces` | Development-only Maxwell host-force diagnostic |
+| `nvfortran-openacc-kv-host-forces` | Development-only Kelvin–Voigt host-force diagnostic |
 | `help` | Display available targets |
 | `clean` | Remove objects and module files from `source/` |
 

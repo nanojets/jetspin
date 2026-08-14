@@ -39,6 +39,7 @@ module integrator_mod
  use accelerator_mod, only : accelerator_eom3_stage, &
                          accelerator_maxwell_evap_stage, &
                          accelerator_maxwell_rk4_stage_update, &
+                         accelerator_evap_rk2_final_update, &
                          accelerator_maxwell_rk4_final_update, &
                          accelerator_maxwell_commit_state, &
                          accelerator_compute_posnoinserted_3d, &
@@ -84,6 +85,22 @@ module integrator_mod
  double precision, public, save :: initime = 0.d0
  double precision, public, save :: endtime = 5.d0
  logical, public, save :: lendtime
+
+#ifdef _OPENACC
+ ! Shared persistent workspace for the serial dynamic Maxwell evaporation
+ ! Euler/RK2 paths. RK4 retains its historical local workspace below.
+ double precision, allocatable, save :: maxev_fxx(:,:),maxev_fyy(:,:)
+ double precision, allocatable, save :: maxev_fzz(:,:),maxev_fst(:,:)
+ double precision, allocatable, save :: maxev_fvx(:,:),maxev_fvy(:,:)
+ double precision, allocatable, save :: maxev_fvz(:,:),maxev_fev(:,:)
+ double precision, allocatable, save :: maxev_yxx(:),maxev_yyy(:),maxev_yzz(:)
+ double precision, allocatable, save :: maxev_yst(:),maxev_yvx(:),maxev_yvy(:)
+ double precision, allocatable, save :: maxev_yvz(:),maxev_yev(:)
+ logical, save :: maxev_workspace=.false.
+ logical, save :: maxev_workspace_device_mapped=.false.
+ integer, save :: maxev_workspace_mxnpjet=-1
+ integer, save :: maxev_workspace_mxchunk=-1
+#endif
  
  public :: driver_integrator
  public :: prepare_integrator_random_history
@@ -155,16 +172,17 @@ contains
    .not.ltagbeads .and. .not.lbreakup
  end function small_dynamic_test_eligible
 
- logical function evaporative_dynamic_rk4_eligible()
+ logical function evaporative_dynamic_accelerator_eligible()
   implicit none
-  evaporative_dynamic_rk4_eligible=systype.eq.3 .and. npjet>=inpjet .and. &
+  evaporative_dynamic_accelerator_eligible=integrator>=1 .and. &
+   integrator<=3 .and. systype.eq.3 .and. npjet>=inpjet .and. &
    mxnpjet>=100 .and. mxrank.eq.1 .and. mystart.eq.inpjet .and. &
    myend.eq.npjet .and. linserting .and. lremove .and. levaporation .and. &
    .not.lKVfluid .and. .not.lmultiplestep .and. lairdrag .and. &
    .not.lflorentz .and. .not.luppot .and. nfieldtype.eq.0 .and. &
    .not.ldragvel .and. typemass.eq.0 .and. .not.ltrackbeads .and. &
    .not.ltagbeads .and. .not.lbreakup
- end function evaporative_dynamic_rk4_eligible
+ end function evaporative_dynamic_accelerator_eligible
   
  subroutine driver_integrator(timesub,h,k,dorefinment)
  
@@ -3103,6 +3121,204 @@ contains
   return
   
  end subroutine rk4sys_KV
+
+#ifdef _OPENACC
+ subroutine ensure_maxwell_evap_device_workspace()
+  implicit none
+  logical :: rebuild
+
+  rebuild=.not.maxev_workspace .or. maxev_workspace_mxnpjet<mxnpjet .or. &
+   maxev_workspace_mxchunk<mxchunk .or. persistent_reset_requested
+  if(.not.rebuild)then
+    call accelerator_set_topology_enabled(.true.)
+    call accelerator_set_persistent(.true.)
+    call set_coulomb_accelerator_persistent(.true.)
+    return
+  endif
+
+  if(maxev_workspace)then
+    if(maxev_workspace_device_mapped)then
+!$acc exit data delete(maxev_fxx,maxev_fyy,maxev_fzz,maxev_fst, &
+!$acc& maxev_fvx,maxev_fvy,maxev_fvz,maxev_fev,maxev_yxx,maxev_yyy, &
+!$acc& maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev)
+      maxev_workspace_device_mapped=.false.
+    endif
+    deallocate(maxev_fxx,maxev_fyy,maxev_fzz,maxev_fst)
+    deallocate(maxev_fvx,maxev_fvy,maxev_fvz,maxev_fev)
+    deallocate(maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst)
+    deallocate(maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev)
+    call reset_coulomb_accelerator(coulforce)
+  endif
+
+  allocate(maxev_fxx(0:mxchunk,2),maxev_fyy(0:mxchunk,2))
+  allocate(maxev_fzz(0:mxchunk,2),maxev_fst(0:mxchunk,2))
+  allocate(maxev_fvx(0:mxchunk,2),maxev_fvy(0:mxchunk,2))
+  allocate(maxev_fvz(0:mxchunk,2),maxev_fev(0:mxchunk,2))
+  allocate(maxev_yxx(0:mxnpjet),maxev_yyy(0:mxnpjet))
+  allocate(maxev_yzz(0:mxnpjet),maxev_yst(0:mxnpjet))
+  allocate(maxev_yvx(0:mxnpjet),maxev_yvy(0:mxnpjet))
+  allocate(maxev_yvz(0:mxnpjet),maxev_yev(0:mxnpjet))
+
+  if(.not.accelerator_is_topology_enabled())then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet),jetzz(0:mxnpjet), &
+!$acc& jetst(0:mxnpjet),jetvx(0:mxnpjet),jetvy(0:mxnpjet),jetvz(0:mxnpjet), &
+!$acc& jetvl(0:mxnpjet),jetve(0:mxnpjet),jetce(0:mxnpjet),jetms(0:mxnpjet), &
+!$acc& jetch(0:mxnpjet),jetfr(0:mxnpjet))
+  endif
+!$acc enter data create(maxev_fxx,maxev_fyy,maxev_fzz,maxev_fst, &
+!$acc& maxev_fvx,maxev_fvy,maxev_fvz,maxev_fev,maxev_yxx,maxev_yyy, &
+!$acc& maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev)
+
+  maxev_workspace=.true.
+  maxev_workspace_device_mapped=.true.
+  maxev_workspace_mxnpjet=mxnpjet
+  maxev_workspace_mxchunk=mxchunk
+  persistent_reset_requested=.false.
+  call accelerator_set_topology_enabled(.true.)
+  call accelerator_set_persistent(.true.)
+  call set_coulomb_accelerator_persistent(.true.)
+ end subroutine ensure_maxwell_evap_device_workspace
+
+ subroutine maxwell_evap_device_stage(tstage,k,xs,ys,zs,ss,vxs,vys,vzs,ves, &
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(in) :: tstage
+  double precision, allocatable, intent(inout) :: xs(:),ys(:),zs(:)
+  double precision, allocatable, intent(inout) :: ss(:),vxs(:),vys(:),vzs(:)
+  double precision, allocatable, intent(inout) :: ves(:)
+  double precision, intent(inout) :: fxx(0:),fyy(0:),fzz(0:),fst(0:)
+  double precision, intent(inout) :: fvx(0:),fvy(0:),fvz(0:),fev(0:)
+  integer :: ipoint,j,nactive
+
+  nactive=myend-mystart
+#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+  ! Development oracle: evaluate the complete trusted Maxwell/Yarin EOM on
+  ! the host and upload only its derivatives. State updates remain on device.
+!$acc update self(xs(0:npjet),ys(0:npjet),zs(0:npjet),ss(0:npjet), &
+!$acc& vxs(0:npjet),vys(0:npjet),vzs(0:npjet),ves(0:npjet), &
+!$acc& jetvl(0:npjet),jetms(0:npjet),jetch(0:npjet),jetfr(0:npjet)) if_present
+  call smooth_charge(xs,ys,zs)
+  call compute_posnoinserted(xs,ys,zs)
+  call compute_coulomelec_driver(k,tstage,coulforce,jetvl,xs,ys,zs,ves)
+  j=0
+  do ipoint=mystart,myend
+    call xpsys_ev_maxwell(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
+     coulforce,fxx(j),fyy(j),fzz(j),fst(j),fvx(j),fvy(j),fvz(j),fev(j), &
+     tstage,k)
+    j=j+1
+  enddo
+  call restore_charge()
+!$acc update device(jetch(0:npjet),fxx(0:nactive),fyy(0:nactive), &
+!$acc& fzz(0:nactive),fst(0:nactive),fvx(0:nactive),fvy(0:nactive), &
+!$acc& fvz(0:nactive),fev(0:nactive)) if_present
+#else
+  call smooth_charge(xs,ys,zs)
+  call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution,xs,ys,zs)
+  call compute_coulomelec_driver(k,tstage,coulforce,jetvl,xs,ys,zs,ves)
+  call accelerator_maxwell_evap_stage(mystart,myend,npjet,xs,ys,zs,ss, &
+   vxs,vys,vzs,jetvl,ves,coulforce,jetms,jetch,jetfr, &
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,linserting,linserted,liniperturb, &
+   lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+   yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0,evairv, &
+   evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev)
+  call restore_charge()
+#endif
+ end subroutine maxwell_evap_device_stage
+
+ subroutine finish_maxwell_evap_device_step(timesub,h)
+  implicit none
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call accelerator_maxwell_commit_state(mystart,myend, &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst, &
+   maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve, &
+   counterlpath,ncounterlpath,maxstress,maxstressposx)
+  call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+   jetxx,jetyy,jetzz)
+  call accelerator_mark_device_state(.true.)
+  timesub=timesub+h
+ end subroutine finish_maxwell_evap_device_step
+
+ subroutine eulsys_maxwell_ev_device(timesub,h,k)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call ensure_maxwell_evap_device_workspace()
+  call maxwell_evap_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst, &
+   jetvx,jetvy,jetvz,jetve,maxev_fxx(:,1),maxev_fyy(:,1), &
+   maxev_fzz(:,1),maxev_fst(:,1),maxev_fvx(:,1),maxev_fvy(:,1), &
+   maxev_fvz(:,1),maxev_fev(:,1))
+#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+  ! NVHPC does not reliably resolve an update through the assumed-shape
+  ! column aliases used by maxwell_evap_device_stage.  Name the persistent
+  ! workspace columns explicitly in the development oracle.
+!$acc update device(maxev_fxx(0:myend-mystart,1), &
+!$acc& maxev_fyy(0:myend-mystart,1),maxev_fzz(0:myend-mystart,1), &
+!$acc& maxev_fst(0:myend-mystart,1),maxev_fvx(0:myend-mystart,1), &
+!$acc& maxev_fvy(0:myend-mystart,1),maxev_fvz(0:myend-mystart,1), &
+!$acc& maxev_fev(0:myend-mystart,1))
+#endif
+  call accelerator_maxwell_rk4_stage_update(mystart,myend,h,3, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   maxev_fxx(:,1),maxev_fyy(:,1),maxev_fzz(:,1),maxev_fst(:,1), &
+   maxev_fvx(:,1),maxev_fvy(:,1),maxev_fvz(:,1),maxev_fev(:,1), &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy, &
+   maxev_yvz,maxev_yev,evlim)
+  call finish_maxwell_evap_device_step(timesub,h)
+ end subroutine eulsys_maxwell_ev_device
+
+ subroutine rk2sys_maxwell_ev_device(timesub,h,k)
+  implicit none
+  integer, intent(in) :: k
+  double precision, intent(inout) :: timesub
+  double precision, intent(in) :: h
+
+  call ensure_maxwell_evap_device_workspace()
+  call maxwell_evap_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst, &
+   jetvx,jetvy,jetvz,jetve,maxev_fxx(:,1),maxev_fyy(:,1), &
+   maxev_fzz(:,1),maxev_fst(:,1),maxev_fvx(:,1),maxev_fvy(:,1), &
+   maxev_fvz(:,1),maxev_fev(:,1))
+#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+!$acc update device(maxev_fxx(0:myend-mystart,1), &
+!$acc& maxev_fyy(0:myend-mystart,1),maxev_fzz(0:myend-mystart,1), &
+!$acc& maxev_fst(0:myend-mystart,1),maxev_fvx(0:myend-mystart,1), &
+!$acc& maxev_fvy(0:myend-mystart,1),maxev_fvz(0:myend-mystart,1), &
+!$acc& maxev_fev(0:myend-mystart,1))
+#endif
+  call accelerator_maxwell_rk4_stage_update(mystart,myend,h,3, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   maxev_fxx(:,1),maxev_fyy(:,1),maxev_fzz(:,1),maxev_fst(:,1), &
+   maxev_fvx(:,1),maxev_fvy(:,1),maxev_fvz(:,1),maxev_fev(:,1), &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy, &
+   maxev_yvz,maxev_yev,evlim)
+
+  call maxwell_evap_device_stage(timesub+h,k,maxev_yxx,maxev_yyy,maxev_yzz, &
+   maxev_yst,maxev_yvx,maxev_yvy,maxev_yvz,maxev_yev, &
+   maxev_fxx(:,2),maxev_fyy(:,2),maxev_fzz(:,2),maxev_fst(:,2), &
+   maxev_fvx(:,2),maxev_fvy(:,2),maxev_fvz(:,2),maxev_fev(:,2))
+#if defined(JETSPIN_DEV_HOST_COULOMB_EVAP) || defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY)
+!$acc update device(maxev_fxx(0:myend-mystart,2), &
+!$acc& maxev_fyy(0:myend-mystart,2),maxev_fzz(0:myend-mystart,2), &
+!$acc& maxev_fst(0:myend-mystart,2),maxev_fvx(0:myend-mystart,2), &
+!$acc& maxev_fvy(0:myend-mystart,2),maxev_fvz(0:myend-mystart,2), &
+!$acc& maxev_fev(0:myend-mystart,2))
+#endif
+  call accelerator_evap_rk2_final_update(mystart,myend,h, &
+   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+   maxev_fxx(:,1),maxev_fyy(:,1),maxev_fzz(:,1),maxev_fst(:,1), &
+   maxev_fvx(:,1),maxev_fvy(:,1),maxev_fvz(:,1),maxev_fev(:,1), &
+   maxev_fxx(:,2),maxev_fyy(:,2),maxev_fzz(:,2),maxev_fst(:,2), &
+   maxev_fvx(:,2),maxev_fvy(:,2),maxev_fvz(:,2),maxev_fev(:,2), &
+   maxev_yxx,maxev_yyy,maxev_yzz,maxev_yst,maxev_yvx,maxev_yvy, &
+   maxev_yvz,maxev_yev,evlim)
+  call finish_maxwell_evap_device_step(timesub,h)
+ end subroutine rk2sys_maxwell_ev_device
+#endif
  
  subroutine eulsys_ev(timesub,h,k)
   
@@ -3146,6 +3362,13 @@ contains
   integer :: ipoint,j
   
   logical, save :: lfirstsub=.true.
+
+#ifdef _OPENACC
+  if(evaporative_dynamic_accelerator_eligible())then
+    call eulsys_maxwell_ev_device(timesub,h,k)
+    return
+  endif
+#endif
   
   
 ! check and eventually reallocate the service arrays
@@ -3358,6 +3581,13 @@ contains
   double precision ::  fev
   
   logical, save :: lfirstsub=.true.
+
+#ifdef _OPENACC
+  if(evaporative_dynamic_accelerator_eligible())then
+    call rk2sys_maxwell_ev_device(timesub,h,k)
+    return
+  endif
+#endif
   
 ! check and eventually reallocate the service arrays
   if(doallocate)then
@@ -3714,7 +3944,7 @@ contains
 
   device_rk4_chain=.false.
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE1) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE2) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE4) && !defined(JETSPIN_COMPARE_MAXWELL_STAGES) && !defined(JETSPIN_TRACE_MAXWELL_BEAD) && !defined(JETSPIN_PRINT_MAXWELL_STAGE2)
-  device_rk4_chain=evaporative_dynamic_rk4_eligible()
+  device_rk4_chain=evaporative_dynamic_accelerator_eligible()
 #endif
 
 #ifdef _OPENACC
@@ -3731,7 +3961,7 @@ contains
     persistent_acc=.false.
     persistent_reset_requested=.false.
   endif
-  if(.not.persistent_acc .and. evaporative_dynamic_rk4_eligible() .and. &
+  if(.not.persistent_acc .and. evaporative_dynamic_accelerator_eligible() .and. &
    .not.accelerator_is_topology_enabled())then
 !$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet),jetzz(0:mxnpjet), &
 !$acc& jetst(0:mxnpjet),jetvx(0:mxnpjet),jetvy(0:mxnpjet),jetvz(0:mxnpjet), &
@@ -3743,7 +3973,7 @@ contains
     persistent_acc=.true.
   endif
 
-  if(evaporative_dynamic_rk4_eligible())then
+  if(evaporative_dynamic_accelerator_eligible())then
     call set_coulomb_accelerator_persistent(.true.)
     call accelerator_set_persistent(device_rk4_chain)
     persistent_acc=.true.
@@ -4066,7 +4296,7 @@ contains
       yev(:)=0.d0
       used_acc_maxwell=.false.
 #ifdef _OPENACC
-      if(evaporative_dynamic_rk4_eligible())then
+      if(evaporative_dynamic_accelerator_eligible())then
         call accelerator_maxwell_evap_stage(mystart,myend,npjet,jetxx,jetyy,jetzz,jetst, &
          jetvx,jetvy,jetvz,jetvl,jetve,coulforce,jetms,jetch,jetfr, &
          f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,linserting,linserted,liniperturb, &
@@ -4194,7 +4424,7 @@ contains
       j=0
       used_acc_maxwell=.false.
 #ifdef _OPENACC
-      if(evaporative_dynamic_rk4_eligible())then
+      if(evaporative_dynamic_accelerator_eligible())then
         if(.not.device_rk4_chain)then
 !$acc update device(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet),jetch(0:npjet)) if_present
@@ -4324,7 +4554,7 @@ contains
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz,yev)
 #ifdef _OPENACC
-      if(evaporative_dynamic_rk4_eligible())then
+      if(evaporative_dynamic_accelerator_eligible())then
         if(.not.device_rk4_chain)then
 !$acc update device(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet),jetch(0:npjet)) if_present
@@ -4334,7 +4564,7 @@ contains
       j=0
       used_acc_maxwell=.false.
 #ifdef _OPENACC
-      if(evaporative_dynamic_rk4_eligible())then
+      if(evaporative_dynamic_accelerator_eligible())then
         call accelerator_maxwell_evap_stage(mystart,myend,npjet,yxx,yyy,yzz,yst, &
          yvx,yvy,yvz,jetvl,yev,coulforce,jetms,jetch,jetfr, &
          f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev,linserting,linserted,liniperturb, &
@@ -4462,7 +4692,7 @@ contains
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz,yev)
 #ifdef _OPENACC
-      if(evaporative_dynamic_rk4_eligible())then
+      if(evaporative_dynamic_accelerator_eligible())then
         if(.not.device_rk4_chain)then
 !$acc update device(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet),jetch(0:npjet)) if_present
@@ -4472,7 +4702,7 @@ contains
       j=0
       used_acc_maxwell=.false.
 #ifdef _OPENACC
-      if(evaporative_dynamic_rk4_eligible())then
+      if(evaporative_dynamic_accelerator_eligible())then
         call accelerator_maxwell_evap_stage(mystart,myend,npjet,yxx,yyy,yzz,yst, &
          yvx,yvy,yvz,jetvl,yev,coulforce,jetms,jetch,jetfr, &
          f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev,linserting,linserted,liniperturb, &

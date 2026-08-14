@@ -76,16 +76,67 @@ tests/performance/dynamic/compare.sh \
 
 ## Maxwell evaporation topology
 
-Test 16 starts from 100 beads and combines Maxwell RK4, Yarin evaporation,
-insertion, removal, and forced capacity growth. The standard OpenACC path keeps
-all four stages and their intermediate state on the device. Its 1,000-step A30
-acceptance totals are 111 additions, 122 removals, two reallocations, and 89
-active beads. The final sampled output must also match the saved preceding GPU
-result.
+Test 16 starts from 100 beads and combines Maxwell rheology, Yarin evaporation,
+insertion, removal, and forced capacity growth. The stored input selects RK4;
+variants changing only `integrator` to `1` or `2` validate Euler and RK2. The
+standard OpenACC path keeps each integrator's one, two, or four stages and its
+intermediate state on the device. The 1,000-step CPU and A30 acceptance totals
+for all three integrators are 111 additions, 122 removals, two reallocations,
+and 89 active beads.
 
 With `NVCOMPILER_ACC_NOTIFY=2`, the normal build shows no jet-state, Coulomb,
-or RK-derivative array transfer between stages. Ordinary steps exchange only
-topology decision scalars. New/removed records, selected statistical samples,
-capacity rebinds, and the final checkpoint account for the remaining data
-traffic. The host-force target is a diagnostic exception and deliberately
-copies force data once per stage.
+force, stress, or derivative-array transfer between stages for Euler, RK2, or
+RK4. Ordinary steps exchange only topology decision scalars. New/removed
+records, selected statistical samples, capacity rebinds, and the final
+checkpoint account for the remaining data traffic. The host-force target is a
+diagnostic exception and deliberately copies stage state and derivatives.
+
+Three-step CPU/GPU `statout.dat` and XYZ geometry comparisons for Euler, RK2,
+and RK4 are identical before the first topology event. The CPU crosses the
+first insertion threshold at step 4 and both standard GPU and host-force paths
+at step 5. The bending instability then amplifies roundoff, so aggregate
+topology, pre-event agreement, and the transfer audit are the acceptance
+criteria.
+
+## Kelvin--Voigt evaporation topology
+
+Test 17 repeats the Test 16 workload with Kelvin--Voigt rheology. The stored
+input selects RK4; variants changing only `integrator` to `1` or `2` validate
+Euler and RK2. Every force stage, concentration-dependent evaporation stress,
+direct Coulomb sum, state update, and statistics reduction remains on the
+device. The accepted 1,000-step CPU and A30 totals for all three integrators
+are 111 additions, 122 removals, two reallocations, and 89 active beads.
+
+The standard transfer policy is the same as Test 16: no jet-state, force,
+stress, or RK-derivative array moves between stages. Only topology decisions
+cross every timestep; event records, output samples, capacity rebinds, and the
+final checkpoint cause data movement. The development-only
+`nvfortran-openacc-kv-host-forces` build transfers stage state and derivatives
+to evaluate the trusted CPU equations and is only a numerical-isolation tool.
+
+Three-step CPU/GPU trajectories for Euler and RK2 are identical at
+`rtol=1e-12`, `atol=1e-13` before the first topology event, but their insertion
+threshold occurs at step 4 on the CPU and step 5 on the GPU.
+The bending instability then amplifies the roundoff difference, so topology
+totals and the transfer audit are the acceptance criteria rather than a strict
+pointwise trajectory comparison.
+
+## Reproducible Maxwell/Kelvin--Voigt validation
+
+Run all six deterministic dynamic-evaporation combinations with:
+
+```sh
+module use /opt/nvidia/hpc_sdk/modulefiles
+module load nvhpc/24.3
+tests/performance/dynamic/validate_evaporation.sh
+```
+
+The script builds isolated NVFORTRAN CPU and standard OpenACC executables,
+then runs Tests 16 and 17 with Euler, RK2, and RK4. It checks the accepted
+1,000-step topology totals and performs strict three-step pre-event CPU/GPU
+comparisons. Test 16 additionally requires byte-identical XYZ geometry. The
+standard GPU target is built without either host-force diagnostic macro.
+
+Set `GPUCC` and `CUDA_VERSION` to select another NVIDIA target. Set
+`JETSPIN_DYNAMIC_EVAP_KEEP=1` to retain build logs, inputs, and outputs in the
+reported temporary directory.

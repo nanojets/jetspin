@@ -87,6 +87,15 @@ force data resident in a preallocated 1,280-slot mapping and performs both
 nozzle insertion and collector removal on the device. Its
 versioned event sequence guards subsequent dynamic-port changes.
 
+[Test Case 16](docs/examples/test-16.md) and
+[Test Case 17](docs/examples/test-17.md) extend the persistent GPU path to
+dynamic Maxwell and Kelvin–Voigt evaporation. All three deterministic
+integrators (Euler, RK2, and RK4) keep their force, constitutive, state-update,
+topology, and statistics work device-resident for both rheologies; ordinary
+timesteps return only topology control scalars.
+The paired local validation is automated by
+[`tests/performance/dynamic/validate_evaporation.sh`](tests/performance/dynamic/validate_evaporation.sh).
+
 ## Citation
 
 If JETSPIN contributes to published work, please cite:

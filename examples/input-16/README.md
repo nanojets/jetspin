@@ -3,12 +3,16 @@
 Test Case 16 validates the CPU and OpenACC GPU implementations of dynamic
 insertion, removal, and capacity growth with the Yarin evaporation model.
 It starts with a deliberately small capacity (`points 100`), enables both
-`inserting yes` and `removing yes`, and uses the Maxwell RK4 integrator.
+`inserting yes` and `removing yes`, and uses the Maxwell rheology. The stored
+input selects RK4; changing only `integrator` to `1` or `2` selects the Euler
+or RK2 validation.
 
 The case is intentionally serial and does not enable dynamic refinement, MPI,
-or breakup. In the OpenACC build, the four Maxwell RK4 stages and evaporation
-state remain on the device while insertion, removal, and capacity rebinding
-are active. The 1,000-step acceptance totals are 111 additions, 122 removals,
-two reallocations, and 89 final active beads. CPU and GPU trajectories may
-separate after roundoff-level direct-Coulomb differences are amplified, so use
-these topology totals and the saved same-build GPU result for validation.
+or breakup. In the OpenACC build, the one, two, or four Maxwell stages and the
+evaporation state remain on the device while insertion, removal, and capacity
+rebinding are active. All three deterministic integrators have 1,000-step
+acceptance totals of 111 additions, 122 removals, two reallocations, and 89
+final active beads. CPU and GPU trajectories may separate after roundoff-level
+direct-Coulomb differences are amplified, so use these topology totals,
+pre-event agreement, the transfer audit, and a saved same-build GPU result for
+validation.

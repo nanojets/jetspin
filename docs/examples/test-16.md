@@ -1,32 +1,47 @@
 # Test Case 16: dynamic topology with evaporation
 
 Test Case 16 is the Maxwell reference for the GPU dynamic-topology path
-with the Yarin evaporation model. It uses the Maxwell RK4 integrator, starts
-with 100 beads, enables both nozzle insertion and collector removal, and keeps
-dynamic Akima refinement disabled. The small initial capacity deliberately
-forces host reallocations.
+with the Yarin evaporation model. It starts with 100 beads, enables both
+nozzle insertion and collector removal, and keeps dynamic Akima refinement
+disabled. The stored input selects RK4; changing only `integrator` to `1` or
+`2` selects Euler or RK2. The small initial capacity deliberately forces host
+reallocations.
 
-The complete Maxwell RK4 chain is device-resident: all four force stages,
-three intermediate state constructions, the final weighted update, direct
-Coulomb summation, evaporation, charge smoothing/restoration, and statistics
-run on the GPU. The normal build performs no host/device array transfer between
-RK stages.
+All three deterministic Maxwell chains are device-resident. Euler executes
+one force/stress stage, RK2 executes two, and RK4 executes four. Their
+intermediate and final state updates, direct Coulomb summation, evaporation,
+charge smoothing/restoration, and statistics run on the GPU. The normal build
+performs no host/device state, force, or derivative-array transfer between
+stages.
 
-The NVIDIA A30 run reproduces the CPU topology totals: 111 additions, 122
-removals, two reallocations, and 89 active beads after 1,000 steps. It is also
-bit-for-bit identical to the preceding saved GPU trajectory, which guards the
-porting increments against algorithmic regressions. A CPU/GPU pointwise
-trajectory comparison is intentionally not the acceptance criterion: the
-different direct-Coulomb accumulation order creates roundoff-level changes
-that are amplified by the physical bending instability and by topology
-threshold crossings.
+For Euler, RK2, and RK4, NVIDIA A30 and CPU runs reproduce the same topology
+totals: 111 additions, 122 removals, two reallocations, and 89 active beads
+after 1,000 steps. Three-step pre-event `statout.dat` comparisons have zero
+difference at `rtol=1e-12`, `atol=1e-13`; the complete written XYZ geometry is
+also byte-identical. The first insertion occurs at step 4 on the CPU and step
+5 on the GPU. A full pointwise trajectory comparison after that threshold is
+intentionally not the acceptance criterion: the different direct-Coulomb
+accumulation order creates roundoff-level changes that are amplified by the
+physical bending instability and later topology crossings.
 
 A transfer audit with all development macros disabled shows only topology
 decision scalars on ordinary timesteps. Bead records are transferred on actual
 insertion/removal and output events; complete active arrays are synchronized
 only for the two capacity reallocations and the final checkpoint. The
 `nvfortran-openacc-host-forces` target remains available solely to isolate
-forces during development and must not be used for performance measurements.
+forces during development. For Euler and RK2 it reproduces the CPU pre-event
+XYZ geometry and the accepted topology totals while leaving state updates on
+the GPU. Its deliberate per-stage transfers make it unsuitable for
+performance measurements.
+
+Run the complete Maxwell and Kelvin--Voigt deterministic validation with:
+
+```sh
+tests/performance/dynamic/validate_evaporation.sh
+```
+
+The script builds independent NVFORTRAN CPU and standard OpenACC executables;
+the GPU build does not enable the diagnostic host-force macros.
 
 - [Input file](../../examples/input-16/input.dat)
 - [Input-file notes](../../examples/input-16/README.md)

@@ -6,6 +6,7 @@ BINROOT = ../execute
 FC=undefined
 FFLAGS=undefined
 FPPFLAGS ?= -cpp
+FPPFLAGS_EXTRA ?=
 LDFLAGS=undefined
 TYPE=undefined
 EX=main.x
@@ -113,7 +114,7 @@ gfortran-mpi:
 nvfortran:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -c" \
-	FPPFLAGS="-Mpreprocess" \
+	FPPFLAGS="-Mpreprocess $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O3 -o" \
 	ACCOBJ=host_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -121,7 +122,7 @@ nvfortran:
 nvfortran-mpi:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(MPIFC) \
 	FFLAGS="-O3 -c" \
-	FPPFLAGS="-Mpreprocess" \
+	FPPFLAGS="-Mpreprocess $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O3 -o" \
 	ACCOBJ=host_accelerator_mod.o TYPE=mpi \
 	EX=$(EX) BINROOT=$(BINROOT) mpi
@@ -129,7 +130,18 @@ nvfortran-mpi:
 nvfortran-openacc:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
-	FPPFLAGS="-Mpreprocess" \
+	FPPFLAGS="-Mpreprocess $(FPPFLAGS_EXTRA)" \
+	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
+	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
+
+# Development-only OpenACC build: keep the accelerator executable, but force
+# the evaporative Coulomb and Maxwell geometric force evaluations through the
+# trusted host implementations for on-the-fly numerical isolation.
+nvfortran-openacc-host-forces:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
+	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_COULOMB_EVAP -DJETSPIN_DEV_HOST_MAXWELL_GEOMETRY $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -137,7 +149,7 @@ nvfortran-openacc:
 nvfortran-openacc-host:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O2 -acc=host -Minfo=accel -c" \
-	FPPFLAGS="-Mpreprocess" \
+	FPPFLAGS="-Mpreprocess $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O2 -acc=host -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -272,7 +284,7 @@ eom_mod.o: eom_mod.f90
 	$(FC) $(FFLAGS) eom_mod.f90
 	
 eom_ev_mod.o: eom_ev_mod.f90
-	$(FC) $(FFLAGS) eom_ev_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) eom_ev_mod.f90
 	
 driver_eom_mod.o: driver_eom_mod.f90
 	$(FC) $(FFLAGS) driver_eom_mod.f90
@@ -281,7 +293,7 @@ integrator_mod.o:integrator_mod.f90 statistic_mod.o
 	$(FC) $(FFLAGS) $(FPPFLAGS) integrator_mod.f90
 
 integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90
-	$(FC) $(FFLAGS) integrator_kv_ev_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) integrator_kv_ev_mod.f90
 
 statistic_mod.o:statistic_mod.f90
 	$(FC) $(FFLAGS) $(FPPFLAGS) statistic_mod.f90

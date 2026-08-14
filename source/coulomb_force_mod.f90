@@ -13,7 +13,11 @@
  use version_mod,           only : idrank,mxrank,sum_world_darr, &
                              max_world_darr,sum_world_iarr
 #ifdef _OPENACC
- use accelerator_mod,       only : accelerator_enabled
+ use accelerator_mod,       only : accelerator_enabled, &
+                             accelerator_coulomb_evap_3d, &
+                             accelerator_coulomb_evap_compare, &
+                             accelerator_smooth_charge_3d, &
+                             accelerator_restore_charge
 #endif
  use profiling_mod,         only : profiling_start,profiling_stop, &
                              prof_coulomb
@@ -154,6 +158,15 @@ end subroutine reset_coulomb_accelerator
    optional ::  yzz
   
   double precision :: dtemp
+
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+  if(accelerator_persistent_mode .and. levaporation .and. systype==3 .and. &
+   mxrank==1 .and. .not.lmultiplestep)then
+    call accelerator_smooth_charge_3d(npjet,linserted,thresolution,dresolution, &
+     yxx,yyy,yzz,jetch)
+    return
+  endif
+#endif
  
   if(.not.linserted)then
     select case(systype)
@@ -185,6 +198,14 @@ end subroutine reset_coulomb_accelerator
 !***********************************************************************
  
   implicit none
+
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+  if(accelerator_persistent_mode .and. levaporation .and. systype==3 .and. &
+   mxrank==1 .and. .not.lmultiplestep)then
+    call accelerator_restore_charge(npjet,linserted,jetch)
+    return
+  endif
+#endif
  
   if(.not.linserted)then
     jetch(npjet-1)=smoothedcharge
@@ -229,7 +250,14 @@ end subroutine reset_coulomb_accelerator
   call allocate_coulcrossec(mxnpjet)
   if(levaporation)then
     if(.not. present(yve))call error(19)
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+    if(.not.(accelerator_persistent_mode .and. systype==3 .and. &
+     mxrank==1 .and. .not.lmultiplestep))then
+#endif
     call compute_crosssec(yxx,yyy,yzz,yve,coulcrossec)
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+    endif
+#endif
     select case(systype)
     case(1)
       if(lmultiplestep)then
@@ -308,6 +336,14 @@ end subroutine reset_coulomb_accelerator
       imiomax=mxnpjet
       if(ncoulforce/=0)then
         if(imiomax>ncoulforce)then
+#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef _OPENACC
+          if(accelerator_coulomb_mapped)then
+!$acc exit data delete(ycf)
+          endif
+#endif
+          accelerator_coulomb_mapped=.false.
+#endif
           deallocate(ycf)
           ncoulforce=imiomax
           allocate(ycf(0:ncoulforce,1))
@@ -376,6 +412,13 @@ end subroutine reset_coulomb_accelerator
       imiomax=mxnpjet
       if(ncoulforce/=0)then
         if(imiomax>ncoulforce)then
+#ifdef _OPENACC
+          if(accelerator_coulomb_mapped)then
+!$acc exit data delete(ycf)
+!$acc exit data delete(coulcrossec)
+          endif
+          accelerator_coulomb_mapped=.false.
+#endif
           deallocate(ycf)
           ncoulforce=imiomax
           allocate(ycf(0:ncoulforce,3))
@@ -455,6 +498,21 @@ end subroutine reset_coulomb_accelerator
       
       imiomax=(ncoulforce+1)*3
       call sum_world_darr(ycf,imiomax)
+#ifdef _OPENACC
+      ! Charge smoothing updates jetch on the host before every RK stage.
+      ! Refresh the persistent device copy used by the Maxwell EOM kernel.
+!$acc update device(jetch(0:ncoulforce))
+#endif
+#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef _OPENACC
+      if(.not.accelerator_coulomb_mapped)then
+!$acc enter data copyin(ycf(0:ncoulforce,1:3))
+        accelerator_coulomb_mapped=.true.
+      else
+!$acc update device(ycf(0:ncoulforce,1:3))
+      endif
+#endif
+#endif
       
   end select
        
@@ -528,11 +586,11 @@ end subroutine reset_coulomb_accelerator
   double precision :: dx,dy,dz,distance,denominator,coefficient
   double precision :: forcex,forcey,forcez,xmirror
 
-!$acc data copyin(yxx(0:ncoulforce),yyy(0:ncoulforce), &
+!$acc data present_or_copyin(yxx(0:ncoulforce),yyy(0:ncoulforce), &
 !$acc& yzz(0:ncoulforce),jetch(0:ncoulforce),jetms(0:ncoulforce), &
 !$acc& jetfr(0:ncoulforce),yvl(0:ncoulforce), &
 !$acc& coulcrossec(0:ncoulforce)) &
-!$acc& copy(ycf(0:ncoulforce,1:3))
+!$acc& present_or_copy(ycf(0:ncoulforce,1:3))
   if(accelerator_persistent_mode)then
 !$acc parallel loop gang vector
     do ipoint=inpjet,npjet
@@ -1720,8 +1778,11 @@ end subroutine reset_coulomb_accelerator
   double precision, parameter :: onethird=1.d0/(dsqrt(3.d0))
   
   integer :: ipoint,jpoint,imiomax
+  character(len=8) :: coulomb_diag
   double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,dtemp,cp,cmass1, &
    cmass2
+  double precision, allocatable :: ycf_host_ref(:,:)
+  double precision :: ycf_sync_max
   double precision, dimension(3) :: versor,utang
   
   
@@ -1787,6 +1848,14 @@ end subroutine reset_coulomb_accelerator
       imiomax=mxnpjet
       if(ncoulforce/=0)then
         if(imiomax>ncoulforce)then
+#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef _OPENACC
+          if(accelerator_coulomb_mapped)then
+!$acc exit data delete(ycf)
+          endif
+          accelerator_coulomb_mapped=.false.
+#endif
+#endif
           deallocate(ycf)
           ncoulforce=imiomax
           allocate(ycf(0:ncoulforce,3))
@@ -1797,6 +1866,31 @@ end subroutine reset_coulomb_accelerator
       endif
       
       ycf(0:ncoulforce,1:3)=0.d0
+
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP)
+      if(accelerator_enabled .and. mxrank==1 .and. .not.lmultiplestep)then
+        if(accelerator_persistent_mode .and. &
+         .not.accelerator_coulomb_mapped)then
+!$acc enter data create(ycf(0:ncoulforce,1:3), &
+!$acc& coulcrossec(0:ncoulcrossec))
+          accelerator_coulomb_mapped=.true.
+        endif
+        call accelerator_coulomb_evap_3d(npjet,inpjet,ycf,yxx,yyy,yzz, &
+         yvl,yve,jetms,jetch,jetfr,coulcrossec,Q,lmirror,h,ldcutoff,dcutoff, &
+         linserting,linserted,icrossec)
+        call get_environment_variable('JETSPIN_COULOMB_DIAGNOSTIC',coulomb_diag)
+        if(trim(coulomb_diag)=='1')then
+#ifdef _OPENACC
+!$acc update self(ycf(0:npjet,1:3),coulcrossec(0:npjet), &
+!$acc& yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yve(0:npjet), &
+!$acc& jetch(0:npjet),jetfr(0:npjet))
+#endif
+          call accelerator_coulomb_evap_compare(npjet,inpjet,ycf,yxx,yyy,yzz, &
+           yvl,yve,jetms,jetch,jetfr,coulcrossec,Q,lmirror,h,ldcutoff,dcutoff)
+        endif
+        return
+      endif
+#endif
       
 !     compute the Coulomb forces
       do ipoint=inpjet+idrank,npjet,mxrank
@@ -1858,6 +1952,28 @@ end subroutine reset_coulomb_accelerator
       
       imiomax=(ncoulforce+1)*3
       call sum_world_darr(ycf,imiomax)
+#ifdef JETSPIN_DEV_HOST_COULOMB_EVAP
+#ifdef _OPENACC
+!$acc update device(jetch(0:ncoulforce))
+      ! The developing host-Coulomb path must refresh the persistent device
+      ! buffer before the Maxwell force kernel consumes it.  The old update
+      ! existed only in the non-evaporative routine, leaving stale GPU forces.
+      ! Development isolation deliberately remaps the force array on every
+      ! call.  This handles reallocations and guarantees that no stale device
+      ! allocation can survive a host-side topology change.
+      if(accelerator_coulomb_mapped)then
+!$acc exit data delete(ycf)
+      endif
+!$acc enter data copyin(ycf(0:ncoulforce,1:3))
+      accelerator_coulomb_mapped=.true.
+      allocate(ycf_host_ref(0:ncoulforce,1:3))
+      ycf_host_ref=ycf
+!$acc update self(ycf(0:ncoulforce,1:3))
+      ycf_sync_max=maxval(abs(ycf-ycf_host_ref))
+      write(*,'(a,1pe14.6)') 'DEV host-Coulomb ycf remap max diff: ',ycf_sync_max
+      deallocate(ycf_host_ref)
+#endif
+#endif
       
   end select
        

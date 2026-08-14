@@ -2,7 +2,7 @@
 module integrator_mod
 
  use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
- 
+
 !***********************************************************************
 !     
 !     JETSPIN module containing integrators data routines
@@ -23,7 +23,10 @@ module integrator_mod
  use nanojet_mod,       only : doallocate,mxnpjet,npjet,inpjet,systype,&
                          jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetst, &
                          jetms,jetch,jetvl,compute_posnoinserted, &
-                         jetpt,lKVfluid,levaporation,jetve,evlim,jetfr, &
+                         jetpt,lKVfluid,levaporation,jetve,jetce,evlim,jetfr, &
+                         cp0,Bev,mev,tev, &
+                         evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity, &
+                         resolution, &
                          linserted,liniperturb,lairdrag,lflorentz,luppot, &
                          pfreq,consistency,findex,yieldstress,att,fve,gr, &
                          ks,li,v,velext,linserting,lremove,lmultiplestep, &
@@ -34,7 +37,19 @@ module integrator_mod
                          prof_rk_update
 #ifdef _OPENACC
  use accelerator_mod, only : accelerator_eom3_stage, &
+                         accelerator_maxwell_evap_stage, &
+                         accelerator_maxwell_rk4_stage_update, &
+                         accelerator_maxwell_rk4_final_update, &
+                         accelerator_maxwell_commit_state, &
+                         accelerator_compute_posnoinserted_3d, &
+                         accelerator_mark_device_state, &
+                         accelerator_device_state_is_current, &
+                         accelerator_maxwell_evap_stress_3d, &
+                         rheology_maxwell, &
                          accelerator_set_persistent, &
+                         accelerator_is_persistent, &
+                         accelerator_set_topology_enabled, &
+                         accelerator_is_topology_enabled, &
                          accelerator_rk4_final_statistics, &
                          accelerator_euler_final_statistics, &
                          accelerator_rk2_final_statistics, &
@@ -52,7 +67,11 @@ module integrator_mod
                          reset_coulomb_accelerator
  use driver_eom_mod,    only : xpsys,xpsys_pos,xpsys_stress, &
                          xpsys_KV_pos_v,xpsys_KV_st,xpsys_ev, &
+                         xpsys_ev_maxwell, &
                          xpsys_pos_ev,xpsys_stress_ev
+ use support_functions_mod, only : compute_geometry,compute_tangetversor, &
+                          compute_curvcenter,compute_curvature, &
+                          project_veltangetversor
 
  implicit none
 
@@ -135,6 +154,17 @@ contains
    .not.ldragvel .and. typemass.eq.0 .and. .not.ltrackbeads .and. &
    .not.ltagbeads .and. .not.lbreakup
  end function small_dynamic_test_eligible
+
+ logical function evaporative_dynamic_rk4_eligible()
+  implicit none
+  evaporative_dynamic_rk4_eligible=systype.eq.3 .and. npjet>=inpjet .and. &
+   mxnpjet>=100 .and. mxrank.eq.1 .and. mystart.eq.inpjet .and. &
+   myend.eq.npjet .and. linserting .and. lremove .and. levaporation .and. &
+   .not.lKVfluid .and. .not.lmultiplestep .and. lairdrag .and. &
+   .not.lflorentz .and. .not.luppot .and. nfieldtype.eq.0 .and. &
+   .not.ldragvel .and. typemass.eq.0 .and. .not.ltrackbeads .and. &
+   .not.ltagbeads .and. .not.lbreakup
+ end function evaporative_dynamic_rk4_eligible
   
  subroutine driver_integrator(timesub,h,k,dorefinment)
  
@@ -164,7 +194,6 @@ contains
     
   call set_chunk(inpjet,npjet)
   call set_mxchunk(mxnpjet)
-  
   if(lKVfluid)then
     select case(integrator)
       case(1)
@@ -205,17 +234,29 @@ contains
       end select 
     endif
   endif
+
+#ifdef _OPENACC
+! The persistent accelerator path leaves the integrated state on the device.
+! Host/debug fallbacks keep the host arrays authoritative instead.
+  call accelerator_mark_device_state(accelerator_is_persistent())
+#endif
   
   ltestinst=.false.
-  do i=inpjet,npjet
-    if(ieee_is_nan(dcos(jetxx(i))))ltestinst=.true.
-    if(ieee_is_nan(dcos(jetyy(i))))ltestinst=.true.
-    if(ieee_is_nan(dcos(jetzz(i))))ltestinst=.true.
-    if(ieee_is_nan(dcos(jetst(i))))ltestinst=.true.
-    if(ieee_is_nan(dcos(jetvx(i))))ltestinst=.true.
-    if(ieee_is_nan(dcos(jetvy(i))))ltestinst=.true.
-    if(ieee_is_nan(dcos(jetvz(i))))ltestinst=.true.
-  enddo
+#ifdef _OPENACC
+  if(.not.accelerator_device_state_is_current())then
+#endif
+    do i=inpjet,npjet
+      if(ieee_is_nan(dcos(jetxx(i))))ltestinst=.true.
+      if(ieee_is_nan(dcos(jetyy(i))))ltestinst=.true.
+      if(ieee_is_nan(dcos(jetzz(i))))ltestinst=.true.
+      if(ieee_is_nan(dcos(jetst(i))))ltestinst=.true.
+      if(ieee_is_nan(dcos(jetvx(i))))ltestinst=.true.
+      if(ieee_is_nan(dcos(jetvy(i))))ltestinst=.true.
+      if(ieee_is_nan(dcos(jetvz(i))))ltestinst=.true.
+    enddo
+#ifdef _OPENACC
+  endif
+#endif
   
   if(ltestinst)then
     call warning(67,dble(k))
@@ -1124,7 +1165,7 @@ contains
       call sum_world_darr(yst,npjet+1,jetst)
       call sum_world_darr(yvx,npjet+1,jetvx)
       timesub=timesub+h
-    case default
+  case default
 !     1°step
       call smooth_charge(jetxx,jetyy,jetzz)
       call compute_posnoinserted(jetxx,jetyy,jetzz)
@@ -2583,6 +2624,7 @@ contains
   double precision, intent(in) :: h
   
   logical, save :: lfirstsub=.true.
+  logical, save :: persistent_acc=.false.
   
   double precision ::  fxx
   double precision ::  fyy
@@ -3419,8 +3461,12 @@ contains
           jetvl,jetve,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,fev, &
           timesub,k)
         f1xx(j)=fxx
+        f1yy(j)=fyy
+        f1zz(j)=fzz
         f1st(j)=fst
         f1vx(j)=fvx
+        f1vy(j)=fvy
+        f1vz(j)=fvz
         f1ev(j)=fev
         yxx(ipoint) = jetxx(ipoint) + h*f1xx(j)
         yst(ipoint) = jetst(ipoint) + h*f1st(j)
@@ -3568,9 +3614,9 @@ contains
   return
       
  end subroutine rk2sys_ev
- 
+
  subroutine rk4sys_ev(timesub,h,k)
-  
+
 !***********************************************************************
 !     
 !     JETSPIN subroutine for integrating the system by the 
@@ -3583,6 +3629,8 @@ contains
 !***********************************************************************
   
   implicit none
+  logical, save :: persistent_acc=.false.
+  logical, save :: workspace_device_mapped=.false.
   
 ! service arrays
   double precision, allocatable, dimension (:), save ::  f1xx
@@ -3640,9 +3688,81 @@ contains
   double precision ::  fvy
   double precision ::  fvz
   double precision ::  fev
-  
+  logical :: used_acc_maxwell,device_rk4_chain
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGE1
+  logical, save :: stage1_reported=.false.
+  double precision :: stage1_max_abs,stage1_max_rel,stage1_ref,stage1_gpu
+#endif
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGE4
+  logical, save :: stage4_reported=.false.
+  double precision :: stage4_max_abs,stage4_max_rel,stage4_ref,stage4_gpu
+  double precision :: stage4_comp(8)
+#endif
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGE2
+  double precision :: compare_comp(8)
+#endif
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGES
+  integer :: compare_stage
+  integer :: compare_ipoint
+  double precision :: compare_abs,compare_ref,compare_gpu
+  double precision :: compare_local
+  double precision :: geom_down,geom_up,geom_curv,geom_center(3),geom_norm(3),geom_tan(3)
+  logical :: geom_straight
+  double precision :: diag_cmass,diag_field,diag_axial,diag_drag,diag_veltan,diag_lup
+  double precision :: compare_comp(8)
+#endif
+
+  device_rk4_chain=.false.
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE1) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE2) && !defined(JETSPIN_COMPARE_MAXWELL_STAGE4) && !defined(JETSPIN_COMPARE_MAXWELL_STAGES) && !defined(JETSPIN_TRACE_MAXWELL_BEAD) && !defined(JETSPIN_PRINT_MAXWELL_STAGE2)
+  device_rk4_chain=evaporative_dynamic_rk4_eligible()
+#endif
+
+#ifdef _OPENACC
+  if(persistent_reset_requested)then
+    if(doallocate .and. workspace_device_mapped)then
+!$acc exit data delete(yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+!$acc& f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+!$acc& f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
+!$acc& f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev)
+      workspace_device_mapped=.false.
+    endif
+    call reset_coulomb_accelerator(coulforce)
+    persistent_acc=.false.
+    persistent_reset_requested=.false.
+  endif
+  if(.not.persistent_acc .and. evaporative_dynamic_rk4_eligible() .and. &
+   .not.accelerator_is_topology_enabled())then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet),jetzz(0:mxnpjet), &
+!$acc& jetst(0:mxnpjet),jetvx(0:mxnpjet),jetvy(0:mxnpjet),jetvz(0:mxnpjet), &
+!$acc& jetvl(0:mxnpjet),jetve(0:mxnpjet),jetce(0:mxnpjet),jetms(0:mxnpjet), &
+!$acc& jetch(0:mxnpjet),jetfr(0:mxnpjet))
+    call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(device_rk4_chain)
+    call accelerator_set_topology_enabled(.true.)
+    persistent_acc=.true.
+  endif
+
+  if(evaporative_dynamic_rk4_eligible())then
+    call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(device_rk4_chain)
+    persistent_acc=.true.
+  endif
+
+#endif
+
 ! check and eventually reallocate the service arrays
   if(doallocate)then
+#ifdef _OPENACC
+    if(workspace_device_mapped)then
+!$acc exit data delete(yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+!$acc& f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+!$acc& f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
+!$acc& f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev)
+      workspace_device_mapped=.false.
+    endif
+#endif
     select case(systype)
     case(1)
       if(.not.lfirstsub)then
@@ -3771,9 +3891,19 @@ contains
       allocate(yvz(0:mxnpjet))
       allocate(yev(0:mxnpjet))
     end select
+#ifdef _OPENACC
+    if((persistent_acc .or. accelerator_is_topology_enabled()) .and. systype/=1)then
+!$acc enter data create(yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+!$acc& f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+!$acc& f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
+!$acc& f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev)
+      workspace_device_mapped=.true.
+      persistent_acc=.true.
+    endif
+#endif
     lfirstsub=.false.
   endif
-  
 ! select the proper system type
   select case(systype)
     case(1)
@@ -3787,12 +3917,16 @@ contains
       yvx(:)=0.d0
       yev(:)=0.d0
       do ipoint=mystart,myend
-        call xpsys_ev(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+        call xpsys_ev_maxwell(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
           jetvl,jetve,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,fev, &
           timesub,k)
         f1xx(j)=fxx
+        f1yy(j)=fyy
+        f1zz(j)=fzz
         f1st(j)=fst
         f1vx(j)=fvx
+        f1vy(j)=fvy
+        f1vz(j)=fvz
         f1ev(j)=fev
         yxx(ipoint) = jetxx(ipoint) + 0.5d0*h*f1xx(j)
         yst(ipoint) = jetst(ipoint) + 0.5d0*h*f1st(j)
@@ -3909,7 +4043,16 @@ contains
     case default
 !     1°step
       call smooth_charge(jetxx,jetyy,jetzz)
+#ifdef _OPENACC
+      if(device_rk4_chain)then
+        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+         jetxx,jetyy,jetzz)
+      else
+#endif
       call compute_posnoinserted(jetxx,jetyy,jetzz)
+#ifdef _OPENACC
+      endif
+#endif
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl, &
        jetxx,jetyy,jetzz,jetve)
       j=0
@@ -3921,6 +4064,82 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
+      used_acc_maxwell=.false.
+#ifdef _OPENACC
+      if(evaporative_dynamic_rk4_eligible())then
+        call accelerator_maxwell_evap_stage(mystart,myend,npjet,jetxx,jetyy,jetzz,jetst, &
+         jetvx,jetvy,jetvz,jetvl,jetve,coulforce,jetms,jetch,jetfr, &
+         f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,linserting,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0,evairv, &
+         evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev)
+        if(.not.device_rk4_chain)then
+!$acc update self(f1xx(0:npjet),f1yy(0:npjet),f1zz(0:npjet),f1st(0:npjet), &
+!$acc& f1vx(0:npjet),f1vy(0:npjet),f1vz(0:npjet),f1ev(0:npjet)) if_present
+        endif
+        used_acc_maxwell=.true.
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGE1
+        stage1_max_abs=0.d0
+        stage1_max_rel=0.d0
+        do ipoint=mystart,myend
+          j=ipoint-mystart
+          call xpsys_ev_maxwell(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+           jetvl,jetve,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,timesub,k)
+          stage1_gpu=f1xx(j); stage1_ref=fxx
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+          stage1_gpu=f1yy(j); stage1_ref=fyy
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+          stage1_gpu=f1zz(j); stage1_ref=fzz
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+          stage1_gpu=f1st(j); stage1_ref=fst
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+          stage1_gpu=f1vx(j); stage1_ref=fvx
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+          stage1_gpu=f1vy(j); stage1_ref=fvy
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+          stage1_gpu=f1vz(j); stage1_ref=fvz
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+          stage1_gpu=f1ev(j); stage1_ref=fev
+          stage1_max_abs=max(stage1_max_abs,abs(stage1_gpu-stage1_ref))
+          stage1_max_rel=max(stage1_max_rel,abs(stage1_gpu-stage1_ref)/max(1.d-30,abs(stage1_ref)))
+        enddo
+        if(.not.stage1_reported)then
+          write(*,'(a,1pe14.6,a,1pe14.6)') 'Maxwell stage-1 CPU/GPU derivative check: max_abs=', &
+           stage1_max_abs,' max_rel=',stage1_max_rel
+          stage1_reported=.true.
+        endif
+#endif
+      endif
+#endif
+      if(device_rk4_chain)then
+#ifdef _OPENACC
+        call accelerator_maxwell_rk4_stage_update(mystart,myend,h,1, &
+         jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+         f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+         yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+#endif
+      elseif(used_acc_maxwell)then
+        j=0
+        do ipoint=mystart,myend
+          yxx(ipoint) = jetxx(ipoint) + 0.5d0*h*f1xx(j)
+          yyy(ipoint) = jetyy(ipoint) + 0.5d0*h*f1yy(j)
+          yzz(ipoint) = jetzz(ipoint) + 0.5d0*h*f1zz(j)
+          yst(ipoint) = jetst(ipoint) + 0.5d0*h*f1st(j)
+          yvx(ipoint) = jetvx(ipoint) + 0.5d0*h*f1vx(j)
+          yvy(ipoint) = jetvy(ipoint) + 0.5d0*h*f1vy(j)
+          yvz(ipoint) = jetvz(ipoint) + 0.5d0*h*f1vz(j)
+          yev(ipoint) = jetve(ipoint) + 0.5d0*h*f1ev(j)
+          if((yev(ipoint)/jetvl(ipoint))<evlim)yev(ipoint)=jetvl(ipoint)*evlim
+          j=j+1
+        enddo
+      else
       do ipoint=mystart,myend
         call xpsys_ev(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,&
          jetvl,jetve,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,fev, &
@@ -3946,27 +4165,106 @@ contains
         endif
         j=j+1
       enddo
+      endif
       call restore_charge()
-      call sum_world_darr(yxx,npjet+1)
-      call sum_world_darr(yyy,npjet+1)
-      call sum_world_darr(yzz,npjet+1)
-      call sum_world_darr(yst,npjet+1)
-      call sum_world_darr(yvx,npjet+1)
-      call sum_world_darr(yvy,npjet+1)
-      call sum_world_darr(yvz,npjet+1)
-      call sum_world_darr(yev,npjet+1)
+      if(.not.device_rk4_chain)then
+        call sum_world_darr(yxx,npjet+1)
+        call sum_world_darr(yyy,npjet+1)
+        call sum_world_darr(yzz,npjet+1)
+        call sum_world_darr(yst,npjet+1)
+        call sum_world_darr(yvx,npjet+1)
+        call sum_world_darr(yvy,npjet+1)
+        call sum_world_darr(yvz,npjet+1)
+        call sum_world_darr(yev,npjet+1)
+      endif
 !     2°step
       call smooth_charge(yxx,yyy,yzz)
+#ifdef _OPENACC
+      if(device_rk4_chain)then
+        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+         yxx,yyy,yzz)
+      else
+#endif
       call compute_posnoinserted(yxx,yyy,yzz)
+#ifdef _OPENACC
+      endif
+#endif
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz,yev)
+      j=0
+      used_acc_maxwell=.false.
+#ifdef _OPENACC
+      if(evaporative_dynamic_rk4_eligible())then
+        if(.not.device_rk4_chain)then
+!$acc update device(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
+!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet),jetch(0:npjet)) if_present
+        endif
+        call accelerator_maxwell_evap_stage(mystart,myend,npjet,yxx,yyy,yzz,yst, &
+         yvx,yvy,yvz,jetvl,yev,coulforce,jetms,jetch,jetfr, &
+         f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev,linserting,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0,evairv, &
+         evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev)
+        if(.not.device_rk4_chain)then
+!$acc update self(f2xx(0:npjet),f2yy(0:npjet),f2zz(0:npjet),f2st(0:npjet), &
+!$acc& f2vx(0:npjet),f2vy(0:npjet),f2vz(0:npjet),f2ev(0:npjet)) if_present
+        endif
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGE2
+        compare_comp(:)=0.d0
+        do ipoint=mystart,myend
+          if(ipoint<=mystart .or. ipoint>=npjet)cycle
+          j=ipoint-mystart
+          call xpsys_ev_maxwell(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,jetvl,yev,coulforce, &
+           fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,timesub+h/2.d0,k)
+          compare_comp(1)=max(compare_comp(1),abs(f2xx(j)-fxx))
+          compare_comp(2)=max(compare_comp(2),abs(f2yy(j)-fyy))
+          compare_comp(3)=max(compare_comp(3),abs(f2zz(j)-fzz))
+          compare_comp(4)=max(compare_comp(4),abs(f2st(j)-fst))
+          compare_comp(5)=max(compare_comp(5),abs(f2vx(j)-fvx))
+          compare_comp(6)=max(compare_comp(6),abs(f2vy(j)-fvy))
+          compare_comp(7)=max(compare_comp(7),abs(f2vz(j)-fvz))
+          compare_comp(8)=max(compare_comp(8),abs(f2ev(j)-fev))
+        enddo
+        write(*,'(a,8(1pe12.4,1x))') 'Stage-2 abs components [xx yy zz st vx vy vz ev]=',compare_comp
+#ifdef JETSPIN_DEV_HOST_MAXWELL_GEOMETRY
+        j=50-mystart
+        call xpsys_ev_maxwell(50,yxx,yyy,yzz,yst,yvx,yvy,yvz,jetvl,yev,coulforce, &
+         fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,timesub+h/2.d0,k)
+        write(*,'(a,8(1pe14.6,1x))') 'Stage-2 host-fallback bead50 [gpu cpu]=',f2xx(j),fxx,f2yy(j),fyy,f2zz(j),fzz,f2vx(j),fvx
+#endif
+#endif
+#ifdef JETSPIN_TRACE_MAXWELL_BEAD
+        if(timesub==0.d0)write(*,'(a,8(1pe14.6,1x))')'TRACE S2 GPU=',f2xx(50),f2yy(50),f2zz(50),f2st(50),f2vx(50),f2vy(50),f2vz(50),f2ev(50)
+#endif
+#ifdef JETSPIN_PRINT_MAXWELL_STAGE2
+        if(timesub==0.d0)write(*,'(a,8(1pe14.6,1x))')'Stage-2 GPU bead50=', &
+         f2xx(50),f2yy(50),f2zz(50),f2st(50),f2vx(50),f2vy(50),f2vz(50),f2ev(50)
+#endif
+        used_acc_maxwell=.true.
+      endif
+#endif
+      if(.not.used_acc_maxwell)then
       j=0
       do ipoint=mystart,myend
         call xpsys_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
          jetvl,yev,coulforce,f2xx(j),f2yy(j),f2zz(j),f2st(j), &
          f2vx(j),f2vy(j),f2vz(j),f2ev(j),timesub+h/2.d0,k)
-        j=j+1
+         j=j+1
       enddo
+#ifdef JETSPIN_TRACE_MAXWELL_BEAD
+      if(timesub==0.d0)write(*,'(a,8(1pe14.6,1x))')'TRACE S2 CPU=',f2xx(50),f2yy(50),f2zz(50),f2st(50),f2vx(50),f2vy(50),f2vz(50),f2ev(50)
+#endif
+      endif
+#ifdef JETSPIN_PRINT_MAXWELL_STAGE2
+      if(timesub==0.d0 .and. .not.used_acc_maxwell)write(*,'(a,8(1pe14.6,1x))')'Stage-2 CPU bead50=', &
+       f2xx(50),f2yy(50),f2zz(50),f2st(50),f2vx(50),f2vy(50),f2vz(50),f2ev(50)
+#endif
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_MAXWELL_EVAP)
+      if(.not.used_acc_maxwell)call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
+       jetfr,f2ev,f2st,yxx,yyy,yzz,yvx,yvy,yvz,yst,jetvl,yev, &
+       evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev, &
+       consistency,findex,yieldstress)
+#endif
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -3976,6 +4274,15 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+      call accelerator_maxwell_rk4_stage_update(mystart,myend,h,2,jetxx,jetyy,jetzz,jetst, &
+       jetvx,jetvy,jetvz,jetve,jetvl,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+       yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+      if(.not.device_rk4_chain)then
+!$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
+!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet)) if_present
+      endif
+#else
       do ipoint=mystart,myend
         yxx(ipoint) = jetxx(ipoint) + 0.5d0*h*f2xx(j)
         yyy(ipoint) = jetyy(ipoint) + 0.5d0*h*f2yy(j)
@@ -3990,27 +4297,112 @@ contains
         endif
         j=j+1
       enddo
+#endif
       call restore_charge()
-      call sum_world_darr(yxx,npjet+1)
-      call sum_world_darr(yyy,npjet+1)
-      call sum_world_darr(yzz,npjet+1)
-      call sum_world_darr(yst,npjet+1)
-      call sum_world_darr(yvx,npjet+1)
-      call sum_world_darr(yvy,npjet+1)
-      call sum_world_darr(yvz,npjet+1)
-      call sum_world_darr(yev,npjet+1)
+      if(.not.device_rk4_chain)then
+        call sum_world_darr(yxx,npjet+1)
+        call sum_world_darr(yyy,npjet+1)
+        call sum_world_darr(yzz,npjet+1)
+        call sum_world_darr(yst,npjet+1)
+        call sum_world_darr(yvx,npjet+1)
+        call sum_world_darr(yvy,npjet+1)
+        call sum_world_darr(yvz,npjet+1)
+        call sum_world_darr(yev,npjet+1)
+      endif
 !     3°step
       call smooth_charge(yxx,yyy,yzz)
+#ifdef _OPENACC
+      if(device_rk4_chain)then
+        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+         yxx,yyy,yzz)
+      else
+#endif
       call compute_posnoinserted(yxx,yyy,yzz)
+#ifdef _OPENACC
+      endif
+#endif
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz,yev)
+#ifdef _OPENACC
+      if(evaporative_dynamic_rk4_eligible())then
+        if(.not.device_rk4_chain)then
+!$acc update device(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
+!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet),jetch(0:npjet)) if_present
+        endif
+      endif
+#endif
       j=0
+      used_acc_maxwell=.false.
+#ifdef _OPENACC
+      if(evaporative_dynamic_rk4_eligible())then
+        call accelerator_maxwell_evap_stage(mystart,myend,npjet,yxx,yyy,yzz,yst, &
+         yvx,yvy,yvz,jetvl,yev,coulforce,jetms,jetch,jetfr, &
+         f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev,linserting,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0,evairv, &
+         evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev)
+        if(.not.device_rk4_chain)then
+!$acc update self(f3xx(0:npjet),f3yy(0:npjet),f3zz(0:npjet),f3st(0:npjet), &
+!$acc& f3vx(0:npjet),f3vy(0:npjet),f3vz(0:npjet),f3ev(0:npjet)) if_present
+        endif
+#ifdef JETSPIN_TRACE_MAXWELL_BEAD
+        if(timesub==0.d0)write(*,'(a,8(1pe14.6,1x))')'TRACE S3 GPU=',f3xx(50),f3yy(50),f3zz(50),f3st(50),f3vx(50),f3vy(50),f3vz(50),f3ev(50)
+#endif
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGES
+        compare_abs=0.d0
+        compare_ipoint=-1
+        compare_comp(:)=0.d0
+        do ipoint=mystart,myend
+          j=ipoint-mystart
+          call xpsys_ev_maxwell(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,jetvl,yev,coulforce, &
+           fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,timesub+h/2.d0,k)
+          compare_local=max(abs(f3xx(j)-fxx),abs(f3yy(j)-fyy),abs(f3zz(j)-fzz), &
+           abs(f3st(j)-fst),abs(f3vx(j)-fvx),abs(f3vy(j)-fvy),abs(f3vz(j)-fvz),abs(f3ev(j)-fev))
+          if(compare_local>compare_abs)compare_ipoint=ipoint
+          compare_abs=max(compare_abs,compare_local)
+          compare_comp(1)=max(compare_comp(1),abs(f3xx(j)-fxx)); compare_comp(2)=max(compare_comp(2),abs(f3yy(j)-fyy))
+          compare_comp(3)=max(compare_comp(3),abs(f3zz(j)-fzz)); compare_comp(4)=max(compare_comp(4),abs(f3st(j)-fst))
+          compare_comp(5)=max(compare_comp(5),abs(f3vx(j)-fvx)); compare_comp(6)=max(compare_comp(6),abs(f3vy(j)-fvy))
+          compare_comp(7)=max(compare_comp(7),abs(f3vz(j)-fvz)); compare_comp(8)=max(compare_comp(8),abs(f3ev(j)-fev))
+        enddo
+        write(*,'(a,1pe14.6)') 'Maxwell stage-3 max absolute CPU/GPU difference: ',compare_abs
+        write(*,'(a,8(1pe12.4,1x))') 'Stage-3 abs components [xx yy zz st vx vy vz ev]=',compare_comp
+        if(compare_ipoint>=0)write(*,'(a,i6,6(1pe14.6,1x))') 'Stage-3 max bead/state [i x y z yve yvl ycf-x]=',compare_ipoint,yxx(compare_ipoint),yyy(compare_ipoint),yzz(compare_ipoint),yev(compare_ipoint),jetvl(compare_ipoint),coulforce(compare_ipoint,1)
+        if(compare_ipoint>0 .and. compare_ipoint<npjet)then
+          call compute_geometry(compare_ipoint,yxx,yyy,yzz,geom_down,geom_up)
+          call compute_tangetversor(compare_ipoint,yxx,yyy,yzz,geom_tan,geom_up)
+          call compute_curvcenter(compare_ipoint,yxx,yyy,yzz,geom_center,geom_straight)
+          call compute_curvature(compare_ipoint,yxx,yyy,yzz,geom_curv,geom_norm,geom_center,geom_straight)
+          write(*,'(a,9(1pe14.6,1x),1x,l1)') 'Stage-3 CPU geometry down up tanx tany tanz curv nx ny nz straight=',geom_down,geom_up,geom_tan(1),geom_tan(2),geom_tan(3),geom_curv,geom_norm(1),geom_norm(2),geom_norm(3),geom_straight
+          diag_cmass=yev(compare_ipoint)/jetvl(compare_ipoint)
+          call project_veltangetversor(compare_ipoint,yvx,yvy,yvz,diag_veltan,geom_tan)
+          diag_lup=geom_up
+          diag_field=jetch(compare_ipoint)/(jetms(compare_ipoint)*diag_cmass)*v
+          diag_axial=(fve/(jetms(compare_ipoint)*diag_cmass))*yev(compare_ipoint)*yst(compare_ipoint)/diag_lup
+          diag_drag=(att/(jetms(compare_ipoint)*diag_cmass))*(abs(diag_lup)**0.905d0)*(abs(diag_veltan)**1.19d0)
+          write(*,'(a,8(1pe14.6,1x))') 'Stage-3 CPU fvx terms [total gravity field axial drag coulomb]=',fvx,gr,diag_field,diag_axial,diag_drag,coulforce(compare_ipoint,1),diag_cmass,diag_veltan
+        endif
+#endif
+        used_acc_maxwell=.true.
+      endif
+#endif
+      if(.not.used_acc_maxwell)then
       do ipoint=mystart,myend
         call xpsys_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
          jetvl,yev,coulforce,f3xx(j),f3yy(j),f3zz(j),f3st(j), &
          f3vx(j),f3vy(j),f3vz(j),f3ev(j),timesub+h/2.d0,k)
-        j=j+1
+         j=j+1
       enddo
+#ifdef JETSPIN_TRACE_MAXWELL_BEAD
+      if(timesub==0.d0)write(*,'(a,8(1pe14.6,1x))')'TRACE S3 CPU=',f3xx(50),f3yy(50),f3zz(50),f3st(50),f3vx(50),f3vy(50),f3vz(50),f3ev(50)
+#endif
+      endif
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_MAXWELL_EVAP)
+      if(.not.used_acc_maxwell)call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
+       jetfr,f3ev,f3st,yxx,yyy,yzz,yvx,yvy,yvz,yst,jetvl,yev, &
+       evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev, &
+       consistency,findex,yieldstress)
+#endif
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -4020,6 +4412,15 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+      call accelerator_maxwell_rk4_stage_update(mystart,myend,h,3,jetxx,jetyy,jetzz,jetst, &
+       jetvx,jetvy,jetvz,jetve,jetvl,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
+       yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+      if(.not.device_rk4_chain)then
+!$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
+!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet)) if_present
+      endif
+#else
       do ipoint=mystart,myend
         yxx(ipoint) = jetxx(ipoint) + h*f3xx(j)
         yyy(ipoint) = jetyy(ipoint) + h*f3yy(j)
@@ -4034,27 +4435,136 @@ contains
         endif
         j=j+1
       enddo
+#endif
       call restore_charge()
-      call sum_world_darr(yxx,npjet+1)
-      call sum_world_darr(yyy,npjet+1)
-      call sum_world_darr(yzz,npjet+1)
-      call sum_world_darr(yst,npjet+1)
-      call sum_world_darr(yvx,npjet+1)
-      call sum_world_darr(yvy,npjet+1)
-      call sum_world_darr(yvz,npjet+1)
-      call sum_world_darr(yev,npjet+1)
+      if(.not.device_rk4_chain)then
+        call sum_world_darr(yxx,npjet+1)
+        call sum_world_darr(yyy,npjet+1)
+        call sum_world_darr(yzz,npjet+1)
+        call sum_world_darr(yst,npjet+1)
+        call sum_world_darr(yvx,npjet+1)
+        call sum_world_darr(yvy,npjet+1)
+        call sum_world_darr(yvz,npjet+1)
+        call sum_world_darr(yev,npjet+1)
+      endif
 !     4°step
       call smooth_charge(yxx,yyy,yzz)
+#ifdef _OPENACC
+      if(device_rk4_chain)then
+        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+         yxx,yyy,yzz)
+      else
+#endif
       call compute_posnoinserted(yxx,yyy,yzz)
+#ifdef _OPENACC
+      endif
+#endif
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz,yev)
+#ifdef _OPENACC
+      if(evaporative_dynamic_rk4_eligible())then
+        if(.not.device_rk4_chain)then
+!$acc update device(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
+!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet),jetch(0:npjet)) if_present
+        endif
+      endif
+#endif
       j=0
+      used_acc_maxwell=.false.
+#ifdef _OPENACC
+      if(evaporative_dynamic_rk4_eligible())then
+        call accelerator_maxwell_evap_stage(mystart,myend,npjet,yxx,yyy,yzz,yst, &
+         yvx,yvy,yvz,jetvl,yev,coulforce,jetms,jetch,jetfr, &
+         f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev,linserting,linserted,liniperturb, &
+         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+         yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0,evairv, &
+         evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev)
+        if(.not.device_rk4_chain)then
+!$acc update self(f4xx(0:npjet),f4yy(0:npjet),f4zz(0:npjet),f4st(0:npjet), &
+!$acc& f4vx(0:npjet),f4vy(0:npjet),f4vz(0:npjet),f4ev(0:npjet)) if_present
+        endif
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGES
+        compare_abs=0.d0
+        compare_comp(:)=0.d0
+        do ipoint=mystart,myend
+          j=ipoint-mystart
+          call xpsys_ev_maxwell(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,jetvl,yev,coulforce, &
+           fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,timesub+h/2.d0,k)
+          compare_abs=max(compare_abs,abs(f4xx(j)-fxx),abs(f4yy(j)-fyy),abs(f4zz(j)-fzz), &
+           abs(f4st(j)-fst),abs(f4vx(j)-fvx),abs(f4vy(j)-fvy),abs(f4vz(j)-fvz),abs(f4ev(j)-fev))
+          compare_comp(1)=max(compare_comp(1),abs(f4xx(j)-fxx)); compare_comp(2)=max(compare_comp(2),abs(f4yy(j)-fyy))
+          compare_comp(3)=max(compare_comp(3),abs(f4zz(j)-fzz)); compare_comp(4)=max(compare_comp(4),abs(f4st(j)-fst))
+          compare_comp(5)=max(compare_comp(5),abs(f4vx(j)-fvx)); compare_comp(6)=max(compare_comp(6),abs(f4vy(j)-fvy))
+          compare_comp(7)=max(compare_comp(7),abs(f4vz(j)-fvz)); compare_comp(8)=max(compare_comp(8),abs(f4ev(j)-fev))
+        enddo
+        write(*,'(a,1pe14.6)') 'Maxwell stage-4 max absolute CPU/GPU difference: ',compare_abs
+        write(*,'(a,8(1pe12.4,1x))') 'Stage-4 abs components [xx yy zz st vx vy vz ev]=',compare_comp
+#endif
+        used_acc_maxwell=.true.
+#ifdef JETSPIN_COMPARE_MAXWELL_STAGE4
+        stage4_max_abs=0.d0
+        stage4_max_rel=0.d0
+        stage4_comp(:)=0.d0
+        do ipoint=mystart,myend
+          j=ipoint-mystart
+          call xpsys_ev_maxwell(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
+           jetvl,yev,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,timesub+h,k)
+          stage4_gpu=f4xx(j); stage4_ref=fxx
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(1)=max(stage4_comp(1),abs(stage4_gpu-stage4_ref))
+          stage4_gpu=f4yy(j); stage4_ref=fyy
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(2)=max(stage4_comp(2),abs(stage4_gpu-stage4_ref))
+          stage4_gpu=f4zz(j); stage4_ref=fzz
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(3)=max(stage4_comp(3),abs(stage4_gpu-stage4_ref))
+          stage4_gpu=f4st(j); stage4_ref=fst
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(4)=max(stage4_comp(4),abs(stage4_gpu-stage4_ref))
+          stage4_gpu=f4vx(j); stage4_ref=fvx
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(5)=max(stage4_comp(5),abs(stage4_gpu-stage4_ref))
+          stage4_gpu=f4vy(j); stage4_ref=fvy
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(6)=max(stage4_comp(6),abs(stage4_gpu-stage4_ref))
+          stage4_gpu=f4vz(j); stage4_ref=fvz
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(7)=max(stage4_comp(7),abs(stage4_gpu-stage4_ref))
+          stage4_gpu=f4ev(j); stage4_ref=fev
+          stage4_max_abs=max(stage4_max_abs,abs(stage4_gpu-stage4_ref))
+          stage4_max_rel=max(stage4_max_rel,abs(stage4_gpu-stage4_ref)/max(1.d-30,abs(stage4_ref)))
+          stage4_comp(8)=max(stage4_comp(8),abs(stage4_gpu-stage4_ref))
+        enddo
+        if(.not.stage4_reported)then
+          write(*,'(a,1pe14.6,a,1pe14.6)') 'Maxwell stage-4 CPU/GPU derivative check: max_abs=', &
+           stage4_max_abs,' max_rel=',stage4_max_rel
+          write(*,'(a,8(1pe12.4,1x))') 'Stage-4 abs components [xx yy zz st vx vy vz ev]=',stage4_comp
+          stage4_reported=.true.
+        endif
+#endif
+      endif
+#endif
+      if(.not.used_acc_maxwell)then
       do ipoint=mystart,myend
         call xpsys_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz, &
          jetvl,yev,coulforce,f4xx(j),f4yy(j),f4zz(j),f4st(j), &
          f4vx(j),f4vy(j),f4vz(j),f4ev(j),timesub+h,k)
-        j=j+1
+         j=j+1
       enddo
+      endif
+#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_MAXWELL_EVAP)
+      if(.not.used_acc_maxwell)call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
+       jetfr,f4ev,f4st,yxx,yyy,yzz,yvx,yvy,yvz,yst,jetvl,yev, &
+       evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev, &
+       consistency,findex,yieldstress)
+#endif
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -4064,6 +4574,16 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_MAXWELL_GEOMETRY) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+      call accelerator_maxwell_rk4_final_update(mystart,myend,h,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+       f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+       f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev, &
+       yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+      if(.not.device_rk4_chain)then
+!$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
+!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet)) if_present
+      endif
+#else
       do ipoint=mystart,myend
         yxx(ipoint) = jetxx(ipoint) + (h/6.d0)*(f1xx(j)+ &
          2.d0*(f2xx(j)+f3xx(j))+f4xx(j))
@@ -4086,17 +4606,33 @@ contains
         endif
         j=j+1
       enddo
+#endif
       call restore_charge()
-      call sum_world_darr(yxx,npjet+1,jetxx)
-      call sum_world_darr(yyy,npjet+1,jetyy)
-      call sum_world_darr(yzz,npjet+1,jetzz)
-      call sum_world_darr(yst,npjet+1,jetst)
-      call sum_world_darr(yvx,npjet+1,jetvx)
-      call sum_world_darr(yvy,npjet+1,jetvy)
-      call sum_world_darr(yvz,npjet+1,jetvz)
-      call sum_world_darr(yev,npjet+1,jetve)
+      if(device_rk4_chain)then
+#ifdef _OPENACC
+        call accelerator_maxwell_commit_state(mystart,myend, &
+         yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+         jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve, &
+         counterlpath,ncounterlpath,maxstress,maxstressposx)
+        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+         jetxx,jetyy,jetzz)
+        call accelerator_mark_device_state(.true.)
+#endif
+      else
+        call sum_world_darr(yxx,npjet+1,jetxx)
+        call sum_world_darr(yyy,npjet+1,jetyy)
+        call sum_world_darr(yzz,npjet+1,jetzz)
+        call sum_world_darr(yst,npjet+1,jetst)
+        call sum_world_darr(yvx,npjet+1,jetvx)
+        call sum_world_darr(yvy,npjet+1,jetvy)
+        call sum_world_darr(yvz,npjet+1,jetvz)
+        call sum_world_darr(yev,npjet+1,jetve)
+        call compute_posnoinserted(jetxx,jetyy,jetzz)
+#ifdef _OPENACC
+        call accelerator_mark_device_state(.false.)
+#endif
+      endif
       timesub=timesub+h
-      call compute_posnoinserted(jetxx,jetyy,jetzz)
   end select
   
   return

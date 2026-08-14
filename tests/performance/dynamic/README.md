@@ -73,3 +73,19 @@ Compare a new paired run with:
 tests/performance/dynamic/compare.sh \
   CPU/run.log GPU/run.log CPU/statout.dat GPU/statout.dat
 ```
+
+## Maxwell evaporation topology
+
+Test 16 starts from 100 beads and combines Maxwell RK4, Yarin evaporation,
+insertion, removal, and forced capacity growth. The standard OpenACC path keeps
+all four stages and their intermediate state on the device. Its 1,000-step A30
+acceptance totals are 111 additions, 122 removals, two reallocations, and 89
+active beads. The final sampled output must also match the saved preceding GPU
+result.
+
+With `NVCOMPILER_ACC_NOTIFY=2`, the normal build shows no jet-state, Coulomb,
+or RK-derivative array transfer between stages. Ordinary steps exchange only
+topology decision scalars. New/removed records, selected statistical samples,
+capacity rebinds, and the final checkpoint account for the remaining data
+traffic. The host-force target is a diagnostic exception and deliberately
+copies force data once per stage.

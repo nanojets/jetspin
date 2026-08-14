@@ -27,11 +27,13 @@ module statistic_mod
  use electric_field_mod,    only : actual_form_electric_field
 #ifdef _OPENACC
  use accelerator_mod,       only : accelerator_is_persistent, &
+                             accelerator_is_topology_enabled, &
                              accelerator_store_statistics, &
                              accelerator_update_host_state, &
                              accelerator_update_host_statistics, &
                              accelerator_update_device_statistics, &
                              accelerator_update_host_point, &
+                             accelerator_update_host_evaporation_point, &
                              accelerator_host_state_is_current
 #endif
  
@@ -191,11 +193,12 @@ module statistic_mod
 
   complete_host_state=.true.
 #ifdef _OPENACC
-  if(accelerator_is_persistent())then
+  if(accelerator_is_persistent() .or. accelerator_is_topology_enabled())then
     complete_host_state=accelerator_host_state_is_current(nstepsub)
     if(.not.complete_host_state)then
       call accelerator_update_host_point(inpjet,jetxx,jetyy,jetzz, &
        jetst,jetvx,jetvy,jetvz)
+      if(levaporation)call accelerator_update_host_evaporation_point(inpjet,jetve)
     endif
     call accelerator_update_host_statistics(counterlpath, &
      ncounterlpath,maxstress,maxstressposx)
@@ -216,7 +219,11 @@ module statistic_mod
     jetcr(inpjet)=dsqrt(jetvl(inpjet)/(selected_length*Pi))
   endif
   if(levaporation)then
-    call compute_crosssec(jetxx,jetyy,jetzz,jetve,jetce)
+    if(complete_host_state)then
+      call compute_crosssec(jetxx,jetyy,jetzz,jetve,jetce)
+    else
+      jetce(inpjet)=dsqrt(jetve(inpjet)/(selected_length*Pi))
+    endif
   endif
   call compute_current_init(tempint)
   call compute_mass_init(tempint)
@@ -356,7 +363,7 @@ module statistic_mod
   nstepsubold=nstepsub
   nmulstepdoneold=nmulstepdone
 #ifdef _OPENACC
-  if(accelerator_is_persistent())then
+  if(accelerator_is_persistent() .or. accelerator_is_topology_enabled())then
     call accelerator_update_device_statistics(counterlpath, &
      ncounterlpath,maxstress,maxstressposx)
   endif

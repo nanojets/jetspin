@@ -1,0 +1,29 @@
+\section{Test Case 16: dynamic Maxwell evaporation on the GPU}
+
+Test Case 16 exercises Maxwell rheology, Yarin evaporation, nozzle insertion,
+collector removal, and capacity growth in one serial three-dimensional run.
+It starts with 100 beads and deliberately retains the small initial capacity
+so that the 1,000-step run invokes the reallocation path.
+
+With target \texttt{nvfortran-openacc}, all four RK4 force evaluations, the
+three intermediate state updates, the final weighted update, direct Coulomb
+summation, evaporation, charge smoothing and restoration, nozzle geometry,
+and the final statistics reductions execute on the GPU.  No state, force, or
+RK derivative array is transferred between stages.  Ordinary timesteps return
+only the insertion and removal decision scalars.  Bead records are moved for
+actual topology or output events, while the complete active state is
+synchronized for capacity reallocation and the final checkpoint.
+
+On an NVIDIA A30 the accepted 1,000-step topology contains 111 additions, 122
+removals, two reallocations, and 89 final active beads, equal to the CPU event
+totals.  The saved final OpenACC output is bit-for-bit identical to the
+preceding GPU reference.  A pointwise CPU/GPU trajectory is not used as the
+acceptance criterion: the target-centric direct Coulomb kernel has a different
+floating-point summation order, and the physical bending instability amplifies
+the resulting roundoff-level perturbation.
+
+The development-only \texttt{nvfortran-openacc-host-forces} target evaluates
+the evaporative Coulomb and Maxwell geometric forces on the host and copies
+them back on every call.  It is useful for isolating numerical differences,
+but its transfers make it unsuitable for production or performance runs.  The
+input is stored in \texttt{examples/input-16/input.dat}.

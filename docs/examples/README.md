@@ -16,5 +16,14 @@ Test Case 13 is the separate dynamic-topology baseline with active nozzle
 insertion and collector removal. Test Case 14 extends it to 1,500 initial
 beads with bounded persistent capacity.
 Test Case 15 is a CPU-side forced `reallocate_jet` check.
+Test Case 16 validates the complete device-resident Maxwell RK4 chain with
+dynamic insertion, removal, reallocation, and evaporation enabled.
+Test Case 17 is the corresponding Kelvin–Voigt evaporation baseline.
+Test Case 18 is the high-resolution Maxwell evaporation performance probe
+with 800 points over 16 cm.
+Test Case 19 is the corresponding high-resolution Kelvin–Voigt evaporation
+performance probe.
+Test Case 20 is a fixed-topology stochastic Platen Maxwell evaporation
+baseline for serial/MPI verification.
 
 See the individual pages in this directory for the purpose of each case.

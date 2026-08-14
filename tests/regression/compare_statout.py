@@ -4,7 +4,7 @@
 import argparse
 import math
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 EXACT_COLUMNS = {"nstep", "n", "nref"}
 
@@ -53,7 +53,9 @@ def read_table(path: Path) -> Tuple[List[str], List[List[float]]]:
     return columns, rows
 
 
-def compare(reference: Path, actual: Path, rtol: float, atol: float) -> None:
+def compare(reference: Path, actual: Path, rtol: float, atol: float,
+            ignored_columns: Optional[Set[str]] = None) -> None:
+    ignored_columns = ignored_columns or set()
     ref_columns, ref_rows = read_table(reference)
     got_columns, got_rows = read_table(actual)
     if got_columns != ref_columns:
@@ -70,6 +72,8 @@ def compare(reference: Path, actual: Path, rtol: float, atol: float) -> None:
     failures = []  # type: List[str]
     for row_index, (ref_row, got_row) in enumerate(zip(ref_rows, got_rows), 1):
         for column, expected, actual_value in zip(ref_columns, ref_row, got_row):
+            if column in ignored_columns:
+                continue
             if column in EXACT_COLUMNS:
                 if actual_value != expected:
                     failures.append(
@@ -112,10 +116,15 @@ def main() -> int:
     parser.add_argument("actual", type=Path)
     parser.add_argument("--rtol", type=float, default=1.0e-7)
     parser.add_argument("--atol", type=float, default=1.0e-10)
+    parser.add_argument(
+        "--ignore-columns", default="",
+        help="comma-separated columns to omit from numerical comparison",
+    )
     args = parser.parse_args()
     if args.rtol < 0.0 or args.atol < 0.0:
         parser.error("tolerances must be non-negative")
-    compare(args.reference, args.actual, args.rtol, args.atol)
+    ignored = {item.strip() for item in args.ignore_columns.split(",") if item.strip()}
+    compare(args.reference, args.actual, args.rtol, args.atol, ignored)
     return 0
 
 

@@ -79,6 +79,12 @@ an NVIDIA device is unavailable and is not a GPU performance build. Before a
 device run, \texttt{nvidia-smi} and \texttt{nvaccelinfo} should both
 confirm that the selected GPU is visible.
 
+Target \texttt{nvfortran-openacc-host-forces} is a development-only GPU build
+that evaluates the evaporative Coulomb and Maxwell geometric forces with the
+trusted host routines and copies their results back to the device. It is useful
+for numerical isolation, but the per-stage transfers make it unsuitable for
+performance measurements or production simulations.
+
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
 binary executable file can be run in the \textit{execute} sub-directory.
@@ -117,6 +123,8 @@ with NVIDIA Fortran; OpenACC offloading is disabled.\tabularnewline
 nvfortran-openacc & compile a single-GPU OpenACC executable; configure the
 device with \texttt{GPUCC} and \texttt{CUDA\_VERSION}.\tabularnewline
 nvfortran-openacc-host & compile the OpenACC code path for host-only validation.\tabularnewline
+nvfortran-openacc-host-forces & compile the GPU path with development-only
+host force evaluation and per-stage transfers.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
 \hline
 \end{tabular}

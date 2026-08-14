@@ -775,13 +775,20 @@
   if(lairdrag)then
     call project_veltangetversor(ipoint,yvx,yvy,yvz,veltangent, &
      tangentversorup)
-    attt=att/(jetms(ipoint)*cmass)
-    Lit=Li/(jetms(ipoint)*cmass)
-    factor4=attt*(dabs(beadlenup)**0.905d0)*(dabs(veltangent)**1.19d0)
-    factor5=factor3*beadlenup*curvature*(veltangent**2.d0)
-    fvx = fvx-factor4*tangentversorup(1)-Lit*factor5*vcurvature(1)
-    fvy = fvy-factor4*tangentversorup(2)-Lit*factor5*vcurvature(2)
-    fvz = fvz-factor4*tangentversorup(3)-Lit*factor5*vcurvature(3)
+        attt=att/(jetms(ipoint)*cmass)
+        Lit=Li/(jetms(ipoint)*cmass)
+        factor4=attt*(dabs(beadlenup)**0.905d0)*(dabs(veltangent)**1.19d0)
+        factor5=factor3*beadlenup*curvature*(veltangent**2.d0)
+    ! Apply the air-drag term in the ordinary 3-D Maxwell evaporation
+    ! branch.  It was historically computed above but accidentally omitted
+    ! from fvx/fvy/fvz, making the CPU reference inconsistent with the GPU
+    ! accelerator path.
+    fvx = fvx-factor4*tangentversorup(1)
+    fvy = fvy-factor4*tangentversorup(2)
+    fvz = fvz-factor4*tangentversorup(3)
+    fvx = fvx-Lit*factor5*vcurvature(1)
+    fvy = fvy-Lit*factor5*vcurvature(2)
+    fvz = fvz-Lit*factor5*vcurvature(3)
   endif
   
   return
@@ -1921,5 +1928,3 @@
  end subroutine kv_ev_stress_rate
 
  end module eom_ev_mod
-
-

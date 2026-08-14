@@ -35,6 +35,7 @@
  public :: xpsys_KV_pos_v
  public :: xpsys_KV_st
  public :: xpsys_ev
+ public :: xpsys_ev_maxwell
  public :: xpsys_pos_ev
  public :: xpsys_stress_ev
  
@@ -347,7 +348,20 @@
   return
   
  end subroutine xpsys_ev
- 
+
+ subroutine xpsys_ev_maxwell(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
+       fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,timesub,k)
+  implicit none
+  integer, intent(in) :: ipoint,k
+  double precision, allocatable, intent(in) :: yxx(:),yyy(:),yzz(:),yst(:)
+  double precision, allocatable, intent(in) :: yvx(:),yvy(:),yvz(:),yvl(:),yve(:)
+  double precision, allocatable, intent(in) :: ycf(:,:)
+  double precision, intent(inout) :: fxx,fyy,fzz,fst,fvx,fvy,fvz,fve
+  double precision, intent(in) :: timesub
+  call xpsys_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf, &
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,timesub,k)
+ end subroutine xpsys_ev_maxwell
+
  subroutine xpsys_pos_ev(ipoint,yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve, &
        ycf,fxx,fyy,fzz,fve,timesub,k) 
        
@@ -442,5 +456,3 @@
  end subroutine xpsys_stress_ev
 
  end module driver_eom_mod
-
-

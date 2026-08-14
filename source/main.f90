@@ -48,11 +48,22 @@
   use accelerator_mod, only : accelerator_prepare, &
                          accelerator_update_host_state, &
                          accelerator_update_host_capacity_state, &
+                         accelerator_update_host_evaporation_state, &
                          accelerator_release_jet_capacity, &
+                         accelerator_release_evaporation_capacity, &
                          accelerator_is_persistent, &
+                         accelerator_is_topology_enabled, &
+                         accelerator_rebind_topology, &
+                         accelerator_rebind_evaporation, &
+                         accelerator_update_device_topology_state, &
+                         accelerator_update_device_evaporation_state, &
+                         accelerator_device_state_is_current, &
                          accelerator_remove_bead, &
+                         accelerator_update_host_removed_evaporation, &
                          accelerator_update_device_removed, &
-                         accelerator_add_bead
+                         accelerator_update_device_removed_evaporation, &
+                         accelerator_add_bead, &
+                         accelerator_update_device_added_evaporation
 #endif
   use profiling_mod, only : profiling_initialize,profiling_reset, &
                        profiling_start,profiling_stop,profiling_report, &
@@ -66,7 +77,7 @@
                        remove_jetbead,erase_jetbead,lengthscale, &
                        pdbrescale,lreadrest,lKVfluid,levaporation, &
                        jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-                       jetms,jetch,jetvl,jetfr,topology_add_total, &
+                         jetms,jetch,jetvl,jetve,jetce,jetfr,topology_add_total, &
                        topology_remove_total,nremtrack,naddtrack,reallocate_total, &
                        h,mxnpjet, &
                        resolution,dresolution,thresolution,ivelocity,istress, &
@@ -236,25 +247,39 @@
       call driver_integrator(mytime,tstep,nstep,ldorefinment)
     endif
     call profiling_stop(prof_integrator)
+#ifdef _OPENACC
+    if(.not.accelerator_device_state_is_current())then
+      call accelerator_update_device_topology_state(npjet,jetxx,jetyy,jetzz,jetst, &
+       jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+      if(levaporation)call accelerator_update_device_evaporation_state(npjet,jetve,jetce)
+    endif
+#endif
     
 !   check if a new bead should be added and/or removed
     call profiling_start(prof_add_bead)
     lresize=.false.
 #ifdef _OPENACC
-    if(accelerator_is_persistent() .and. linserting)then
+    if((accelerator_is_persistent() .or. accelerator_is_topology_enabled()) .and. linserting)then
       timedeposition=timedeposition+tstep
-      call accelerator_add_bead(npjet,mxnpjet,linserted,ladd,lresize,resolution, &
+       call accelerator_add_bead(npjet,mxnpjet,linserted,ladd,lresize,resolution, &
        dresolution,thresolution,ivelocity,istress,imassa,icharge,ivolume, &
        jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
        jetms,jetch,jetvl,jetfr)
+      if(ladd .and. levaporation) &
+       call accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
       if(lresize)then
         call accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz, &
          jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
-        call accelerator_release_jet_capacity(jetxx,jetyy,jetzz,jetst, &
+        if(levaporation)call accelerator_update_host_evaporation_state(npjet,jetve,jetce)
+        if(levaporation)call accelerator_release_evaporation_capacity(mxnpjet,jetve,jetce)
+        call accelerator_release_jet_capacity(mxnpjet,jetxx,jetyy,jetzz,jetst, &
          jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
         npjet=npjet+1
         call reallocate_jet()
         npjet=npjet-1
+        call accelerator_rebind_topology(mxnpjet,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+         jetms,jetch,jetvl,jetfr)
+        if(levaporation)call accelerator_rebind_evaporation(mxnpjet,jetve,jetce)
         call reset_persistent_integrator()
       endif
       if(ladd)then
@@ -271,9 +296,12 @@
     call profiling_stop(prof_add_bead)
     call profiling_start(prof_remove_bead)
 #ifdef _OPENACC
-    if(accelerator_is_persistent() .and. .not.lresize .and. linserting .and. lremove)then
+    if((accelerator_is_persistent() .or. accelerator_is_topology_enabled()) .and. &
+       .not.lresize .and. linserting .and. lremove)then
       call accelerator_remove_bead(inpjet,npjet,h,jetxx,jetyy,jetzz,jetst, &
        jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nremoved,lrem)
+      if(lrem .and. levaporation) &
+       call accelerator_update_host_removed_evaporation(inpjet-1,jetve,jetce)
       lremdat=lrem
       if(lrem)then
         nremtrack=nremtrack+nremoved
@@ -292,15 +320,25 @@
     endif
     if(ltopologysnapshot .and. idrank==0 .and. (ladd .or. lrem))then
 #ifdef _OPENACC
-      if(accelerator_is_persistent())call accelerator_update_host_state( &
-       npjet,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,nstep)
+      if(accelerator_is_persistent() .or. accelerator_is_topology_enabled()) &
+       call accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz, &
+       jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nstep)
+      if(levaporation .and. &
+       (accelerator_is_persistent() .or. accelerator_is_topology_enabled())) &
+       call accelerator_update_host_evaporation_state(npjet,jetve,jetce)
 #endif
       write(151,'(a,4(1x,i0),1x,l1)')'event',nstep,inpjet,npjet, &
        npjet-inpjet,ladd
       do i=inpjet,npjet
-        write(151,'(i0,1x,l1,10(1x,es24.16))')i,jetfr(i),jetxx(i), &
-         jetyy(i),jetzz(i),jetst(i),jetvx(i),jetvy(i),jetvz(i), &
-         jetms(i),jetch(i),jetvl(i)
+        if(levaporation)then
+          write(151,'(i0,1x,l1,12(1x,es24.16))')i,jetfr(i),jetxx(i), &
+           jetyy(i),jetzz(i),jetst(i),jetvx(i),jetvy(i),jetvz(i), &
+           jetms(i),jetch(i),jetvl(i),jetve(i),jetce(i)
+        else
+          write(151,'(i0,1x,l1,10(1x,es24.16))')i,jetfr(i),jetxx(i), &
+           jetyy(i),jetzz(i),jetst(i),jetvx(i),jetvy(i),jetvz(i), &
+           jetms(i),jetch(i),jetvl(i)
+        endif
       enddo
     endif
     
@@ -312,7 +350,7 @@
 !   Synchronize the complete state only for output formats that consume bead
 !   arrays. Normal statistical output transfers only its selected bead.
 #ifdef _OPENACC
-    if(accelerator_is_persistent())then
+    if(accelerator_is_persistent() .or. accelerator_is_topology_enabled())then
       lfullhostoutput=.false.
       if(lprintxyz)lfullhostoutput=mod(nstep,iprintxyz)==0
       if(lprintxyzsing)lfullhostoutput=lfullhostoutput .or. &
@@ -323,8 +361,9 @@
        mod(nstep,iprintdat)==0
       lfullhostoutput=lfullhostoutput .or. mod(nstep,nrestartdump)==0
       if(lfullhostoutput)then
-        call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz, &
-         jetst,jetvx,jetvy,jetvz,nstep)
+        call accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz, &
+         jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nstep)
+        if(levaporation)call accelerator_update_host_evaporation_state(npjet,jetve,jetce)
       endif
     endif
 #endif
@@ -345,9 +384,12 @@
     call profiling_start(prof_erase_bead)
     call erase_jetbead(nstep,mytime,ladd,lrem,nremoved)
 #ifdef _OPENACC
-    if(accelerator_is_persistent() .and. linserting .and. nremoved>0)then
+    if((accelerator_is_persistent() .or. accelerator_is_topology_enabled()) .and. &
+       linserting .and. nremoved>0)then
       call accelerator_update_device_removed(inpjet-nremoved,inpjet-1, &
        jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl)
+      if(levaporation)call accelerator_update_device_removed_evaporation( &
+       inpjet-nremoved,inpjet-1,jetve,jetce)
     endif
 #endif
     call profiling_stop(prof_erase_bead)
@@ -416,8 +458,9 @@
   
 ! print restart file
 #ifdef _OPENACC
-  call accelerator_update_host_state(npjet,jetxx,jetyy,jetzz,jetst, &
-   jetvx,jetvy,jetvz,nstep)
+  call accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz,jetst, &
+   jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nstep)
+  if(levaporation)call accelerator_update_host_evaporation_state(npjet,jetve,jetce)
 #endif
   call write_restart_file(1,135,'save.dat',nstep,mytime)
   

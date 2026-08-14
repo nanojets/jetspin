@@ -13,17 +13,25 @@ module integrator_kv_ev_mod
 !***********************************************************************
 
  use version_mod, only : mystart,myend,mxchunk,sum_world_darr, &
-                         set_chunk,set_mxchunk,idrank
+                         set_chunk,set_mxchunk,idrank,mxrank
  use error_mod, only : error
  use nanojet_mod, only : mxnpjet,npjet,inpjet,systype,jetxx,jetyy, &
                          jetzz,jetst,jetvx,jetvy,jetvz,jetvl,jetve, &
-                         compute_posnoinserted,evlim
+                         jetms,jetch,jetce, &
+                         compute_posnoinserted,evlim,linserting,linserted, &
+                         jetfr,evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity, &
+                         cp0,Bev,mev,tev
  use integrator_mod, only : integrator
  use dynamic_refinement_mod, only : driver_dynamic_refinement
  use coulomb_force_mod, only : smooth_charge,restore_charge,coulforce, &
                                compute_coulomelec_driver
  use eom_ev_mod, only : eom1_KV_pos_v_ev,eom1_KV_st_ev, &
                         eom3_KV_pos_v_ev,eom3_KV_st_ev
+#ifdef _OPENACC
+ use accelerator_mod, only : accelerator_enabled, &
+                             accelerator_kv_evap_stress_3d, &
+                             accelerator_set_topology_enabled
+#endif
 
  implicit none
  private
@@ -38,6 +46,7 @@ module integrator_kv_ev_mod
  double precision, allocatable, save :: yxx(:),yyy(:),yzz(:),yst(:)
  double precision, allocatable, save :: yvx(:),yvy(:),yvz(:),yev(:)
  logical, save :: lworkspace=.false.
+ logical, save :: workspace_device_mapped=.false.
  logical, save :: lannounced=.false.
  integer, save :: workspace_mxnpjet=-1
  integer, save :: workspace_mxchunk=-1
@@ -98,6 +107,14 @@ module integrator_kv_ev_mod
   if(lworkspace)then
     if(workspace_mxnpjet>=mxnpjet .and. workspace_mxchunk>=mxchunk)return
 
+#ifdef _OPENACC
+  if(workspace_device_mapped)then
+!$acc exit data delete(fxx,fyy,fzz,fst,fev,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz, &
+!$acc& f3vx,f3vy,f3vz,f4vx,f4vy,f4vz,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev)
+    workspace_device_mapped=.false.
+  endif
+#endif
+
     deallocate(fxx,fyy,fzz,fst,fev)
     deallocate(f1vx,f1vy,f1vz,f2vx,f2vy,f2vz)
     deallocate(f3vx,f3vy,f3vz,f4vx,f4vy,f4vz)
@@ -113,6 +130,14 @@ module integrator_kv_ev_mod
   allocate(yxx(0:mxnpjet),yyy(0:mxnpjet),yzz(0:mxnpjet))
   allocate(yst(0:mxnpjet),yvx(0:mxnpjet),yvy(0:mxnpjet))
   allocate(yvz(0:mxnpjet),yev(0:mxnpjet))
+#ifdef _OPENACC
+!$acc enter data copyin(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
+!$acc& jetch,jetvl,jetve,jetce,jetfr)
+!$acc enter data create(fxx,fyy,fzz,fst,fev,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz, &
+!$acc& f3vx,f3vy,f3vz,f4vx,f4vy,f4vz,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev)
+  workspace_device_mapped=.true.
+  call accelerator_set_topology_enabled(.true.)
+#endif
   workspace_mxnpjet=mxnpjet
   workspace_mxchunk=mxchunk
   lworkspace=.true.
@@ -179,11 +204,31 @@ module integrator_kv_ev_mod
         call eom1_KV_st_ev(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
          coulforce,ax,ay,az,dve(j),ds(j),tstage,k)
       case(3)
+#ifdef _OPENACC
+        if(accelerator_enabled .and. mxrank==1)then
+          ds(j)=0.d0
+        else
+          call eom3_KV_st_ev(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
+           coulforce,ax,ay,az,dve(j),ds(j),tstage,k)
+        endif
+#else
         call eom3_KV_st_ev(ipoint,xs,ys,zs,ss,vxs,vys,vzs,jetvl,ves, &
          coulforce,ax,ay,az,dve(j),ds(j),tstage,k)
+#endif
     end select
     j=j+1
   enddo
+
+#ifdef _OPENACC
+  if(accelerator_enabled .and. systype==3 .and. mxrank==1)then
+    call accelerator_kv_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
+     jetfr,dve,ds,xs,ys,zs,vxs,vys,vzs,ax,ay,az,ss,jetvl,ves,evairv, &
+     evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev,evlim)
+#ifdef _OPENACC
+    !$acc update self(dve(0:myend-mystart),ds(0:myend-mystart))
+#endif
+  endif
+#endif
 
   call restore_charge()
 

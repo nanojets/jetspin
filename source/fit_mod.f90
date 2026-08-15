@@ -16,7 +16,7 @@
  use version_mod ,only : idrank,mxrank,sum_world_darr,mystart,myend
  use nanojet_mod, only : mxnpjet,npjet,inpjet,typemass,ltagbeads, &
                           lbreakup
-  
+
  
  implicit none
  
@@ -55,6 +55,7 @@
  
  integer, save :: inpjetspline
  integer, save :: npjetspline
+ logical, save :: lakima_accelerator_coordinates=.false.
  
  public :: create_spline
  public :: fit_spline
@@ -68,6 +69,8 @@
  public :: fit_akima
  public :: allocate_arrayakima
  public :: findcurve4
+ public :: begin_akima_accelerator_data
+ public :: end_akima_accelerator_data
  
  contains
  
@@ -569,7 +572,8 @@
   
  end subroutine allocate_arrayakima
  
- subroutine fit_akima(jptinit,jptend,jpt,jvr,jptc,jvrfit)
+ subroutine fit_akima(jptinit,jptend,jpt,jvr,jptc,jvrfit, &
+  use_accelerator,field_name)
 
 !***********************************************************************
 !     
@@ -589,21 +593,244 @@
   double precision, allocatable, dimension (:), intent(in) :: jvr
   double precision, allocatable, dimension (:), intent(in) :: jptc
   double precision, allocatable, dimension (:), intent(inout) :: jvrfit
-  
-  double precision :: derinit,derend
-  integer :: i,j
+  logical, intent(in), optional :: use_accelerator
+  character(len=*), intent(in), optional :: field_name
+
+  logical :: run_accelerator
+#ifdef _OPENACC
+  double precision :: coefficient_max_abs,coefficient_max_rel
+#ifdef JETSPIN_COMPARE_AKIMA
+  character(len=16) :: diagnostic_name
+  double precision, allocatable :: host_reference(:)
+  double precision :: value_max_abs,value_max_rel
+#endif
+#endif
   
   inpjetspline=inpjet
   npjetspline=npjet
-  
-  call setup_akima( jpt, jvr, jetak1,jetak2,jetak3,jetak4)
-  
-  call interp_akima(jptinit,jptend,jpt,jetak1,jetak2,jetak3,jetak4, &
-    jptc,jvrfit)
+
+  run_accelerator=.false.
+#ifdef _OPENACC
+  if(present(use_accelerator))run_accelerator=use_accelerator
+  run_accelerator=run_accelerator .and. mxrank==1
+#ifdef JETSPIN_DEV_HOST_AKIMA
+  run_accelerator=.false.
+#endif
+#endif
+
+#ifdef _OPENACC
+  if(run_accelerator)then
+#ifdef JETSPIN_COMPARE_AKIMA
+    allocate(host_reference(lbound(jvrfit,1):ubound(jvrfit,1)))
+    host_reference=jvrfit
+    call setup_akima(jpt,jvr,jetak1,jetak2,jetak3,jetak4)
+    call interp_akima(jptinit,jptend,jpt,jetak1,jetak2,jetak3,jetak4, &
+     jptc,host_reference)
+#endif
+    call fit_akima_accelerator(jptinit,jptend,jpt,jvr,jptc,jvrfit, &
+     coefficient_max_abs,coefficient_max_rel)
+#ifdef JETSPIN_COMPARE_AKIMA
+    value_max_abs=maxval(dabs(jvrfit(jptinit:jptend)- &
+     host_reference(jptinit:jptend)))
+    value_max_rel=value_max_abs/max( &
+     maxval(dabs(host_reference(jptinit:jptend))),1.d-30)
+    diagnostic_name='unnamed'
+    if(present(field_name))diagnostic_name=field_name
+    if(idrank==0)write(6,'(a,a,4(a,es12.4))') &
+     'Akima device comparison: field=',trim(diagnostic_name), &
+     ' coefficient_max_abs=',coefficient_max_abs, &
+     ' coefficient_max_rel=',coefficient_max_rel, &
+     ' value_max_abs=',value_max_abs,' value_max_rel=',value_max_rel
+    deallocate(host_reference)
+#endif
+  else
+#endif
+    call setup_akima(jpt,jvr,jetak1,jetak2,jetak3,jetak4)
+    call interp_akima(jptinit,jptend,jpt,jetak1,jetak2,jetak3,jetak4, &
+     jptc,jvrfit)
+#ifdef _OPENACC
+  endif
+#endif
   
   return
   
  end subroutine fit_akima
+
+ subroutine begin_akima_accelerator_data(xpt,x,enable)
+
+  implicit none
+
+  double precision, allocatable, intent(in) :: xpt(:),x(:)
+  logical, intent(in) :: enable
+
+  lakima_accelerator_coordinates=.false.
+#ifdef _OPENACC
+  if(enable)then
+! Normalized source coordinates and target knots are shared by all eleven
+! interpolated fields. Map them once per accepted event instead of once per
+! field.
+!$acc enter data copyin(xpt,x)
+    lakima_accelerator_coordinates=.true.
+  endif
+#endif
+
+  return
+
+ end subroutine begin_akima_accelerator_data
+
+ subroutine end_akima_accelerator_data(xpt,x)
+
+  implicit none
+
+  double precision, allocatable, intent(in) :: xpt(:),x(:)
+
+#ifdef _OPENACC
+  if(lakima_accelerator_coordinates)then
+!$acc exit data delete(xpt,x)
+  endif
+#endif
+  lakima_accelerator_coordinates=.false.
+
+  return
+
+ end subroutine end_akima_accelerator_data
+
+#ifdef _OPENACC
+ subroutine fit_akima_accelerator(iinterp,ninterp,xpt,ypt,x,y, &
+  coefficient_max_abs,coefficient_max_rel)
+
+!***********************************************************************
+!
+!     OpenACC Akima coefficient construction and interpolation.
+!     Segment slopes, knot tangents, polynomial coefficients, and target
+!     points are independent. Only the four endpoint-slope extrapolations
+!     use one serial device thread.
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: iinterp,ninterp
+  double precision, allocatable, intent(in) :: xpt(:),ypt(:),x(:)
+  double precision, allocatable, intent(inout) :: y(:)
+  double precision, intent(out) :: coefficient_max_abs
+  double precision, intent(out) :: coefficient_max_rel
+
+  integer :: i,j
+  double precision :: m1,m2,m3,m4,w1,w2,t1,t2,dx
+  double precision :: coefficient_scale
+  double precision, parameter :: eps=1.d-30
+  double precision, allocatable :: slopes(:),tangents(:)
+  double precision, allocatable :: p0(:),p1(:),p2(:),p3(:)
+
+  allocate(slopes(inpjetspline-2:npjetspline+1))
+  allocate(tangents(inpjetspline:npjetspline))
+  allocate(p0(inpjetspline:npjetspline-1))
+  allocate(p1(inpjetspline:npjetspline-1))
+  allocate(p2(inpjetspline:npjetspline-1))
+  allocate(p3(inpjetspline:npjetspline-1))
+
+#ifdef JETSPIN_COMPARE_AKIMA
+!$acc data create(xpt,ypt,x,slopes,tangents,y) &
+!$acc& copyout(p0,p1,p2,p3)
+#else
+!$acc data create(xpt,ypt,x,slopes,tangents,p0,p1,p2,p3,y)
+#endif
+! The source arrays can already belong to the persistent jet mapping. Their
+! host values include the event-time density/cross-section preparation, so
+! explicitly refresh the active ranges before constructing coefficients.
+  if(.not.lakima_accelerator_coordinates)then
+!$acc update device(xpt(inpjetspline:npjetspline),x(iinterp:ninterp))
+  endif
+!$acc update device(ypt(inpjetspline:npjetspline))
+
+!$acc parallel loop gang vector present(xpt,ypt,slopes)
+  do i=inpjetspline,npjetspline-1
+    slopes(i)=(ypt(i+1)-ypt(i))/(xpt(i+1)-xpt(i))
+  enddo
+!$acc end parallel loop
+
+!$acc serial present(slopes)
+  slopes(inpjetspline-1)=2.d0*slopes(inpjetspline)- &
+   slopes(inpjetspline+1)
+  slopes(inpjetspline-2)=2.d0*slopes(inpjetspline-1)- &
+   slopes(inpjetspline)
+  slopes(npjetspline)=2.d0*slopes(npjetspline-1)- &
+   slopes(npjetspline-2)
+  slopes(npjetspline+1)=2.d0*slopes(npjetspline)- &
+   slopes(npjetspline-1)
+!$acc end serial
+
+!$acc parallel loop gang vector present(slopes,tangents)
+  do i=inpjetspline,npjetspline
+    m1=slopes(i-2)
+    m2=slopes(i-1)
+    m3=slopes(i)
+    m4=slopes(i+1)
+    w1=dabs(m4-m3)
+    w2=dabs(m2-m1)
+    if(w1<eps .and. w2<eps)then
+      tangents(i)=0.5d0*(m2+m3)
+    else
+      tangents(i)=(w1*m2+w2*m3)/(w1+w2)
+    endif
+  enddo
+!$acc end parallel loop
+
+!$acc parallel loop gang vector present(xpt,ypt,slopes,tangents,p0,p1,p2,p3)
+  do i=inpjetspline,npjetspline-1
+    dx=xpt(i+1)-xpt(i)
+    t1=tangents(i)
+    t2=tangents(i+1)
+    p0(i)=ypt(i)
+    p1(i)=t1
+    p2(i)=(3.d0*slopes(i)-2.d0*t1-t2)/dx
+    p3(i)=(t1+t2-2.d0*slopes(i))/dx**2.d0
+  enddo
+!$acc end parallel loop
+
+! Each target knot owns one thread. The descending interval search is local
+! to that knot and exactly follows the historical host selection rule.
+!$acc parallel loop gang vector private(j,dx) present(xpt,x,y,p0,p1,p2,p3)
+  do i=iinterp,ninterp
+    if(x(i)<xpt(inpjetspline))then
+      j=inpjetspline
+    else
+      do j=npjetspline-1,inpjetspline,-1
+        if(x(i)>=xpt(j))exit
+      enddo
+    endif
+    dx=x(i)-xpt(j)
+    y(i)=p0(j)+p1(j)*dx+p2(j)*dx**2.d0+p3(j)*dx**3.d0
+  enddo
+!$acc end parallel loop
+! Only the new interpolated values are required on the host. The prefix in
+! the shared service buffer was never overwritten on the device.
+!$acc update self(y(iinterp:ninterp))
+!$acc end data
+
+  coefficient_max_abs=0.d0
+  coefficient_max_rel=0.d0
+#ifdef JETSPIN_COMPARE_AKIMA
+  coefficient_max_abs=max( &
+   maxval(dabs(p0-jetak1(inpjetspline:npjetspline-1))), &
+   maxval(dabs(p1-jetak2(inpjetspline:npjetspline-1))), &
+   maxval(dabs(p2-jetak3(inpjetspline:npjetspline-1))), &
+   maxval(dabs(p3-jetak4(inpjetspline:npjetspline-1))))
+  coefficient_scale=max( &
+   maxval(dabs(jetak1(inpjetspline:npjetspline-1))), &
+   maxval(dabs(jetak2(inpjetspline:npjetspline-1))), &
+   maxval(dabs(jetak3(inpjetspline:npjetspline-1))), &
+   maxval(dabs(jetak4(inpjetspline:npjetspline-1))))
+  coefficient_max_rel=coefficient_max_abs/max(coefficient_scale,1.d-30)
+#endif
+
+  deallocate(slopes,tangents,p0,p1,p2,p3)
+
+  return
+
+ end subroutine fit_akima_accelerator
+#endif
  
  subroutine setup_akima( xpt, ypt, p0, p1, p2, p3)
 

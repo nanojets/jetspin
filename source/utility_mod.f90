@@ -44,7 +44,8 @@ module utility_mod
  public :: allocate_array_buffservice
  public :: init_random_seed,gauss,wiener_process1,wiener_process2,wiener
  public :: prepare_gaussian_buffer,gaussian_buffer_value
- public :: prepare_gaussian_history,gaussian_history_value
+ public :: prepare_gaussian_history,resize_gaussian_history
+ public :: gaussian_history_value
  public :: modulvec
  public :: dot
  public :: cross
@@ -322,6 +323,87 @@ module utility_mod
   call bcast_world_darr(gaussianhistory,nvalues)
   ngaussianhistory=mxpnt
  end subroutine prepare_gaussian_history
+
+ subroutine resize_gaussian_history(mxpnt,device_mapped)
+  implicit none
+  integer, intent(in) :: mxpnt
+  logical, intent(in), optional :: device_mapped
+  integer :: oldcapacity,oldsteps,newsteps
+  integer :: oldnperstep,newnperstep,oldnvalues,newnvalues
+  integer :: istep,ipoint,icomponent,idraw,oldindex,newindex
+  logical :: mapped
+  double precision, allocatable :: resizedhistory(:)
+
+  if(.not.allocated(gaussianhistory))return
+  if(mxpnt<=ngaussianhistory)return
+
+  mapped=.false.
+  if(present(device_mapped))mapped=device_mapped
+  oldcapacity=ngaussianhistory
+  oldsteps=gaussianhistorysteps
+  oldnperstep=(oldcapacity+1)*3*2
+  newnperstep=(mxpnt+1)*3*2
+  oldnvalues=oldnperstep*oldsteps
+  newsteps=min(oldsteps,maxgaussianhistory/newnperstep)
+  if(newsteps<1)stop "One resized Gaussian timestep exceeds history limit"
+  newnvalues=newnperstep*newsteps
+  allocate(resizedhistory(0:newnvalues-1))
+  resizedhistory(:)=0.d0
+
+! Preserve every existing bead/component/draw value for the retained cycle.
+! The storage stride changes with capacity, so this must be a semantic copy
+! rather than a contiguous prefix copy.
+  do istep=1,newsteps
+    do ipoint=0,oldcapacity
+      do icomponent=1,3
+        do idraw=1,2
+          oldindex=(istep-1)*oldnperstep+ipoint+(oldcapacity+1)* &
+           ((icomponent-1)+3*(idraw-1))
+          newindex=(istep-1)*newnperstep+ipoint+(mxpnt+1)* &
+           ((icomponent-1)+3*(idraw-1))
+          resizedhistory(newindex)=gaussianhistory(oldindex)
+        enddo
+      enddo
+    enddo
+  enddo
+
+! New capacity slots receive a single rank-independent extension of the
+! initial Gaussian history. No random extraction is introduced in the time
+! integration loop.
+  if(idrank==0)then
+    do istep=1,newsteps
+      do ipoint=oldcapacity+1,mxpnt
+        do icomponent=1,3
+          do idraw=1,2
+            newindex=(istep-1)*newnperstep+ipoint+(mxpnt+1)* &
+             ((icomponent-1)+3*(idraw-1))
+            resizedhistory(newindex)=gauss()
+          enddo
+        enddo
+      enddo
+    enddo
+  endif
+  call bcast_world_darr(resizedhistory,newnvalues)
+
+#ifdef _OPENACC
+! The old allocation must be detached before move_alloc changes its host
+! address. Re-enter the resized history once; ordinary timesteps remain free
+! of random-history transfers.
+!$acc exit data delete(gaussianhistory(0:oldnvalues-1)) if(mapped)
+#endif
+  call move_alloc(resizedhistory,gaussianhistory)
+  ngaussianhistory=mxpnt
+  gaussianhistorysteps=newsteps
+#ifdef _OPENACC
+!$acc enter data copyin(gaussianhistory(0:newnvalues-1)) if(mapped)
+#endif
+
+  if(idrank==0)then
+    write(6,'(a,i0,a,i0,a,i0,a,i0)') &
+     'Gaussian history capacity: old=',oldcapacity,' new=',mxpnt, &
+     ' retained_steps=',newsteps,' values=',newnvalues
+  endif
+ end subroutine resize_gaussian_history
 
  function gaussian_history_value(istep,ipoint,icomponent,idraw)
   implicit none

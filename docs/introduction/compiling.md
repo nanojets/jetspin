@@ -118,6 +118,20 @@ aliases: the first is a complete force oracle and the second isolates only
 Coulomb accumulation. Their deliberate per-stage transfers make both targets
 unsuitable for production or performance measurements.
 
+Two additional development targets isolate dynamic-refinement interpolation:
+
+```sh
+make -C source -f ../build/Makefile nvfortran-openacc-host-akima GPUCC=80
+make -C source -f ../build/Makefile nvfortran-openacc-compare-akima GPUCC=80
+```
+
+`nvfortran-openacc-host-akima` enables `JETSPIN_DEV_HOST_AKIMA` and retains
+the historical host coefficient/interpolation path while the surrounding
+OpenACC refinement lifecycle remains active. `nvfortran-openacc-compare-akima`
+enables `JETSPIN_COMPARE_AKIMA`: it computes the trusted host result followed
+by the device result and reports field-wise maximum coefficient and value
+differences. These are numerical-validation builds, not performance builds.
+
 ## Other targets
 
 | Target | Purpose |
@@ -136,6 +150,8 @@ unsuitable for production or performance measurements.
 | `nvfortran-openacc-host` | OpenACC code-path validation on the host |
 | `nvfortran-openacc-force-oracle` | Development-only complete host-force oracle for all supported integrators, with or without evaporation |
 | `nvfortran-openacc-coulomb-oracle` | Development-only host direct-Coulomb oracle, with or without evaporation |
+| `nvfortran-openacc-host-akima` | Development-only historical host-Akima oracle inside the OpenACC refinement path |
+| `nvfortran-openacc-compare-akima` | Development-only host/device Akima A/B comparison |
 | `help` | Display available targets |
 | `clean` | Remove objects and module files from `source/` |
 

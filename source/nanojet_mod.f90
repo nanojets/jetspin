@@ -181,6 +181,8 @@
  double precision, allocatable, public, save :: jetve(:) ! cm^3
  
  logical, private, parameter :: listresscompensate=.false.
+ logical, private, save :: lfirsttagbead=.true.
+ double precision, private, save :: tagbeaddistance=0.d0
  logical, public, parameter :: ldevelopers=.false.
  logical, public, save :: lnthreads=.false.
  logical, public, save :: lsystype=.false.
@@ -243,6 +245,7 @@
  public :: deallocate_jet
  public :: set_initial_jet
  public :: add_jetbead
+ public :: tag_accelerator_added_bead
  public :: reallocate_jet
  public :: fcut
  public :: remove_jetbead
@@ -332,8 +335,8 @@
   implicit none
   
   logical, intent(in), optional :: miomax
-  
-  
+  integer :: refinementreserve,reserveiostat
+  character(len=32) :: reserveenv
   
   
   select case(systype)
@@ -353,6 +356,27 @@
     mxnpjet=incnpjet
   endif
   mxnpjet=max(mxnpjet,npjet)
+! Dynamic refinement may replace a pre-extended anchored mesh by a denser
+! one while the jet arrays are persistently mapped on an accelerator.  Keep
+! one normal allocation increment available so the event-time Akima remesh
+! normally avoids an early rebind. A developer-only environment override is
+! used by the capacity-growth regression; production behavior remains 100.
+  if(linserting .and. ltagbeads .and. npjet>=100)then
+    refinementreserve=incnpjet
+    reserveenv=''
+    call get_environment_variable('JETSPIN_REFINEMENT_INITIAL_RESERVE', &
+     reserveenv)
+    if(len_trim(reserveenv)>0)then
+      read(reserveenv,*,iostat=reserveiostat)refinementreserve
+      if(reserveiostat/=0 .or. refinementreserve<0) &
+       refinementreserve=incnpjet
+    endif
+    mxnpjet=max(mxnpjet,npjet+refinementreserve)
+    if(idrank==0 .and. refinementreserve/=incnpjet)then
+      write(6,'(a,i0)')'Developer refinement initial reserve=', &
+       refinementreserve
+    endif
+  endif
 ! Reserve headroom for the large dynamic OpenACC benchmark.  Keeping the
 ! allocation stable is required while the jet arrays are mapped on a device.
   if(linserting .and. npjet>=1000)then
@@ -800,6 +824,7 @@
   if(typemass==3 .or. ltagbeads)then
     jetbd(:)=.false.
   endif
+  if(ltagbeads)call initialize_tagged_beads()
   
   if(lbreakup)then
     jetbr(:)=.false.
@@ -1406,6 +1431,59 @@
   
  end subroutine compute_posnoinserted
  
+ subroutine initialize_tagged_beads()
+
+!***********************************************************************
+!
+!     Mark anchors in a pre-extended initial jet with the same nominal
+!     material-spacing rule used for beads inserted at the nozzle.
+!
+!***********************************************************************
+
+  implicit none
+
+  integer :: ipoint
+  integer :: nanchors
+  double precision :: initialdistance
+
+  jetbd(:)=.false.
+  lfirsttagbead=.true.
+  tagbeaddistance=0.d0
+
+! Preserve the historical one-bead startup.  A pre-extended jet instead
+! represents material that has already passed through the nozzle and needs
+! anchors before its first refinement event.
+  if((npjet-inpjet)<=1)return
+  if(lenthresholdbead<=0.d0)return
+
+  initialdistance=0.d0
+! Endpoints already belong to both the old and target meshes.  Only interior
+! beads may be anchors: tagging inpjet would create a zero-length first
+! anchored segment in dynamic_refinement_akima.
+  do ipoint=npjet-1,inpjet+1,-1
+    initialdistance=initialdistance+resolution
+    if(initialdistance>=lenthresholdbead)then
+      jetbd(ipoint)=.true.
+      initialdistance=0.d0
+    endif
+  enddo
+
+! Start a new, equivalent spacing sequence for material inserted after the
+! artificial pre-extended initial condition.
+  lfirsttagbead=.false.
+  tagbeaddistance=0.d0
+
+  if(idrank==0)then
+    nanchors=count(jetbd(inpjet+1:npjet-1))
+    write(6,'(a,i0,a,i0,a,es12.4)') &
+     'Initial dynamic-refinement anchors: active=',npjet-inpjet, &
+     ' anchors=',nanchors,' spacing_cm=',lenthresholdbead
+  endif
+
+  return
+
+ end subroutine initialize_tagged_beads
+
  subroutine tag_beads()
  
 !***********************************************************************
@@ -1421,27 +1499,25 @@
  
   implicit none
   
-  logical, save :: lfirst=.true.
   logical :: ljetbd
-  double precision, save :: olddistancesub
   
   if(.not. ltagbeads)return
   
-  if(lfirst)then
-    lfirst=.false.
-    olddistancesub=0.d0
-    if(olddistancesub<lenthresholdbead)then
+  if(lfirsttagbead)then
+    lfirsttagbead=.false.
+    tagbeaddistance=0.d0
+    if(tagbeaddistance<lenthresholdbead)then
       ljetbd=.false.
     else
       ljetbd=.true.
     endif
   else
-    olddistancesub=olddistancesub+resolution
-    if(olddistancesub<lenthresholdbead)then
+    tagbeaddistance=tagbeaddistance+resolution
+    if(tagbeaddistance<lenthresholdbead)then
       ljetbd=.false.
     else
       ljetbd=.true.
-      olddistancesub=0.d0
+      tagbeaddistance=0.d0
     endif
   endif
   
@@ -1450,6 +1526,28 @@
   return
   
  end subroutine tag_beads
+
+ subroutine tag_accelerator_added_bead()
+
+!***********************************************************************
+!
+!     Mirror the anchor bookkeeping performed by add_jetbead after the
+!     topology update itself has been executed on an accelerator.
+!
+!***********************************************************************
+
+  implicit none
+
+  if(.not.ltagbeads)return
+
+! accelerator_add_bead has already incremented npjet.  Preserve the old
+! nozzle flag at its copied endpoint before tagging the newly inserted bead.
+  jetbd(npjet)=jetbd(npjet-1)
+  call tag_beads()
+
+  return
+
+ end subroutine tag_accelerator_added_bead
   
  subroutine extract_actual_massdensity(actualmass,timesub)
  

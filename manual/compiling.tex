@@ -98,6 +98,16 @@ updates remain on the GPU. The two targets are deliberately distinct, and
 their per-stage transfers make both unsuitable for production or performance
 measurements.
 
+Target \texttt{nvfortran-openacc-host-akima} enables the development-only
+\texttt{JETSPIN\_DEV\_HOST\_AKIMA} macro. It retains the historical host
+coefficient and interpolation routines while leaving the surrounding OpenACC
+refinement lifecycle enabled. Target
+\texttt{nvfortran-openacc-compare-akima} enables
+\texttt{JETSPIN\_COMPARE\_AKIMA}; it computes the trusted host result followed
+by the device result and reports maximum coefficient and interpolated-value
+differences for every field. Neither target is intended for performance
+measurements.
+
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
 binary executable file can be run in the \textit{execute} sub-directory.
@@ -140,6 +150,10 @@ nvfortran-openacc-force-oracle & compile supported Euler, RK2, RK4, or Platen
 paths with the complete development-only host-force oracle.\tabularnewline
 nvfortran-openacc-coulomb-oracle & compile supported Euler, RK2, RK4, or Platen
 paths with only the direct Coulomb sum evaluated on the host.\tabularnewline
+nvfortran-openacc-host-akima & retain the historical host Akima routines as a
+development-only refinement oracle.\tabularnewline
+nvfortran-openacc-compare-akima & compare host and device Akima coefficients
+and interpolated values at every accepted refinement.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
 \hline
 \end{tabular}

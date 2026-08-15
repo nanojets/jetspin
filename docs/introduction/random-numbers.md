@@ -50,9 +50,14 @@ topology and duration are fixed. Before timing, rank 0 generates every
 timestep block in `step, bead, component, draw` order. CPU and GPU paths
 address this same history; the OpenACC build copies it to the device once.
 Test 12 stores 6,006,000 doubles for 1,000 steps, while Test 20 stores 600,600
-doubles for 100 steps. This guarantees identical Gaussian assignments without
-a per-step host/device transfer. General Platen simulations with dynamic
-topology continue to use the per-step block described above.
+doubles for 100 steps. Test 21 uses the same pre-generated policy with dynamic
+topology: its standard 500-entry capacity stores 24,048,000 doubles for 8,000
+steps. This guarantees indexed Gaussian assignments without a per-step
+host/device transfer.
+
+Test 22 applies the dynamic policy three times in one run. Each capacity
+increase repacks retained values into the new stride and generates only the
+new bead-index slots before a single device upload.
 
 The pre-generated history is capped at 100,000,000 double precision values
 (about 763 MiB). If a fixed simulation needs more timesteps than fit in that
@@ -76,9 +81,18 @@ data.
 ## Dynamic topology
 
 Insertion, removal, compaction, and refinement can change bead indices and
-capacity. A fresh Gaussian block is prepared after chunk assignment for the
-current integration step, so it uses the current global indices consistently
-on all ranks. Capacity growth automatically reallocates the shared block.
+capacity. The ordinary per-step buffer is prepared after chunk assignment and
+therefore follows the current global indices. For Tests 21--23, capacity
+growth of the pre-generated history instead repacks every retained step into
+the new bead stride, preserves values for existing indices, and generates one
+extension for newly available indices. In an OpenACC run, the old history
+mapping is deleted before the host allocation changes and the resized history
+is copied to the device once.
+
+Test Case 23 is also a debugging guard: CPU and accelerator comparisons must
+use the same pre-generated-history policy before a difference in collector
+removal timing is attributed to topology code. Falling back to on-the-fly CPU
+draws changes the stochastic trajectory before the first removal.
 
 The current scheme associates a draw with the bead's array index during that
 step. It guarantees serial/MPI agreement for the same topology evolution; it

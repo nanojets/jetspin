@@ -1,6 +1,6 @@
 # Example simulations
 
-JETSPIN includes eight numerical reference cases and twelve extended
+JETSPIN includes eight numerical reference cases and fifteen extended
 validation or performance cases. Each case can be run by copying its
 `input.dat` next to a compiled `main.x`. For quick validation of all cases,
 use the repository smoke suite:
@@ -27,5 +27,13 @@ Test Case 19 is the corresponding high-resolution Kelvin–Voigt evaporation
 performance probe.
 Test Case 20 is the fixed-topology stochastic Platen Maxwell evaporation
 CPU/GPU validation case.
+Test Case 21 is the anchored dynamic-refinement Maxwell/Platen evaporation
+validation for the persistent OpenACC path. Akima coefficient construction and
+field interpolation execute on the GPU at an accepted remeshing event; target
+mesh construction and conservation remain host event work.
+Test Case 22 repeats that event three times and deliberately forces a capacity
+increase at every remesh to stress persistent-data release/rebind.
+Test Case 23 shortens the collector distance so device-side removal occurs
+both before and after the final remesh.
 
 See the individual pages in this directory for the purpose of each case.

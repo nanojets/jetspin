@@ -50,6 +50,7 @@ module accelerator_mod
  public :: accelerator_rebind_evaporation
  public :: accelerator_update_device_topology_state
  public :: accelerator_update_device_evaporation_state
+ public :: accelerator_refinement_candidate
  public :: accelerator_is_persistent
  public :: accelerator_update_host_state
  public :: accelerator_update_host_capacity_state
@@ -1075,6 +1076,85 @@ contains
 !$acc update device(jetve(0:npjet),jetce(0:npjet))
 #endif
  end subroutine accelerator_update_device_evaporation_state
+
+ subroutine accelerator_refinement_candidate(inpjet,npjet,systype, &
+   linserting,linserted,threshold,jetxx,jetyy,jetzz,candidate, &
+   refinement_start,path_length,nozzle_correction)
+  implicit none
+  integer, intent(in) :: inpjet,npjet,systype
+  logical, intent(in) :: linserting,linserted
+  double precision, intent(in) :: threshold
+  double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:)
+  logical, intent(out) :: candidate
+  integer, intent(out) :: refinement_start
+  double precision, intent(out) :: path_length,nozzle_correction
+  integer :: ipoint,lastsegment
+  double precision :: dx,dy,dz,distance,tdx,tdy,tdz,tail_distance
+
+  if(linserting)then
+    if(linserted)then
+      lastsegment=npjet-2
+    else
+      lastsegment=npjet-3
+    endif
+  else
+    lastsegment=npjet-1
+  endif
+
+  refinement_start=-1
+  path_length=0.d0
+  nozzle_correction=0.d0
+  if(npjet-1>=inpjet)then
+#ifdef _OPENACC
+! Only the final integer reduction crosses from device to host on an ordinary
+! refinement check, together with two scalar lengths.  The complete jet state
+! remains resident until this scan reports that the historical CPU Akima path
+! may actually produce a denser mesh.
+!$acc parallel loop gang vector present(jetxx,jetyy,jetzz) &
+!$acc& private(dx,dy,dz,distance,tdx,tdy,tdz,tail_distance) &
+!$acc& reduction(max:refinement_start,nozzle_correction) &
+!$acc& reduction(+:path_length)
+#endif
+    do ipoint=inpjet,npjet-1
+      dx=jetxx(ipoint)-jetxx(ipoint+1)
+      if(systype==1)then
+        distance=dabs(dx)
+      else
+        dy=jetyy(ipoint)-jetyy(ipoint+1)
+        dz=jetzz(ipoint)-jetzz(ipoint+1)
+        distance=dsqrt(dx*dx+dy*dy+dz*dz)
+      endif
+      path_length=path_length+distance
+      if(ipoint<=lastsegment .and. distance>threshold) &
+       refinement_start=max(refinement_start,ipoint)
+
+! Match the correction used by check_dynamic_refinement_akima to exclude the
+! blocked insertion segment(s) from the requested spline size.
+      tail_distance=0.d0
+      if(linserting)then
+        if(linserted .and. ipoint==npjet-1)then
+          tail_distance=distance
+        elseif((.not.linserted) .and. ipoint==npjet-2)then
+          tdx=jetxx(npjet-2)-jetxx(npjet)
+          if(systype==1)then
+            tail_distance=dabs(tdx)
+          else
+            tdy=jetyy(npjet-2)-jetyy(npjet)
+            tdz=jetzz(npjet-2)-jetzz(npjet)
+            tail_distance=dsqrt(tdx*tdx+tdy*tdy+tdz*tdz)
+          endif
+        endif
+      endif
+      nozzle_correction=max(nozzle_correction,tail_distance)
+    enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+  endif
+
+  candidate=refinement_start>=inpjet
+  return
+ end subroutine accelerator_refinement_candidate
 
  subroutine accelerator_platen_predict(firstpoint,lastpoint,h,airamp,noisediff, &
    jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &

@@ -1,0 +1,50 @@
+\section{Test Case 22: Repeated Dynamic Refinement and Capacity Growth}
+
+Test Case 22 extends the hybrid refinement path of Test Case 21 from one
+accepted Akima event to three. It retains Maxwell rheology, Yarin evaporation,
+stochastic Platen aerodynamic drag, nozzle insertion, and ordinary numerical
+anchor beads. The initial jet contains 400 elements over 8 cm of a 16 cm
+nozzle-to-collector domain. The timestep is $2.5\times10^{-8}$ s and the run
+ends after 15,800 steps.
+
+The dedicated validation runner sets developer-only initial and growth
+reserves of 20 entries. This forces every accepted remesh beyond the current
+capacity, whereas production runs retain the normal 100-entry
+\texttt{incnpjet} policy. Each event must release the old topology,
+evaporation, Platen, Coulomb, and Gaussian-history mappings before the host
+allocations change. The new state and repacked Gaussian history are then bound
+once. The host constructs the target mesh and applies conservation, while
+Akima coefficient construction and spline interpolation execute on the GPU.
+
+With NVFORTRAN 24.3, the CPU events occur at steps 14,301, 14,944, and 15,719.
+The active element counts change from 413 to 455, from 455 to 498, and from
+499 to 536. Capacity grows successively from 420 to 477, then to 520, and
+finally to 558. The complete-force oracle reproduces these CPU event steps and
+topologies. The native NVIDIA A30 obtains the same active counts and capacity
+sequence; its third event occurs at step 15,701 because of the different
+direct-Coulomb accumulation order.
+
+The three-event contract is intentionally a same-compiler NVFORTRAN CPU/GPU
+comparison. A different compiler can perturb the stochastic bending
+trajectory enough to accept a different number of marginal remeshes within
+the same final time. Test Case 21 remains the portable single-event GFortran
+validation.
+
+All 81 active anchors retain their positions, velocities, stresses, reference
+radii, and evaporation radii at every remeshing event. Reference volume,
+evaporated volume, mass, and charge are conserved to approximately
+$10^{-16}$. The 80-row native CPU/GPU statistical comparison passes with a
+relative tolerance of 2.5 percent, while the complete-force oracle agrees with
+the CPU within $6\times10^{-7}$ relatively.
+
+An OpenACC transfer audit records four complete state downloads: three
+accepted refinement events and the final shutdown. It records exactly three
+Gaussian-history uploads, three topology rebinds, and three evaporation-state
+rebinds. Ordinary timesteps and unsuccessful threshold scans do not transfer
+the complete bead state.
+
+The commands
+\texttt{tests/refinement/run\_test22.sh nvfortran},
+\texttt{tests/refinement/run\_test22.sh openacc}, and
+\texttt{tests/refinement/run\_test22.sh force-oracle} run the CPU, native GPU,
+and diagnostic oracle validations, respectively.

@@ -15,9 +15,11 @@ to model efficiently the nanofiber. To get around this problem the
 dynamic refinement procedure developed in Ref \cite{lauricella2016refinement}
 can be used in JETSPIN in order to maintain the the length of the
 elements $l_{i}$ below a prescribed characteristic length max $l_{max}$.
-Whenever a bead length $l_{i}$ is larger than $l_{max}$, the nanofiber
-is refined by discretizing uniformly the jet at the length step $l_{step}$
-value given in input file. The discretization is performed by Akima
+Whenever a bead length $l_{i}$ is larger than $l_{max}$, the relevant portion
+of the nanofiber is remeshed so that the target element length is no larger
+than the value specified by \texttt{dynam refin threshold}. The base
+insertion spacing $l_{step}$ does not define the refined mesh. The
+discretization is performed by Akima
 spline interpolations \cite{akima1970new,akima1991method} of the
 main quantities describing the jet beads (positions, fiber radius,
 stress, velocities). In order to perform the interpolation we proceed
@@ -37,26 +39,108 @@ used to build the cubic spline. Given a generic quantity $y$, the
 data $y_{i}=y\left(\lambda_{i}\right)$ are tabulated and used in
 order to compute the coefficients of the \textit{Akima spline}, following
 the algorithm reported in Ref \cite{akima1991method}. Then, we enforce
-a uniform parametrization of the nanofiber by imposing all the lengths
-of the elements equal to $l_{step}$. The new mesh ${\lambda_{i}^{*}}$
-is defined as
+a target parametrization of the nanofiber. Without interior anchors, the new
+mesh ${\lambda_{i}^{*}}$ can be represented schematically as
 
 \begin{equation}
 \lambda_{0}^{*}=0\;\lambda_{i}^{*}=\frac{i}{N_{beads}^{*}},\;i=1,2,\ldots,N_{beads}^{*}\text{.}
 \end{equation}
-where $N_{beads}^{*}=l_{path}/l_{step}$ represents the number of
-jet beads in the new representation. Finally, the new values $y\left(\lambda_{i}^{*}\right)$
+where $N_{beads}^{*}$ is chosen from the path length and the configured
+refinement threshold. In the implemented algorithm, each anchored segment of
+arc length $L_s$ receives $\left\lceil L_s/l_{max}\right\rceil$ intervals.
+Finally, the new values $y\left(\lambda_{i}^{*}\right)$
 are computed for any $i-th$ bead by the \textit{spline interpolation}.
 The procedure is repeated for positions, fiber radius, stress and
 velocities of the jet beads in order to provide the respective quantities
 in the new mesh ${\lambda_{i}^{*}}$. It is worth to dressing that
 the volume $V_{i}=\pi a_{i}^{2}\,l_{i}$ represented by each bead
 is not anymore constant, and, consequently, $\pi a_{i}^{2}\,l_{i}\neq\pi a_{0}^{2}l_{step}$.
-It is also possible keep few beads in their positions before and after
+It is also possible to keep selected beads in their positions before and after
 the refinement procedure in order to reduce possible errors introduced
 by the interpolation procedure. In other words, these anchor beads
-are manteined as knots of both the old and new meshes (see directive
+are maintained as knots of both the old and new meshes (see directive
 \texttt{dynam refin anchor} in Tab \ref{tab:inputlist}). In the
-following text we will refer to this emended version of the Ren model
+one-bead startup they are tagged as material is inserted. For a pre-extended
+initial jet, interior anchors are initialized at the requested spacing before
+the first timestep. The path endpoints are already common to both meshes and
+are not tagged as interior anchors. An anchor is an ordinary material bead and
+does not imply nanoparticle mass unless the separate variable-mass model is
+enabled. Its role is to provide a persistent interpolation knot; it is not
+spatially frozen during time integration. In the following text we will refer
+to this emended version of the Ren model
 as DyRen model. Further details on the implemented dynamic refinement
 procedure are available in Ref \cite{lauricella2016refinement}.
+
+For the serial Maxwell/Platen OpenACC path exercised by Test Case 21, the
+time integrator, Gaussian history, insertion logic, and bead state remain in a
+persistent device data region. After the configured minimum interval, a
+device reduction returns only the last segment exceeding the threshold, the
+total path length, and the nozzle correction used by the mesh-size test. No
+bead array is transferred during an ordinary check. When a denser mesh is
+actually possible, the active topology and evaporation state are downloaded
+once. The host computes the normalized source and target coordinates. The GPU
+then computes the interval slopes, Akima tangents, cubic coefficients, and all
+field interpolations. Slopes, interior tangents, coefficient sets, and target
+knots are independent parallel work; only the constant-size endpoint-slope
+extrapolation is serial. The interpolated cross-section radius then drives a
+second device kernel that reconstructs bead volume and evaporation volume,
+rescales each for reference-volume conservation, and converts the
+interpolated mass/charge densities back to per-bead quantities. The host
+retains only the data-dependent, rare bookkeeping that these device kernels
+build on and consume: the normalized target-mesh construction and anchor
+save/restore/final-assembly rules, after
+which the completed mesh is uploaded once and device integration resumes. The
+normal Test 21 mesh reserves one allocation increment. A capacity-growth
+validation reduces that reserve and forces the accepted mesh beyond the old
+bound. In this case the topology and evaporation mappings are released before
+the host arrays are replaced; the Platen and Coulomb workspaces are resized,
+the Gaussian history is repacked for the new bead stride, and the completed
+state is bound once. Existing Gaussian values are retained and values for new
+indices are generated only during this event.
+
+Test Case 22 exercises this event lifecycle three times. Developer-only
+20-entry reserve and growth overrides force three successive capacity
+increases, while the normal production increment remains 100. Each event
+preserves every active anchor and separately conserves reference volume,
+evaporated volume, mass, and charge. This repeated test verifies the mapping
+lifecycle together with the device Akima spline.
+
+Test Case 23 adds collector removal to the same lifecycle. Removal advances
+the active lower bound and clears the collected bead through the device
+topology primitive; it does not download the full jet. The validation requires
+removal both before and after the third Akima event, so repeated device
+interpolation and capacity replacement are checked with a rebased active
+interval. Complete intermediate state transfers remain confined to accepted
+refinement events.
+
+Its CPU/GPU statistics agree within tolerance for all but the last two rows;
+once the jet reaches the collector the two builds accumulate a different
+number of collector removals (ten on the CPU, four on the GPU) because
+direct-Coulomb summation order is amplified by the stochastic bending
+trajectory near the collector. Isolating only the direct Coulomb sum on the
+host while keeping topology and the reconstruction kernel below on the device
+confirms this: the isolated build's third event and first seven removals then
+match the CPU step-for-step, and only the last statistics row still
+diverges. Matching topology, conservation, and this tolerance -- not
+bit-for-bit trajectory identity -- remain the acceptance criteria for this
+test.
+
+A development host-Akima target retains the historical coefficient and
+interpolation routines as an oracle. A second comparison target executes both
+paths for each field. Across the 11 fields and three Test Case 23 events, the
+largest coefficient relative difference is $2.48\times10^{-15}$; interpolated
+values differ by at most $7.28\times10^{-12}$ absolutely and
+$3.32\times10^{-15}$ relatively.
+
+A third development target applies the same host-then-device oracle pattern
+to the volume-reconstruction/conservation/density kernel: it backs up the
+pre-reconstruction state, evaluates the trusted host reference, restores that
+state, then runs the device kernel so it remains authoritative, and compares.
+All three Test Case 23 events agree with the host reference at or near
+roundoff (worst absolute $7.1\times10^{-15}$, worst relative
+$4.05\times10^{-16}$). Building this oracle exposed two ordering mistakes
+before they reached the standard path -- the device kernel invoked twice, and
+the host reference evaluated from already-converted state -- each of which
+corrupted the event's mass/charge invariant by tens of percent, which is why
+every new device stage in this port is validated with such an A/B comparison
+before being trusted.

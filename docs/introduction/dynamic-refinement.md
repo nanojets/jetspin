@@ -26,7 +26,7 @@ The supported controls are:
 | --- | --- |
 | `dynamic refinement yes` | Enable refinement and bead tagging |
 | `dynamic refinement no` | Disable refinement |
-| `dynamic refinement every <time>` | Interval between refinement checks |
+| `dynamic refinement every <time>` | Minimum interval between accepted refinements |
 | `dynamic refinement threshold <length>` | Maximum target element length |
 | `dynamic refinement start <time>` | Do not refine before this time |
 | `dynamic refinement anchor <length>` | Spacing used to preserve anchor beads as interpolation knots |
@@ -39,7 +39,9 @@ minimum. If internal defaults are used, the code derives them from the base
 resolution and emits a warning.
 
 [`examples/input-5/input.dat`](../../examples/input-5/input.dat) is the
-reference refinement case.
+historical refinement case. [Test Case 21](../examples/test-21.md) combines
+pre-extended anchors, insertion, Maxwell evaporation, and stochastic Platen
+integration in a focused remeshing validation.
 
 ## Runtime workflow
 
@@ -74,8 +76,12 @@ update bounds, allocation flags, and dependent workspaces
 When bead insertion is active, refinement is deferred until at least ten
 active beads exist. A threshold crossing alone is also insufficient: the
 estimated fitted mesh must contain more points than the current active mesh.
-The counter `irefinementdone`, available as the `nref` observable, increases
-only when a refinement is accepted.
+After the configured `every` interval has elapsed, the threshold is tested on
+each subsequent timestep until a useful refinement is accepted. The interval
+counter is reset only at that accepted event. Thus `every` is a minimum delay
+between remeshes, not a permanently sparse sampling period. The counter
+`irefinementdone`, available as the `nref` observable, increases only when a
+refinement is accepted.
 
 ## Path parametrization and anchors
 
@@ -86,13 +92,23 @@ so the same algorithm works for one- and three-dimensional trajectories.
 The refined region extends from the collected/nozzle side through
 `irefbeadstart`, the last element found above the threshold. Beads marked in
 `jetbd` divide it into anchored segments. Each segment receives a number of
-new intervals based on its fraction of total path length and the requested
-threshold. Anchor locations are copied into the target mesh exactly; the
-unrefined tail is retained rather than interpolated.
+new intervals equal to the ceiling of its arc length divided by the requested
+`dynamic refinement threshold`. The base insertion `resolution` does not
+define this target mesh. Anchor locations are copied into the target mesh
+exactly; the unrefined tail is retained rather than interpolated.
 
 Anchor beads reduce interpolation drift and preserve selected material
 locations, but their array indices may still change when the active interval
-is rebased.
+is rebased. They are ordinary jet material unless the separate variable-mass
+feature is explicitly enabled; an anchor flag alone does not represent a
+nanoparticle or freeze a bead between timesteps.
+
+For the historical one-bead startup, anchors continue to be assigned as new
+material is inserted at the nozzle. A pre-extended initial jet now receives
+interior anchors before its first timestep, at the configured anchor spacing.
+The two path endpoints are not tagged because they already occur in both
+meshes; treating an endpoint as an interior anchor would create a zero-length
+anchored segment.
 
 ## Interpolated and reconstructed state
 
@@ -131,6 +147,88 @@ algorithm preserves the two totals separately:
 They must not be merged, substituted for one another, or normalized with a
 shared factor. Their local distribution may change slightly through spline
 interpolation even though each total is conserved.
+
+## OpenACC path
+
+The serial Maxwell/Platen configuration in Test Case 21 keeps integration,
+insertion, and the jet state in a persistent OpenACC data region. Once the
+minimum refinement interval has elapsed, a device reduction returns only the
+last over-threshold segment index, total path length, and the nozzle-length
+correction. These scalars reproduce the inexpensive part of the historical
+acceptance test without downloading bead arrays.
+
+Only when that test predicts a denser target mesh does JETSPIN download the
+active topology and evaporation state. The host computes normalized path
+coordinates and target knots. Akima then follows four accelerator phases:
+
+1. one independent secant slope per source interval;
+2. serial extrapolation of the four endpoint slopes;
+3. one independent Akima tangent and one cubic coefficient set per knot; and
+4. one independent interval search and interpolation per target knot.
+
+The endpoint extrapolation is constant work; the three knot-oriented phases
+are OpenACC parallel loops. They contain no reduction or order-dependent sum.
+Source and target coordinates are uploaded once per accepted event. Each of
+the 11 source fields is then uploaded once and its interpolated result is
+downloaded once.
+
+The interpolated cross-section radius then feeds a second device kernel that
+reconstructs bead volume/evaporation volume, rescales each for
+reference-volume conservation, and converts the interpolated mass/charge
+densities back to per-bead quantities -- the same volume-conservation and
+mass/charge-conversion rules described above, executed on the device instead
+of the host. Only the data-dependent bookkeeping that builds the normalized
+target mesh in the first place (the mass-boundary walk, `jetptc`/`jetbdc`
+assembly) and the anchor save/restore/final-assembly steps remain host-side:
+they are a small, rare, inherently sequential scan, not a per-bead parallel
+operation. After those host checks, the remeshed state is uploaded and device
+integration resumes.
+
+The normal Test 21 allocation reserves one `incnpjet` block and does not need
+to grow. The capacity-growth validation deliberately reduces that reserve to
+50 entries. When the accepted mesh exceeds the old capacity, JETSPIN detaches
+the topology and evaporation mappings before the host allocations are
+replaced. It then resizes the Platen workspaces, semantically repacks the
+pre-generated Gaussian history for the new stride, generates values only for
+new bead indices, and binds the completed host mesh and resized history once.
+The same device Akima kernels operate before and after capacity growth.
+
+Test Case 22 validates repeated use of this lifecycle. Its physical input is
+derived from Test 21, while developer-only environment overrides reduce the
+initial reserve and refinement growth increment to 20 entries. Three accepted
+events must therefore perform three independent mapping releases, device Akima
+remeshes, Gaussian-history repacks, workspace reallocations, and device
+rebinds. Normal runs still reserve and grow by `incnpjet`, currently 100.
+
+Test Case 23 adds collector removal without changing this hybrid boundary.
+The device topology primitive advances the lower active bound and clears the
+removed bead without downloading the full state. Accepted refinement events
+still perform the only intermediate complete-state downloads. The test
+requires removal on both sides of the third remesh, proving that a rebased
+active interval survives the Akima and device-rebind lifecycle.
+
+Two development builds validate this boundary. `JETSPIN_DEV_HOST_AKIMA`
+retains the historical host coefficient/interpolation path as an oracle.
+`JETSPIN_COMPARE_AKIMA` executes the host reference and the GPU path at each
+accepted event and reports coefficient and interpolated-value errors for all
+11 fields. Test 23 performs 33 such comparisons; its largest relative errors
+are `2.48e-15` for coefficients and `3.32e-15` for values. The largest
+absolute value difference is `7.28e-12`.
+
+A third development build, `JETSPIN_COMPARE_REFINEMENT_ASSEMBLY`, applies the
+same host-then-device oracle pattern to the volume/conservation/density
+kernel: back up the pre-reconstruction state, evaluate the trusted host
+reference, restore that state, run the device kernel so it stays
+authoritative, then compare. All three Test 23 events agree with the host
+reference at or near roundoff (worst absolute `7.1e-15`, worst relative
+`4.05e-16`). Building this oracle caught two real ordering mistakes before
+they could reach the standard path: an early version invoked the device
+kernel a second time after the comparison helper already ran it, silently
+reapplying the density-to-mass conversion; a later version evaluated the host
+reference from the already-device-converted state instead of the shared
+pre-reconstruction input. Both corrupted the event's mass/charge invariant by
+tens of percent -- exactly the class of error this A/B methodology exists to
+catch before a device kernel is trusted.
 
 ## Allocation and MPI interaction
 
@@ -191,6 +289,12 @@ Changes to refinement should preserve these rules:
 The standard smoke suite exercises the historical refinement example and a
 three-way Kelvin--Voigt, evaporation, and refinement path. The latter forces
 both an Akima remeshing event and growth beyond the initial bead capacity.
+Test Case 21 adds the pre-extended anchored Maxwell/Platen path and checks the
+event-level remeshing invariants.
+Test Case 22 extends that check to three consecutive events and three capacity
+increases.
+Test Case 23 combines those three events with collector removal before and
+after the final remesh.
 
 Run:
 
@@ -198,6 +302,18 @@ Run:
 tests/smoke/run.sh serial
 tests/smoke/run.sh debug
 tests/smoke/run.sh mpi
+tests/refinement/run.sh
+tests/refinement/run.sh openacc
+tests/refinement/run.sh force-oracle
+tests/refinement/run_test22.sh nvfortran
+tests/refinement/run_test22.sh openacc
+tests/refinement/run_test22.sh force-oracle
+tests/refinement/run_test23.sh nvfortran
+tests/refinement/run_test23.sh openacc
+tests/refinement/run_test23.sh force-oracle
+tests/refinement/run_test23.sh host-akima
+tests/refinement/run_test23.sh akima-compare
+tests/refinement/run_test23.sh refinement-compare
 ```
 
 For numerical changes, also compare conservation totals immediately before

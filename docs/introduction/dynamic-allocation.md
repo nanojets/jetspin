@@ -85,6 +85,11 @@ new remeshed upper bound and, when necessary, sets capacity to that bound plus
 `incnpjet`. Akima interpolation then reconstructs the bead-aligned fields in
 a rebased interval.
 
+Test Case 22 can override only the refinement growth increment through the
+developer environment variable `JETSPIN_REFINEMENT_GROWTH_INCREMENT`. This is
+a stress-test control; the normal allocation and insertion paths continue to
+grow by 100 entries.
+
 The full workflow and its conservation rules are documented in the
 [dynamic-refinement guide](dynamic-refinement.md).
 
@@ -94,6 +99,19 @@ combines its local allocation decision with `doallocate`. When evaporation is
 enabled, reference volume `jetvl` and instantaneous post-evaporation volume
 `jetve` are distinct state and both must survive remeshing, backup, restore,
 and MPI synchronization.
+
+In the single-GPU Maxwell/Platen path, an accepted refinement first downloads
+the active state for host target-mesh preparation. Akima coefficient
+construction and field interpolation then execute on the GPU. If the target
+mesh exceeds `mxnpjet`, the old topology and evaporation mappings are deleted
+before any host allocation changes. The new arrays, capacity-dependent Platen
+workspace, and indexed Gaussian history are then rebound once. No stale device
+address is retained across the host reallocation.
+
+Test Case 23 verifies the same replacement while the active lower bound moves.
+Collector removal is handled by the existing device topology primitive: it
+advances `inpjet`, clears the removed slot, and returns only event metadata.
+It does not require the complete jet to be copied to the host.
 
 ## Relationship with MPI workspaces
 

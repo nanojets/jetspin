@@ -1,0 +1,70 @@
+\section{Test Case 21: Anchored Dynamic Refinement with Platen Evaporation}
+
+Test Case 21 validates the hybrid OpenACC port of dynamic Akima refinement.
+It combines Maxwell rheology, the stochastic Platen integrator,
+Yarin evaporation, aerodynamic drag, nozzle insertion, and numerical anchor
+beads. The input is stored in
+\texttt{examples/input-21/input.dat}.
+
+The initial jet contains 400 elements at a resolution of 0.02 cm and occupies
+the interval from the nozzle to 8 cm, while the collector remains at 16 cm.
+The free half of the domain permits field-driven stretching. Interior beads
+are tagged as anchors every 0.10 cm. These beads are ordinary material points
+that remain knots of the old and refined interpolation meshes; no variable
+mass or nanoparticle model is enabled.
+
+The refinement target is also 0.10 cm. The reduced charge density limits
+sensitivity to the order of the direct Coulomb sum, whereas the increased
+external potential makes the short validation reach the refinement threshold.
+These choices accelerate a numerical validation and are not proposed as a
+reference experimental parameter set. The minimum interval between accepted
+remeshes is $5\times10^{-5}$ s, leaving a post-refinement trajectory before
+the run ends.
+
+The OpenACC path keeps the Platen stages, pre-generated Gaussian history,
+insertion, and state on the device. Repeated refinement checks transfer only
+three reduction scalars. At an accepted event the active state is downloaded,
+the host constructs normalized source and target knots, and Akima coefficient
+construction and all 11 spline interpolations execute on the GPU. Conservation
+and anchor restoration remain on the host, after which the remeshed state is
+uploaded once. The
+initial allocation reserves 100 additional entries, so the validated event
+does not reallocate a mapped array. An additional capacity-growth mode reduces
+only this developer reserve to 50 entries. It releases the old persistent
+mappings before the host allocation changes, expands the Gaussian history and
+Platen/Coulomb workspaces, and binds the completed mesh once. The same device
+Akima kernels are used in both modes.
+
+With GFortran the event occurs at step 7,134 and changes the active count from
+413 to 454, ending with 455 elements. With NVFORTRAN 24.3 the CPU event occurs
+at step 7,118 and changes 412 elements to 460, ending with 462. The complete
+host-force oracle on one NVIDIA A30 reproduces the NVFORTRAN CPU event and
+topology. The native A30 path accepts at step 7,122, changes 412 elements to
+459, and ends with 461. The four-step shift is consistent with the different
+target-centric Coulomb summation order in a bending-sensitive trajectory.
+
+All paths start with 79 interior anchors, finish with \texttt{nref=1}, and
+preserve anchor positions and fields within the $10^{-12}$ checker tolerance.
+Reference and evaporation-volume conservation errors are of order
+$10^{-16}$, with no capacity reallocation. The 8,000-step run pre-generates
+24,048,000 Gaussian doubles for the full 500-entry capacity and uploads them
+once. A transfer audit observed only the three reduction scalars during
+ordinary threshold checks, one full-state download and upload at the Akima
+event, and the independent final-shutdown download.
+
+In the capacity-growth mode, NVFORTRAN CPU accepts at step 7,156 and the
+native A30 at step 7,155. Both change 413 active elements to 455 and finish
+with 456. The complete-force oracle accepts at the CPU step with the same
+topology. Capacity grows from 450 to 557 entries. Existing Gaussian values are
+preserved while the history is repacked, new indices are generated once, and
+26,784,000 doubles are uploaded for the new stride. CPU and oracle statistics
+agree within $3\times10^{-7}$ relatively; the native GPU statistics differ by
+at most 0.8 percent while retaining identical topology and conservation
+invariants. A transfer audit again found only the accepted-event and final
+full-state downloads, plus one topology/evaporation rebind, one history
+upload, and one workspace recreation at the event.
+
+The script \texttt{tests/refinement/run.sh} defaults to GFortran. Its
+\texttt{nvfortran}, \texttt{openacc}, and \texttt{force-oracle} arguments run
+the corresponding event-level validation paths. Appending
+\texttt{capacity-growth} enables the forced-capacity validation.

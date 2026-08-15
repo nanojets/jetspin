@@ -50,6 +50,9 @@ all:
 	@echo "nvfortran-openacc-host             "
 	@echo "nvfortran-openacc-force-oracle     "
 	@echo "nvfortran-openacc-coulomb-oracle   "
+	@echo "nvfortran-openacc-host-akima       "
+	@echo "nvfortran-openacc-compare-akima    "
+	@echo "nvfortran-openacc-compare-refinement"
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -77,6 +80,9 @@ help:
 	@echo "nvfortran-openacc-host             "
 	@echo "nvfortran-openacc-force-oracle     "
 	@echo "nvfortran-openacc-coulomb-oracle   "
+	@echo "nvfortran-openacc-host-akima       "
+	@echo "nvfortran-openacc-compare-akima    "
+	@echo "nvfortran-openacc-compare-refinement"
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -157,6 +163,37 @@ nvfortran-openacc-coulomb-oracle:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
 	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
 	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_COULOMB_ORACLE $(FPPFLAGS_EXTRA)" \
+	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
+	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
+
+# Development-only Akima oracle: retain the historical host coefficient and
+# interpolation path while the surrounding refinement lifecycle stays active.
+nvfortran-openacc-host-akima:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
+	FPPFLAGS="-Mpreprocess -DJETSPIN_DEV_HOST_AKIMA $(FPPFLAGS_EXTRA)" \
+	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
+	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
+
+# Development-only A/B build: compute host reference coefficients and values,
+# then run the device Akima path and report field-wise maximum differences.
+nvfortran-openacc-compare-akima:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
+	FPPFLAGS="-Mpreprocess -DJETSPIN_COMPARE_AKIMA $(FPPFLAGS_EXTRA)" \
+	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
+	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
+	EX=$(EX) BINROOT=$(BINROOT) seq
+
+# Development-only A/B build: compute host reference volume/evaporation-
+# volume reconstruction, conservation rescale, and density conversion, then
+# run the device path and report field-wise maximum differences.
+nvfortran-openacc-compare-refinement:
+	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
+	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
+	FPPFLAGS="-Mpreprocess -DJETSPIN_COMPARE_REFINEMENT_ASSEMBLY $(FPPFLAGS_EXTRA)" \
 	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
@@ -269,13 +306,13 @@ error_mod.o:error_mod.f90
 	$(FC) $(FFLAGS) error_mod.f90
 
 utility_mod.o:utility_mod.f90
-	$(FC) $(FFLAGS) utility_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) utility_mod.f90
 	
 nanojet_mod.o:nanojet_mod.f90
 	$(FC) $(FFLAGS) nanojet_mod.f90
 	
 fit_mod.o:fit_mod.f90
-	$(FC) $(FFLAGS) fit_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) fit_mod.f90
 	
 support_functions_mod.o:support_functions_mod.f90
 	$(FC) $(FFLAGS) support_functions_mod.f90
@@ -284,7 +321,7 @@ breaking_mod.o:breaking_mod.f90
 	$(FC) $(FFLAGS) breaking_mod.f90
 	
 dynamic_refinement_mod.o:dynamic_refinement_mod.f90
-	$(FC) $(FFLAGS) dynamic_refinement_mod.f90
+	$(FC) $(FFLAGS) $(FPPFLAGS) dynamic_refinement_mod.f90
 	
 viscoelastic_force_mod.o: viscoelastic_force_mod.f90
 	$(FC) $(FFLAGS) viscoelastic_force_mod.f90

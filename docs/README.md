@@ -38,6 +38,10 @@ and documentation-maintenance rules, see the
 - [Test Case 9: 1,000-bead CPU/GPU benchmark](examples/test-9.md)
 - [Test Case 16: dynamic Maxwell GPU evaporation](examples/test-16.md)
 - [Test Case 17: dynamic Kelvin–Voigt GPU evaporation](examples/test-17.md)
+- [Test Case 20: stochastic Platen Maxwell evaporation](examples/test-20.md)
+- [Test Case 21: anchored dynamic refinement](examples/test-21.md)
+- [Test Case 22: repeated refinement and capacity growth](examples/test-22.md)
+- [Test Case 23: refinement with collector removal](examples/test-23.md)
 
 ## Scientific model
 

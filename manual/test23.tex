@@ -1,0 +1,58 @@
+\section{Test Case 23: Refinement with Collector Removal}
+
+Test Case 23 extends the repeated-refinement path through the collector. It
+retains Maxwell rheology, Yarin evaporation, stochastic Platen aerodynamic
+drag, nozzle insertion, and ordinary numerical anchor beads. The initial jet
+contains 400 elements over the first 8 cm of a 12 cm nozzle-to-collector
+domain. The applied potential is scaled to retain the physical field strength
+of Test Case 22. The timestep is $2.5\times10^{-8}$ s and the run ends after
+16,000 steps.
+
+The dedicated runner sets developer-only initial and growth reserves of 20
+entries. Three accepted Akima events therefore cause three capacity changes.
+Collector removal changes the lower active bound before the third remesh and
+continues afterwards. This combines all relevant topology transitions:
+insertion, removal, remeshing, capacity replacement, Platen workspace resize,
+and semantic repacking of the pre-generated Gaussian history.
+
+With NVFORTRAN 24.3, the CPU refinement events occur at steps 14,301, 14,944,
+and 15,718. The first collector removal occurs at step 15,647. The complete
+force oracle places the last remesh at step 15,717, while the native NVIDIA
+A30 places it at step 15,700. All paths preserve 81 active anchors and grow
+capacity from 420 to 477, then 520, and finally 557.
+
+The exact later removal sequence is not a CPU/GPU identity requirement.
+Target-centric direct Coulomb accumulation changes the floating-point order
+of summation, and the stochastic bending trajectory amplifies this difference
+near the collector. Validation instead requires collector removal both before
+and after the final remesh, finite output, ordered coordinates, unchanged
+anchor fields, and conservation of reference volume, evaporated volume, mass,
+and charge at every Akima event.
+
+Removal is performed by the device topology primitive and does not download
+the full jet. Complete state transfers remain limited to accepted refinement
+events and final shutdown. Host code constructs the target mesh and applies
+conservation and anchor rules; Akima coefficient construction and all 11 field
+interpolations execute on the GPU.
+
+An NVIDIA A30 transfer audit records four complete state downloads, namely
+the three accepted Akima events and final shutdown, together with exactly
+three Gaussian-history uploads, topology rebinds, and evaporation-state
+rebinds. The ordinary collector check returns one four-byte control value;
+an accepted removal transfers and clears only the collected point.
+
+A dedicated A/B build evaluates the historical host Akima routines and the
+device implementation at all three events. Across 33 field/event comparisons,
+the maximum coefficient relative difference is $2.48\times10^{-15}$, while
+interpolated values differ by at most $7.28\times10^{-12}$ absolutely and
+$3.32\times10^{-15}$ relatively. Independent device and host-Akima-oracle
+runs produce byte-identical statistics files and the same event and removal
+topology.
+
+The commands
+\texttt{tests/refinement/run\_test23.sh nvfortran},
+\texttt{tests/refinement/run\_test23.sh openacc}, and
+\texttt{tests/refinement/run\_test23.sh force-oracle} run the CPU, native GPU,
+and force-oracle validations. Arguments \texttt{host-akima} and
+\texttt{akima-compare} select the historical spline oracle and the direct
+host/device spline comparison, respectively.

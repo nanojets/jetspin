@@ -65,7 +65,7 @@ named explicitly in each OpenACC data region. No managed/unified-memory build
 mode is used.
 
 Configurations outside the explicitly validated persistent gates in Tests
-9--13, 16, 17, and 20 continue to use separate call-scoped Coulomb and EOM
+9--13, 16, 17, 20, and 21 continue to use separate call-scoped Coulomb and EOM
 data regions.
 
 Test 13 now records the bounded persistent dynamic-topology milestone. It
@@ -123,6 +123,69 @@ The fixed-topology Maxwell Platen evaporation path used by Test 20 also keeps
 its three drift evaluations, stochastic velocity update, Heun position,
 volume and stress updates, and statistics on the device. Its state and
 Gaussian history therefore follow the same persistent-data policy as Test 12.
+
+Test 21 extends Maxwell Platen evaporation to insertion and dynamic refinement.
+Its standard 24,048,000-double Gaussian history covers the reserved 500-bead
+capacity and is uploaded once. Eligible refinement checks return only three
+reduction scalars. At an accepted event, the complete active state is
+downloaded once for host target-mesh preparation. Akima slopes, tangents,
+cubic coefficients, and the 11 field interpolations then run on the GPU. The
+resulting cross-section radius is then used, still on the GPU, to reconstruct
+bead volume and evaporation volume, rescale each for reference-volume
+conservation, and convert the interpolated mass/charge densities back to
+per-bead quantities. Host code retains the data-dependent, rare (a few events
+per run) bookkeeping instead: normalized target-mesh/anchor-mesh construction,
+anchor state save/restore, and the final mesh assembly.
+If the resulting mesh exceeds capacity, the old
+topology, evaporation state, Platen scratch arrays, Coulomb workspace, and
+Gaussian history mappings are released before their host allocations change.
+Existing indexed Gaussian values are preserved during stride repacking; only
+new capacity slots are generated. The resized state and history are rebound
+once. An A30 transfer audit found no complete state transfer on an ordinary
+timestep. The one full-state download at final shutdown is independent of
+refinement.
+
+Test 22 repeats this lifecycle three times in 15,800 steps. The native A30 and
+NVFORTRAN CPU runs retain the same active counts across all events and finish
+with 536 elements. The first two event steps are identical; the third occurs
+at step 15,701 on the A30 and 15,719 on the CPU because of the target-centric
+Coulomb accumulation order. Their 80-row statistics compare within 2.5
+percent. The complete-force oracle reproduces all CPU event steps and compares
+within `6e-7` relatively.
+
+An A30 transfer audit records four complete state downloads: one for each of
+the three accepted refinement events and one at final shutdown. It also records
+exactly three Gaussian-history uploads, three topology rebinds, and three
+evaporation-state rebinds. No complete state is downloaded during an ordinary
+timestep or an unsuccessful threshold scan. Across the three Akima events,
+coordinates are uploaded six times (source and target once per event), source
+fields 33 times, and interpolated results are downloaded 33 times. These
+kilobyte-scale payloads are confined to accepted events.
+
+Test 23 combines this repeated lifecycle with collector removal. The Maxwell
+Platen persistent-path eligibility includes `removing yes`; the established
+device topology primitive advances the active lower bound and clears the
+collected bead. Removal itself transfers only point/event data, while accepted
+Akima events retain the event-only target-mesh/anchor-bookkeeping boundary
+described above.
+The A30 audit again finds four complete state downloads (three refinement
+events plus shutdown) and three history/topology/evaporation rebinds. The
+ordinary removal check returns one four-byte control scalar; each of the four
+accepted removals downloads and clears only one bead.
+
+The standard build's CPU/GPU `statout.dat` agreement (`rtol=3e-2`) holds for
+79 of 81 rows; the last two diverge once the jet reaches the `x=12 cm`
+collector and the two builds fork onto different removal schedules (CPU ten
+removals/527 final active beads, GPU four/532). Rebuilding Test 23 with the
+existing narrow `nvfortran-openacc-coulomb-oracle` target -- direct Coulomb
+sum on the host, everything else including topology and the reconstruction
+kernel above still on the device -- confirms direct-Coulomb summation order
+as the dominant source: its third event lands at the CPU's own step (15718),
+its first seven removals match the CPU step-for-step, and its final active
+count (530) matches the complete-force oracle exactly. Agreement then holds
+for 80 of 81 rows, leaving only the last row diverging. This is a diagnostic
+confirmation of an already-documented sensitivity, not a change to the
+standard build's accepted topology.
 
 The Yarin evaporation rate, the evaporation-specific direct Coulomb force, and
 the concentration-dependent constitutive updates are now available in the
@@ -238,15 +301,53 @@ Kelvin--Voigt evaporation EOM omits air drag and lift even when the input
 enables air drag; the device implementation preserves that established
 semantics.
 
+Test 21 validates the hybrid dynamic-refinement path. The native A30 event is
+accepted through anchor preservation, ordered path coordinates, topology, and
+separate reference/evaporated-volume conservation rather than binary
+trajectory identity. With NVFORTRAN 24.3, the CPU and complete-force-oracle
+runs accept the same step and final topology; their final written statistics
+agree within `3.6e-6` relatively. The native target-centric Coulomb path shifts
+the accepted event by four steps, as expected for a bending-sensitive
+trajectory.
+
+Test 23 validates the Akima device kernels directly. A comparison build runs
+the historical host spline and the accelerator spline for 11 fields at each
+of three remeshes. The maximum coefficient relative difference is
+`2.48e-15`; interpolated values differ by at most `7.28e-12` absolutely and
+`3.32e-15` relatively. The calculation has no reduction: source slopes,
+interior tangents, cubic coefficients, and target interpolations are
+independent, with
+only the constant-size endpoint extrapolation executed serially.
+
+A second comparison build validates the bead volume/evaporation-volume
+reconstruction, conservation rescale, and density-to-quantity conversion that
+follow the Akima interpolation. It backs up the pre-reconstruction state,
+evaluates the host reference, restores that state, then runs the device
+kernel so it remains authoritative, and reports the maximum difference
+against the host reference at each event. All three Test 23 events agree at
+or near roundoff (worst absolute `7.1e-15`, worst relative `4.05e-16`), and
+the standard build reproduces the same event/removal/final-active topology as
+before this kernel existed. Building this oracle exposed two real ordering
+bugs — the device kernel invoked twice, and the host reference evaluated from
+already-converted state — each of which corrupted the event's mass/charge
+invariant by tens of percent before being fixed; this is the reason every new
+device stage in this project must be validated with an A/B oracle rather than
+trusted from inspection alone.
+
 ## Next porting stages
 
 1. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
-2. Move capacity growth itself to a device-aware allocator if reallocation
-   frequency becomes significant; current transfers occur only on resize
-   events, not on ordinary timesteps.
-3. Port the local Akima coefficient loops, replace the interpolation interval
-   scan with a GPU-suitable search, and then address dynamic refinement.
+2. Extend the refinement-capacity lifecycle beyond the currently validated
+   serial Maxwell/Platen combination when additional GPU model combinations
+   are enabled; current transfers occur only on resize events.
+3. The remaining host-side work at an accepted event is the data-dependent
+   mass-boundary walk, target-mesh/anchor-mesh construction, and anchor
+   save/restore/final-assembly bookkeeping. It is a small, rare (a few events
+   per run), inherently sequential scan rather than a per-bead parallel
+   operation, so it is not a priority target; the next candidate is instead
+   determining whether the accepted-event full-state round trip can be
+   removed without duplicating that bookkeeping's model logic.
 4. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 

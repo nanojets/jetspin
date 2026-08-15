@@ -32,7 +32,7 @@ module integrator_mod
                          ks,li,v,velext,linserting,lremove,lmultiplestep, &
                          airdragamp,noisediff,noisefric,ldragvel,typemass, &
                          ltrackbeads,ltagbeads,lbreakup
- use dynamic_refinement_mod, only : driver_dynamic_refinement
+ use dynamic_refinement_mod, only : driver_dynamic_refinement,lrefinement
  use profiling_mod, only : profiling_start,profiling_stop,prof_eom, &
                          prof_rk_update
 #ifdef _OPENACC
@@ -120,12 +120,20 @@ contains
  subroutine prepare_integrator_random_history(h)
   implicit none
   double precision, intent(in) :: h
-  integer :: nsteps
-  if(integrator/=4 .or. systype/=4 .or. npjet/=1000)return
-  if(.not.(fixed_accelerator_geometry() .or. &
-   fixed_evaporative_platen_eligible()))return
+  integer :: nsteps,history_last
+  logical :: fixed_history,dynamic_history
+  if(integrator/=4 .or. systype/=4)return
+  fixed_history=npjet==1000 .and. (fixed_accelerator_geometry() .or. &
+   fixed_evaporative_platen_eligible())
+  dynamic_history=dynamic_evaporative_platen_eligible()
+  if(.not.(fixed_history .or. dynamic_history))return
   nsteps=nint((endtime-initime)/h)
-  call prepare_gaussian_history(inpjet,npjet,mxnpjet,3,nsteps)
+  history_last=npjet
+! Generate noise for the full reserved capacity in a dynamic run.  Beads
+! inserted after initialization then consume the same indexed history on CPU
+! and GPU without drawing random numbers inside the timestep loop.
+  if(dynamic_history)history_last=mxnpjet
+  call prepare_gaussian_history(inpjet,history_last,mxnpjet,3,nsteps)
 #ifdef _OPENACC
 !$acc enter data copyin(gaussianhistory(0:(mxnpjet+1)*6* &
 !$acc& gaussianhistorysteps-1))
@@ -154,6 +162,26 @@ contains
    .not.linserting .and. .not.lremove .and. .not.lmultiplestep .and. &
    lairdrag .and. .not.lflorentz .and. .not.luppot .and. nfieldtype.eq.0
  end function fixed_evaporative_platen_eligible
+
+ logical function dynamic_evaporative_platen_eligible()
+  implicit none
+  character(len=16) :: disable_persistent
+  disable_persistent=''
+  call get_environment_variable('JETSPIN_OPENACC_DISABLE_PERSISTENT', &
+   disable_persistent)
+  if(trim(disable_persistent)=='1')then
+    dynamic_evaporative_platen_eligible=.false.
+    return
+  endif
+  dynamic_evaporative_platen_eligible=systype.eq.4 .and. levaporation .and. &
+   .not.lKVfluid .and. integrator.eq.4 .and. npjet>=100 .and. &
+   mxnpjet>npjet .and. mxrank.eq.1 .and. mystart.eq.inpjet .and. &
+   myend.eq.npjet .and. linserting .and. &
+   .not.lmultiplestep .and. lairdrag .and. .not.lflorentz .and. &
+   .not.luppot .and. nfieldtype.eq.0 .and. .not.ldragvel .and. &
+   typemass.eq.0 .and. .not.ltrackbeads .and. ltagbeads .and. &
+   .not.lbreakup .and. lrefinement
+ end function dynamic_evaporative_platen_eligible
 
  logical function dynamic_rk4_accelerator_eligible()
   implicit none
@@ -995,7 +1023,10 @@ contains
   double precision ::  fvz
 
 #ifdef _OPENACC
-  if(persistent_reset_requested .and. persistent_acc)then
+! A refinement-driven capacity increase occurs before this integrator call,
+! unlike nozzle insertion which requests the reset from the main loop. In
+! either case, detach the old scratch arrays before reallocating them.
+  if((persistent_reset_requested .or. doallocate) .and. persistent_acc)then
 !$acc exit data delete(yxx,yyy,yzz,yst,yvx,yvy,yvz, &
 !$acc& f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f2xx,f2yy,f2zz,f2st, &
 !$acc& f2vx,f2vy,f2vz,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz, &
@@ -1667,7 +1698,7 @@ contains
   double precision ::  f3stocvx
   double precision ::  f3stocvy
   double precision ::  f3stocvz
-  
+
 ! check and eventually reallocate the service arrays
   if(doallocate)then
     select case(systype)
@@ -5197,6 +5228,22 @@ contains
   double precision ::  f3stocvx
   double precision ::  f3stocvy
   double precision ::  f3stocvz
+
+#ifdef _OPENACC
+! Refinement can grow capacity before this call, so doallocate itself is a
+! reset request even when the main topology loop did not issue one.
+  if((persistent_reset_requested .or. doallocate) .and. persistent_acc)then
+!$acc exit data delete(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev,d3xx,d3yy,d3zz,d3st, &
+!$acc& d3vx,d3vy,d3vz,d3ev,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev, &
+!$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,y2ev)
+    call reset_coulomb_accelerator(coulforce)
+    call accelerator_set_persistent(.false.)
+    call set_coulomb_accelerator_persistent(.false.)
+    persistent_acc=.false.
+  endif
+  persistent_reset_requested=.false.
+#endif
   
 ! check and eventually reallocate the service arrays
   if(doallocate)then
@@ -5320,19 +5367,24 @@ contains
   endif
 
 #ifdef _OPENACC
-  if(.not.persistent_acc .and. fixed_evaporative_platen_eligible() .and. &
+  if(.not.persistent_acc .and. (fixed_evaporative_platen_eligible() .or. &
+   dynamic_evaporative_platen_eligible()) .and. &
    allocated(gaussianhistory))then
+    if(.not.accelerator_is_topology_enabled())then
 !$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
 !$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
 !$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
 !$acc& jetve(0:mxnpjet),jetce(0:mxnpjet),jetms(0:mxnpjet), &
 !$acc& jetch(0:mxnpjet),jetfr(0:mxnpjet))
+    endif
 !$acc enter data create(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
 !$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev,d3xx,d3yy,d3zz,d3st, &
 !$acc& d3vx,d3vy,d3vz,d3ev,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev, &
 !$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,y2ev)
     call set_coulomb_accelerator_persistent(.true.)
     call accelerator_set_persistent(.true.)
+    if(dynamic_evaporative_platen_eligible()) &
+     call accelerator_set_topology_enabled(.true.)
     persistent_acc=.true.
   endif
 #endif

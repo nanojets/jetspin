@@ -73,6 +73,7 @@
   use nanojet_mod,    only : inpjet,npjet,linserted,linserting,lremove,myseed,systype, &
                        tstep,xyzrescale,set_resolution_length, &
                        allocate_jet,set_initial_jet,add_jetbead, &
+                       tag_accelerator_added_bead, &
                        reallocate_jet, &
                        remove_jetbead,erase_jetbead,lengthscale, &
                        pdbrescale,lreadrest,lKVfluid,levaporation, &
@@ -267,6 +268,7 @@
        jetms,jetch,jetvl,jetfr)
       if(ladd .and. levaporation) &
        call accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
+      if(ladd)call tag_accelerator_added_bead()
       if(lresize)then
         call accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz, &
          jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)

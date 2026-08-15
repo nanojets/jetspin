@@ -50,6 +50,7 @@ The code is written in modular Fortran. Important entry points include:
 | `source/integrator_mod.f90` | General Euler, Heun, RK4, and Platen integration |
 | `source/integrator_kv_ev_mod.f90` | Kelvin–Voigt/evaporation integration |
 | `source/dynamic_refinement_mod.f90` | Adaptive jet remeshing |
+| `source/fit_mod.f90` | Host and OpenACC Akima coefficient/interpolation kernels |
 | `source/io_mod.f90` | Input parsing, output, restart, and reporting |
 | `source/statistic_mod.f90` | Runtime and statistical observables |
 | `source/serial_version_mod.f90` | Serial communication abstraction |
@@ -79,6 +80,7 @@ are documented in
 | `tests/smoke/` | Serial, runtime-debug, and MPI smoke suite |
 | `tests/regression/` | Eight-case numerical baselines and serial/MPI comparisons |
 | `tests/evaporation/` | Yarin and Kelvin–Voigt evaporation checks |
+| `tests/refinement/` | Anchored Akima-remeshing, repeated growth, and collector-removal checks |
 | `docs/` | Concise operational Markdown documentation |
 | `manual/` | Scientific LaTeX sources and tracked PDF |
 | `tools/` | Trajectory conversion and auxiliary tools |

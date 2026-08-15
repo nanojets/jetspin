@@ -102,6 +102,26 @@ integration sequence remain device-resident. The development-only complete
 force and Coulomb-only oracle builds use the same interfaces for Euler, RK2,
 RK4, and Platen, with or without evaporation.
 
+[Test Case 21](docs/examples/test-21.md) validates the OpenACC path for
+dynamic Akima refinement with Maxwell evaporation, stochastic Platen air drag,
+insertion, and ordinary numerical anchor beads. Integration and threshold
+reductions remain device-resident. At an accepted event, target-mesh
+construction and conservation remain on the host, while Akima slopes,
+coefficients, and the 11 field interpolations execute on the GPU. If that event
+increases capacity, the persistent jet, Platen workspace, evaporation state,
+and Gaussian history are released and rebound around the same event rather
+than transferred on later ordinary timesteps.
+
+[Test Case 22](docs/examples/test-22.md) stresses the same path with three
+successive Akima events and three forced capacity increases. It verifies that
+anchors, reference and evaporated volumes, mass, charge, Gaussian indexing,
+and persistent OpenACC mappings survive repeated release/rebind cycles.
+
+[Test Case 23](docs/examples/test-23.md) adds collector removal to that
+workload. It verifies that the device lower-bound update and bead clearing can
+be interleaved with repeated device Akima events and capacity replacement
+without introducing a full-state transfer on an ordinary removal timestep.
+
 ## Citation
 
 If JETSPIN contributes to published work, please cite:

@@ -18,7 +18,7 @@ reallocation in
 | `inpjet` | Index of the first active bead |
 | `npjet` | Index of the last active bead/current active upper endpoint |
 | `mxnpjet` | Allocated upper bound of the fundamental jet arrays |
-| `incnpjet` | Capacity-growth increment; currently 100 beads |
+| `incnpjet` | Capacity-growth increment; `dynamic refinement capacity <i>` input directive, default 100 beads |
 | `reallocation_increment` | Capacity increase applied by `reallocate_jet`; currently 100 beads |
 | `mxchunk` | Maximum size of a rank-local MPI work chunk |
 | `doallocate` | Signals that capacity-dependent work arrays may need resizing |
@@ -85,10 +85,13 @@ new remeshed upper bound and, when necessary, sets capacity to that bound plus
 `incnpjet`. Akima interpolation then reconstructs the bead-aligned fields in
 a rebased interval.
 
-Test Case 22 can override only the refinement growth increment through the
-developer environment variable `JETSPIN_REFINEMENT_GROWTH_INCREMENT`. This is
-a stress-test control; the normal allocation and insertion paths continue to
-grow by 100 entries.
+Production runs set `incnpjet` with the `dynamic refinement capacity <i>`
+input directive (positive integer, default 100 beads if omitted); it applies
+uniformly to the initial reserve and every later growth increment. Test Case
+22 additionally overrides only the refinement growth increment through the
+developer environment variable `JETSPIN_REFINEMENT_GROWTH_INCREMENT`,
+independently of the input value, to stress-test several release/rebind
+cycles in a short run.
 
 The full workflow and its conservation rules are documented in the
 [dynamic-refinement guide](dynamic-refinement.md).

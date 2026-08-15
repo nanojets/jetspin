@@ -98,6 +98,12 @@ the Gaussian history is repacked for the new bead stride, and the completed
 state is bound once. Existing Gaussian values are retained and values for new
 indices are generated only during this event.
 
+This allocation increment is the \uline{dynam refin capacity} $i$ input
+directive (default 100 beads if omitted; the value must be positive). It sets
+both the headroom reserved for a pre-extended anchored jet and the growth
+increment applied whenever an accepted refinement event exceeds the current
+capacity.
+
 Test Case 22 exercises this event lifecycle three times. Developer-only
 20-entry reserve and growth overrides force three successive capacity
 increases, while the normal production increment remains 100. Each event

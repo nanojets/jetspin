@@ -358,6 +358,8 @@ implicit none
   double precision :: anchorerror,volerror,voleverror
   double precision :: anchorvelerror,anchorstresserror
   double precision :: anchorradiuserror,anchorevradiuserror
+  double precision :: minsegmentlength,minradius,minvolume
+  integer :: minvolumeat
   double precision :: oldmass,newmass,oldcharge,newcharge
   double precision :: masserror,chargeerror
   logical :: orderedmesh,device_capacity_rebind
@@ -683,14 +685,26 @@ implicit none
   endif
 
   orderedmesh=.true.
+  minsegmentlength=huge(1.d0)
   do ipoint=inpjet,npjet-1
     if(jetpt(ipoint+1)<=jetpt(ipoint))orderedmesh=.false.
+    minsegmentlength=min(minsegmentlength,jetpt(ipoint+1)-jetpt(ipoint))
   enddo
+  minradius=minval(jetcr(inpjet:npjet))
+  minvolume=minval(jetvl(inpjet:npjet))
+  minvolumeat=inpjet-1+minloc(jetvl(inpjet:npjet),1)
 
   if(idrank==0)then
     write(6,'(a,i0,4(a,i0))')'Dynamic refinement event: step=',nstep, &
      ' active_before=',oldactive,' active_after=',newactive, &
      ' anchors_before=',oldanchorcount,' anchors_after=',newanchorcount
+    write(6,'(a,3(a,es12.4),2(a,i0))')'Dynamic refinement geometry check:', &
+     ' min_segment_length_cm=',minsegmentlength*lengthscale, &
+     ' min_radius_cm=',minradius*lengthscale, &
+     ' min_reference_volume_cm3=',minvolume, &
+     ' min_volume_bead=',minvolumeat,' jptinit=',jptinit
+    write(6,'(a,3(a,i0))')'Dynamic refinement geometry range:', &
+     ' jptend=',jptend,' totjptend=',totjptend,' npjet=',npjet
     write(6,'(a,3(a,es12.4),a,l1)')'Dynamic refinement invariants:', &
      ' anchor_position_max_displacement_cm=',anchorerror*lengthscale, &
      ' reference_volume_relative_difference=',volerror, &
@@ -1225,8 +1239,25 @@ implicit none
   integer :: i,ipoint
   double precision :: tempmod0,newvoltot,newvoltotev
 
+! When the fitted segment reaches the true jet endpoint (no preserved tail
+! beyond it, jptend==totjptend), bead totjptend has no following point to
+! define a forward segment length. This case never arose while every
+! validated refinement test kept an un-refined tail beyond the fitted
+! region; it does arise once the active jet is short enough that the whole
+! mesh lies inside the refinement zone (e.g. a jet still growing from a
+! single nozzle bead). Use the preceding segment length there instead of
+! reading past the last active bead; fall back to the elementary
+! resolution length in the degenerate single-bead case.
   do i=jptinit,jptend
-    tempmod0=lengthpath*(jetptc(i+1)-jetptc(i))
+    if(i==totjptend)then
+      if(i>jptinit)then
+        tempmod0=lengthpath*(jetptc(i)-jetptc(i-1))
+      else
+        tempmod0=resolution
+      endif
+    else
+      tempmod0=lengthpath*(jetptc(i+1)-jetptc(i))
+    endif
     jetvl(i)=tempmod0*Pi*(jetcr(i))**2.d0
   enddo
 
@@ -1248,7 +1279,15 @@ implicit none
   if(do_evaporation)then
 
     do i=jptinit,jptend
-      tempmod0=lengthpath*(jetptc(i+1)-jetptc(i))
+      if(i==totjptend)then
+        if(i>jptinit)then
+          tempmod0=lengthpath*(jetptc(i)-jetptc(i-1))
+        else
+          tempmod0=resolution
+        endif
+      else
+        tempmod0=lengthpath*(jetptc(i+1)-jetptc(i))
+      endif
       jetve(i)=tempmod0*Pi*(jetce(i))**2.d0
     enddo
 
@@ -1318,9 +1357,19 @@ implicit none
 !$acc update device(jetptc(jptinit:jptend+1),jetcr(jptinit:jptend), &
 !$acc& jetms(jptinit:totjptend),jetch(jptinit:totjptend))
 
+! See reconstruct_refinement_state_host for why the true jet endpoint
+! (jptend==totjptend, no preserved tail) must not read jetptc(totjptend+1).
 !$acc parallel loop present(jetptc,jetcr,jetvl)
   do i=jptinit,jptend
-    jetvl(i)=lengthpath*(jetptc(i+1)-jetptc(i))*Pi*jetcr(i)**2.d0
+    if(i==totjptend)then
+      if(i>jptinit)then
+        jetvl(i)=lengthpath*(jetptc(i)-jetptc(i-1))*Pi*jetcr(i)**2.d0
+      else
+        jetvl(i)=resolution*Pi*jetcr(i)**2.d0
+      endif
+    else
+      jetvl(i)=lengthpath*(jetptc(i+1)-jetptc(i))*Pi*jetcr(i)**2.d0
+    endif
   enddo
 !$acc end parallel loop
 
@@ -1363,7 +1412,15 @@ implicit none
 
 !$acc parallel loop present(jetptc,jetce,jetve)
     do i=jptinit,jptend
-      jetve(i)=lengthpath*(jetptc(i+1)-jetptc(i))*Pi*jetce(i)**2.d0
+      if(i==totjptend)then
+        if(i>jptinit)then
+          jetve(i)=lengthpath*(jetptc(i)-jetptc(i-1))*Pi*jetce(i)**2.d0
+        else
+          jetve(i)=resolution*Pi*jetce(i)**2.d0
+        endif
+      else
+        jetve(i)=lengthpath*(jetptc(i+1)-jetptc(i))*Pi*jetce(i)**2.d0
+      endif
     enddo
 !$acc end parallel loop
 

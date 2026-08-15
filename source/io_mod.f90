@@ -58,7 +58,7 @@
                              evtemp,evumidity,levumidity,evmasscoeff, &
                              jetve,lbev,bev,lmev,mev,levmasscoeff, &
                              evmasscoeff,levcsvapour,evcsvapour, &
-                             ltev,tev
+                             ltev,tev,incnpjet,lincnpjet
  use dynamic_refinement_mod, only : lrefinement,lrefinementthreshold,&
                              refinementthreshold,lrefinementevery, &
                              irefinementevery,lrefinementstart, &
@@ -712,8 +712,9 @@
   tev=1.d0
   evcsvapour=0.d0
   evmasscoeff=0.d0
-  
-  
+  incnpjet=100
+
+
   lsystype=.false.
   lintegrator=.false.
   lprintlist=.false.
@@ -773,7 +774,8 @@
   
   lrefinement=.false.
   lrefinementthreshold=.false.
-  
+  lincnpjet=.false.
+
   lrefbeadstart=.false.
   luppot=.false.
   lmirror=.false.
@@ -1267,6 +1269,13 @@
           elseif(findstring('start',directive,inumchar,maxlen))then
             lrefinementstart=.true.
             refinementstart=dblstr(directive,maxlen,inumchar)
+          elseif(findstring('capacity',directive,inumchar,maxlen))then
+            lincnpjet=.true.
+            incnpjet=intstr(directive,maxlen,inumchar)
+            if(incnpjet<1)then
+              incnpjet=100
+              call warning(107,dble(incnpjet))
+            endif
           elseif(findstring('no',directive,inumchar,maxlen))then
             lrefinement=.false.
           else
@@ -1490,6 +1499,8 @@
   call bcast_world_d(refinementevery)
   call bcast_world_l(lrefinementstart)
   call bcast_world_d(refinementstart)
+  call bcast_world_l(lincnpjet)
+  call bcast_world_i(incnpjet)
   call bcast_world_l(lprintdatrem)
   call bcast_world_l(lrefbeadstart)
   call bcast_world_d(refbeadstartfit)
@@ -2530,6 +2541,10 @@
       labelsub='dynamic refinement every'
       write(6,form4)labelsub,ugualab,refinementevery,' s'
       endif
+      if(lincnpjet)then
+      labelsub='dynamic refinement capacity'
+      write(6,form7)labelsub,ugualab,incnpjet,' beads'
+      endif
       endif
       if(lreadrest)then
       write(6,form3)"restart yes"
@@ -2807,6 +2822,10 @@
       if(lrefinementevery)then
       labelsub='dynamic refinement every'
       write(6,form4)labelsub,ugualab,refinementevery,' s'
+      endif
+      if(lincnpjet)then
+      labelsub='dynamic refinement capacity'
+      write(6,form7)labelsub,ugualab,incnpjet,' beads'
       endif
       endif
       if(lreadrest)then

@@ -514,6 +514,9 @@
       write(outp,'(/,a,g20.10,a,/)')"WARNING - mass diffusivity of solvent automatically set equal to ",ddata,' cm^2 s^-1'
     case (106)
       write(outp,'(/,a,g20.10,/)')"WARNING - 'evaporation umidity' should be between 0-1, actual value",ddata
+    case (107)
+      write(outp,'(/,a,g20.10,/)') &
+      "WARNING - 'dynamic refinement capacity' must be a positive number of beads, reset to default ",ddata
     case default
       write(outp,'(/,a,i8,/)')"unknown WARNING! code = ",kode
   end select

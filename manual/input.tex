@@ -103,6 +103,8 @@ dynam refin start $f$  & the refinement is applied only if the simulation time i
 dynam refin anchor $f$ & during the refinement procedure all the anchor beads inserted\tabularnewline
  & at distance $f$ preserve their positions\tabularnewline
  & (they are manteined as knots of both the old and new meshes)\tabularnewline
+dynam refin capacity $i$ & number of beads by which array capacity grows/is reserved\tabularnewline
+ & at an accepted refinement event (default: 100; must be positive)\tabularnewline
 evaporation yes  & activate solvent evaporation and concentration-dependent rheology (default: no)\tabularnewline
 evaporation polymer frac $f$  & initial polymer mass fraction $c_{p,0}$\tabularnewline
 evaporation airviscosity $f$  & kinematic viscosity of air $\nu_a$ in $\mathrm{cm}^{2}/\mathrm{s}$\tabularnewline

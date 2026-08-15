@@ -289,7 +289,9 @@ contains
   double precision, intent(in) :: h
   
   integer :: i
-  logical :: ltestinst
+  logical :: ltestinst,lthisbeadinst
+  logical :: lreportedinst
+  integer :: nnaninst,firstnaninst,lastnaninst
   
 ! perform the dynamic refinement if is requested
   call driver_dynamic_refinement(k,dorefinment)
@@ -344,23 +346,53 @@ contains
 #endif
   
   ltestinst=.false.
+  lreportedinst=.false.
+  nnaninst=0
+  firstnaninst=-1
+  lastnaninst=-1
 #ifdef _OPENACC
   if(.not.accelerator_device_state_is_current())then
 #endif
     do i=inpjet,npjet
-      if(ieee_is_nan(dcos(jetxx(i))))ltestinst=.true.
-      if(ieee_is_nan(dcos(jetyy(i))))ltestinst=.true.
-      if(ieee_is_nan(dcos(jetzz(i))))ltestinst=.true.
-      if(ieee_is_nan(dcos(jetst(i))))ltestinst=.true.
-      if(ieee_is_nan(dcos(jetvx(i))))ltestinst=.true.
-      if(ieee_is_nan(dcos(jetvy(i))))ltestinst=.true.
-      if(ieee_is_nan(dcos(jetvz(i))))ltestinst=.true.
+      lthisbeadinst=.false.
+      if(ieee_is_nan(dcos(jetxx(i))))lthisbeadinst=.true.
+      if(ieee_is_nan(dcos(jetyy(i))))lthisbeadinst=.true.
+      if(ieee_is_nan(dcos(jetzz(i))))lthisbeadinst=.true.
+      if(ieee_is_nan(dcos(jetst(i))))lthisbeadinst=.true.
+      if(ieee_is_nan(dcos(jetvx(i))))lthisbeadinst=.true.
+      if(ieee_is_nan(dcos(jetvy(i))))lthisbeadinst=.true.
+      if(ieee_is_nan(dcos(jetvz(i))))lthisbeadinst=.true.
+      if(lthisbeadinst)ltestinst=.true.
+! Report the first offending bead in full detail and count how many beads
+! are affected in total. The direct all-to-all Coulomb coupling can spread
+! a single bad value to every bead within one timestep, so the count
+! distinguishes a widespread propagated failure from an isolated one.
+      if(lthisbeadinst)then
+        nnaninst=nnaninst+1
+        if(firstnaninst==-1)firstnaninst=i
+        lastnaninst=i
+        if(.not.lreportedinst .and. idrank==0)then
+          lreportedinst=.true.
+          write(6,'(a,i0,7(a,l1))')'Numerical instability detail: bead=',i, &
+           ' x_nan=',ieee_is_nan(dcos(jetxx(i))), &
+           ' y_nan=',ieee_is_nan(dcos(jetyy(i))), &
+           ' z_nan=',ieee_is_nan(dcos(jetzz(i))), &
+           ' st_nan=',ieee_is_nan(dcos(jetst(i))), &
+           ' vx_nan=',ieee_is_nan(dcos(jetvx(i))), &
+           ' vy_nan=',ieee_is_nan(dcos(jetvy(i))), &
+           ' vz_nan=',ieee_is_nan(dcos(jetvz(i)))
+        endif
+      endif
     enddo
 #ifdef _OPENACC
   endif
 #endif
-  
+
   if(ltestinst)then
+    if(idrank==0)write(6,'(a,i0,a,i0,a,i0,a,i0,a,i0,a,i0)') &
+     'Numerical instability context: nstep=',k,' inpjet=',inpjet, &
+     ' npjet=',npjet,' nan_bead_count=',nnaninst, &
+     ' first_nan_bead=',firstnaninst,' last_nan_bead=',lastnaninst
     call warning(67,dble(k))
     call error(14)
   endif

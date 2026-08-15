@@ -30,6 +30,7 @@ The supported controls are:
 | `dynamic refinement threshold <length>` | Maximum target element length |
 | `dynamic refinement start <time>` | Do not refine before this time |
 | `dynamic refinement anchor <length>` | Spacing used to preserve anchor beads as interpolation knots |
+| `dynamic refinement capacity <i>` | Bead-count capacity reserve/growth increment `incnpjet` (positive integer, default 100) |
 
 Times and lengths use the normal input units: seconds and centimetres before
 internal nondimensionalization. Both `every` and `threshold` are required
@@ -185,8 +186,12 @@ operation. After those host checks, the remeshed state is uploaded and device
 integration resumes.
 
 The normal Test 21 allocation reserves one `incnpjet` block and does not need
-to grow. The capacity-growth validation deliberately reduces that reserve to
-50 entries. When the accepted mesh exceeds the old capacity, JETSPIN detaches
+to grow. `incnpjet` is set by the `dynamic refinement capacity <i>` input
+directive (positive integer, default 100 if omitted) and applies uniformly to
+the initial reserve and every later growth increment. The capacity-growth
+validation instead uses the developer-only `JETSPIN_REFINEMENT_INITIAL_RESERVE`
+environment override to reduce that reserve to 50 entries, independently of
+the input value. When the accepted mesh exceeds the old capacity, JETSPIN detaches
 the topology and evaporation mappings before the host allocations are
 replaced. It then resizes the Platen workspaces, semantically repacks the
 pre-generated Gaussian history for the new stride, generates values only for
@@ -198,7 +203,9 @@ derived from Test 21, while developer-only environment overrides reduce the
 initial reserve and refinement growth increment to 20 entries. Three accepted
 events must therefore perform three independent mapping releases, device Akima
 remeshes, Gaussian-history repacks, workspace reallocations, and device
-rebinds. Normal runs still reserve and grow by `incnpjet`, currently 100.
+rebinds. Normal runs still reserve and grow by `incnpjet`, which defaults to
+100 and is otherwise set by the `dynamic refinement capacity <i>` input
+directive.
 
 Test Case 23 adds collector removal without changing this hybrid boundary.
 The device topology primitive advances the lower active bound and clears the

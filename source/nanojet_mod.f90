@@ -29,7 +29,8 @@
  integer, public, save :: inpjet
  integer, public, save :: npjet
  integer, public, save :: mxnpjet
- integer, public, parameter :: incnpjet=100
+ integer, public, save :: incnpjet=100
+ logical, public, save :: lincnpjet=.false.
  integer, public, parameter :: reallocation_increment=100
  integer, public, save :: systype
  integer, public, save :: units

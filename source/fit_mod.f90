@@ -641,7 +641,7 @@
      jptc,host_reference)
 #endif
     call fit_akima_accelerator(jptinit,jptend,jpt,jvr,jptc,jvrfit, &
-     coefficient_max_abs,coefficient_max_rel)
+     coefficient_max_abs,coefficient_max_rel,lmonotonefield)
 #ifdef JETSPIN_COMPARE_AKIMA
     value_max_abs=maxval(dabs(jvrfit(jptinit:jptend)- &
      host_reference(jptinit:jptend)))
@@ -733,14 +733,15 @@
 
 #ifdef _OPENACC
  subroutine fit_akima_accelerator(iinterp,ninterp,xpt,ypt,x,y, &
-  coefficient_max_abs,coefficient_max_rel)
+  coefficient_max_abs,coefficient_max_rel,lmonotone)
 
 !***********************************************************************
 !
 !     OpenACC Akima coefficient construction and interpolation.
 !     Segment slopes, knot tangents, polynomial coefficients, and target
-!     points are independent. Only the four endpoint-slope extrapolations
-!     use one serial device thread.
+!     points are independent. Only the four endpoint-slope extrapolations,
+!     and the optional monotonicity limiter below, use one serial device
+!     thread.
 !
 !***********************************************************************
 
@@ -751,13 +752,16 @@
   double precision, allocatable, intent(inout) :: y(:)
   double precision, intent(out) :: coefficient_max_abs
   double precision, intent(out) :: coefficient_max_rel
+  logical, intent(in), optional :: lmonotone
 
-  integer :: i,j
+  integer :: i,j,ipass
   double precision :: m1,m2,m3,m4,w1,w2,t1,t2,dx
   double precision :: coefficient_scale
+  double precision :: alpha,beta,tau
   double precision, parameter :: eps=1.d-30
   double precision, allocatable :: slopes(:),tangents(:)
   double precision, allocatable :: p0(:),p1(:),p2(:),p3(:)
+  logical :: uselimiter
 
   allocate(slopes(inpjetspline-2:npjetspline+1))
   allocate(tangents(inpjetspline:npjetspline))
@@ -812,6 +816,44 @@
     endif
   enddo
 !$acc end parallel loop
+
+! Device counterpart of limit_akima_tangents_monotone (setup_akima, host):
+! the classic Fritsch-Carlson sufficient condition for a monotone cubic
+! Hermite interpolant, restricting the tangents just computed above. Same
+! algorithm, applied to slopes/tangents instead of the host's module-level
+! mak/tak. A single serial device thread, like the endpoint extrapolation
+! just above: this only ever runs once per accepted refinement event, on
+! a segment of at most a few hundred knots, so there is no performance
+! reason to parallelize an inherently sequential fixed-point iteration.
+  uselimiter=.false.
+  if(present(lmonotone))uselimiter=lmonotone
+  if(uselimiter)then
+!$acc serial present(slopes,tangents)
+    do i=inpjetspline,npjetspline
+      if(slopes(i-1)*slopes(i)<=0.d0)tangents(i)=0.d0
+    enddo
+    do ipass=1,3
+      do i=inpjetspline,npjetspline-1
+        if(dabs(slopes(i))<eps)then
+          tangents(i)=0.d0
+          tangents(i+1)=0.d0
+          cycle
+        endif
+        alpha=tangents(i)/slopes(i)
+        beta=tangents(i+1)/slopes(i)
+        if(alpha<0.d0)tangents(i)=0.d0
+        if(beta<0.d0)tangents(i+1)=0.d0
+        alpha=tangents(i)/slopes(i)
+        beta=tangents(i+1)/slopes(i)
+        if(alpha**2.d0+beta**2.d0>9.d0)then
+          tau=3.d0/dsqrt(alpha**2.d0+beta**2.d0)
+          tangents(i)=tau*alpha*slopes(i)
+          tangents(i+1)=tau*beta*slopes(i)
+        endif
+      enddo
+    enddo
+!$acc end serial
+  endif
 
 !$acc parallel loop gang vector present(xpt,ypt,slopes,tangents,p0,p1,p2,p3)
   do i=inpjetspline,npjetspline-1

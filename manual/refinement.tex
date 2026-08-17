@@ -253,14 +253,25 @@ but it flags the combination that produced this failure mode for any input
 exercising many consecutive refinement events over a long integration
 window.
 
-This entire investigation targeted the serial GFortran path only. Of the
-defenses above, fitting $\ln\left(\pi a_{i}^{2}\right)$ and the three
-despiking/local-source/anchor-envelope steps apply on the OpenACC path as
-well, since they wrap the fit regardless of which backend performs it; the
-evlim floor, the radius floor, and the Fritsch--Carlson monotonicity
-limiter do not, since they are reached only from the host reconstruction
-and host tangent-computation routines, not their OpenACC counterparts. A
-GPU build exercising the same input would therefore still reproduce the
-evlim/$c_{p}$ failure and would lack the monotonicity limiter's share of
-the cadence-driven mitigation; porting these host-only pieces to the
-device paths is unstarted.
+This investigation itself targeted the serial GFortran path only, and
+fitting $\ln\left(\pi a_{i}^{2}\right)$ and the three
+despiking/local-source/anchor-envelope steps already applied on the
+OpenACC path from the start, since they wrap the fit regardless of which
+backend performs it. The evlim floor, the radius floor, and the
+Fritsch--Carlson monotonicity limiter have since been ported to their
+OpenACC counterparts as well: the two water-filling floors are applied by
+bringing just the small accepted-event segment to the host, calling the
+identical, already-validated host subroutine, and returning the corrected
+values to the device -- an exact reuse, not a reimplementation, since this
+correction is rare, small, and inherently sequential, the same rationale
+already applied elsewhere in this port to the normalized target-mesh
+construction. The monotonicity limiter was ported natively into the
+device Akima kernel's own tangent computation, using the same single-thread
+device region that kernel already uses for its endpoint-slope
+extrapolation. Validated on a native NVIDIA A30: Tests 21--23 pass on all
+five available comparison backends, including a device-versus-host Akima
+coefficient/value comparison at the same roundoff level as the
+pre-existing documented baseline, and a GPU run of the real
+\texttt{examples/input-24} ran past 2.5 million steps (12 accepted
+refinement events) with no error and no recurrence of the evlim/$c_p$
+blowup.

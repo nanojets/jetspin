@@ -32,7 +32,7 @@ AKIMA_RE = re.compile(
 )
 AKIMA_FIELDS = {
     "x", "y", "z", "vx", "vy", "vz", "stress", "mass_density",
-    "charge_density", "radius", "evap_radius",
+    "charge_density", "radius_area", "evap_radius_area",
 }
 
 

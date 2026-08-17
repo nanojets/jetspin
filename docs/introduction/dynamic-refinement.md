@@ -270,18 +270,26 @@ settled into the stationary insertion/removal oscillation the case was
 designed to reach. This is the cadence now shipped with
 `examples/input-24`.
 
-**GPU/OpenACC scope: host-only.** This whole investigation targeted
-GFortran CPU only. Of the fixes above, the log-area transform and the
-three despiking/local-source/anchor-envelope calls apply on both backends
+**GPU/OpenACC scope.** This investigation itself targeted GFortran CPU
+only, and the log-area transform and the three despiking/local-source/
+anchor-envelope calls already applied on both backends from the start
 (they wrap `fit_akima` in `fit_jet_akima` regardless of which backend it
-dispatches to), but `enforce_evlim_conservative`,
+dispatches to). The remaining three -- `enforce_evlim_conservative`,
 `enforce_radius_floor_conservative`, and `limit_akima_tangents_monotone`
-are reachable only from the host paths
-(`reconstruct_refinement_state_host`, `setup_akima`) and were not ported to
-their OpenACC counterparts (`accelerator_reconstruct_refinement_state`,
-`fit_akima_accelerator`). A GPU build would still reproduce the `evlim`/`cp`
-blowup and would miss the monotonicity limiter's share of the cadence
-mitigation.
+-- have since been ported to their OpenACC counterparts too. The two
+water-filling floors reuse the exact host subroutines via a small
+`update self`/`update device` round trip around the already-rare,
+small, accepted-event data (no reimplementation, since it is the same
+code on the same data); the monotonicity limiter got a native `!$acc
+serial` port into `fit_akima_accelerator`'s own `slopes`/`tangents`
+arrays, mirroring `setup_akima`'s host algorithm verbatim. Validated on a
+native NVIDIA A30 (NVFORTRAN 24.3): Tests 21/22/23 pass on all five
+`tests/refinement/run_test23.sh` backends including `akima-compare`
+(device-vs-host tangent/coefficient agreement at the same roundoff level
+as the pre-existing documented baseline), and a fresh GPU run of the real
+`examples/input-24` ran past 2.5 million steps (12 accepted events) with
+zero errors and zero evlim/cp blowups. See `docs/STATE.md` ("GPU/OpenACC
+port of the three host-only fixes") for full detail.
 
 ## OpenACC path
 

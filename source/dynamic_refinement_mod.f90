@@ -1865,6 +1865,17 @@ implicit none
   enddo
 !$acc end parallel loop
 
+! The rare, small, data-dependent floor-and-redistribute correction below
+! is not worth a dedicated device kernel (same rationale already applied
+! to the host-only normalized target-mesh construction): bring just this
+! segment's jetvl to the host, reuse the exact same validated host
+! subroutine used by reconstruct_refinement_state_host, then push the
+! corrected values back before they are consumed by the mass/charge
+! conversion loop that follows.
+!$acc update self(jetvl(jptinit:jptend))
+  call enforce_radius_floor_conservative(jptinit,jptend,totjptend,voltotsub)
+!$acc update device(jetvl(jptinit:jptend))
+
 !$acc parallel loop present(jetms,jetch,jetvl)
   do i=jptinit,totjptend
     jetms(i)=jetms(i)*jetvl(i)
@@ -1915,6 +1926,13 @@ implicit none
       jetve(i)=jetve(i)*voltotevsub/newvoltotev
     enddo
 !$acc end parallel loop
+
+! Same rationale as the reference-volume floor above: bring this segment's
+! jetve to the host, reuse the exact validated host evlim water-filling,
+! then push the corrected values back.
+!$acc update self(jetve(jptinit:jptend))
+    call enforce_evlim_conservative(jptinit,jptend,voltotevsub)
+!$acc update device(jetve(jptinit:jptend))
 
 !$acc update self(jetve(jptinit:totjptend))
 !$acc end data

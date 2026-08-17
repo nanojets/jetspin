@@ -191,28 +191,14 @@
   (radius floor infeasible against the segment's reference-volume total).
   Both abort with a clear message rather than silently breaking either the
   floor or the conservation invariant.
-- **GPU/OpenACC scope of all fixes above: host-only, verified explicitly.**
-  This entire investigation, per the user's direction, targeted GFortran
-  CPU only. Checked precisely which of the above are actually reachable
-  from the OpenACC/GPU path: the log-cross-section-area transform and the
-  three `despike_median_filter`/`clamp_to_local_source_range`/
-  `clamp_to_anchor_envelope` calls are applied in `fit_jet_akima` as pre-
-  and post-processing around whichever backend `fit_akima` dispatches to
-  (host `setup_akima`/`interp_akima` or the device kernel
-  `fit_akima_accelerator`), so those four *do* apply uniformly to both
-  paths. The other two fixes do not: `enforce_evlim_conservative` and
-  `enforce_radius_floor_conservative` are called only from
-  `reconstruct_refinement_state_host`; the OpenACC counterpart
-  `accelerator_reconstruct_refinement_state` (`dynamic_refinement_mod.f90`)
-  was not touched and still lacks both floors. Likewise
-  `limit_akima_tangents_monotone` is reachable only through the host
-  `setup_akima`, not through `fit_akima_accelerator`'s separate device
-  tangent computation. A GPU build of `examples/input-24` (or any input
-  hitting the same evlim/cp mechanism) would therefore still reproduce
-  root cause 1 exactly as originally found, and would not benefit from the
-  monotonicity limiter's share of the cadence-driven mitigation. Porting
-  these three host-only pieces to their accelerator counterparts is
-  unstarted and untested.
+- **GPU/OpenACC scope of all fixes above: originally host-only; now ported,
+  see the dedicated section below.** This investigation itself, per the
+  user's direction, targeted GFortran CPU only, and at the time of writing
+  three of the six defenses (`enforce_evlim_conservative`,
+  `enforce_radius_floor_conservative`, `limit_akima_tangents_monotone`)
+  were reachable only from the host paths. They have since been ported to
+  their OpenACC counterparts; see "GPU/OpenACC port of the three host-only
+  fixes" below for what changed and how it was validated.
 - Guarded, low-noise diagnostic instrumentation was added and left in the
   tracked source (development-only, no effect on normal output unless a
   threshold is crossed): `Rattao blowup diagnostic` in `eom_ev_mod.f90`
@@ -300,6 +286,110 @@
   completion run (only 65% of the target `final time` has been validated
   so far) and pending a decision on whether to also address the underlying
   mechanism rather than only its cadence-driven trigger for this input.
+
+## GPU/OpenACC port of the three host-only fixes (2026-08-17)
+
+- Ported `enforce_evlim_conservative`, `enforce_radius_floor_conservative`,
+  and `limit_akima_tangents_monotone` to the OpenACC path, closing the gap
+  documented above. NVFORTRAN 24.3 and a native NVIDIA A30 (compute
+  capability 8.0) were available in this session (`module use
+  /opt/nvidia/hpc_sdk/modulefiles`, `module load nvhpc/24.3`, matching the
+  setup already documented elsewhere in this file).
+- **The two water-filling floors were not reimplemented on device.** Both
+  are rare (a few times per run), small (at most a few hundred beads), and
+  already inherently sequential (iterative fixed-point redistribution), so
+  writing a native device kernel would add real risk for no measurable
+  benefit -- the same rationale this file already applies to the
+  normalized target-mesh construction. Instead,
+  `accelerator_reconstruct_refinement_state` now does
+  `!$acc update self(jetvl(jptinit:jptend))`, calls the exact same
+  `enforce_radius_floor_conservative` host subroutine already validated on
+  CPU, then `!$acc update device(jetvl(jptinit:jptend))`, inserted between
+  the existing reference-volume rescale and the mass/charge conversion
+  loop (matching the host subroutine's own call order exactly). The
+  evaporated-volume counterpart does the same with `jetve` and
+  `enforce_evlim_conservative`, inserted between that rescale and the
+  final `!$acc update self`. Because this reuses the identical,
+  already-CPU-validated subroutine on the identical data, there is no
+  approximation or reimplementation risk here, unlike a typical device
+  port; the only new consideration is the small extra host/device
+  round trip, which is negligible next to the full-state transfer this
+  same accepted-event path already performs.
+- **The monotonicity limiter was ported natively**, since the device Akima
+  kernel (`fit_akima_accelerator`) computes its own local `slopes`/
+  `tangents` arrays rather than sharing the host's module-level `mak`/
+  `tak`, so there was no equivalent free reuse available. Added a new
+  optional `lmonotone` argument to `fit_akima_accelerator`, and a
+  `!$acc serial` block (the same construct this routine already uses for
+  its four endpoint-slope extrapolations, for the same reason: small,
+  one-time, inherently sequential work with no performance case for
+  parallelizing it) that mirrors `limit_akima_tangents_monotone`'s
+  algorithm verbatim against `slopes`/`tangents` instead of `mak`/`tak`.
+  `fit_akima` now passes `lmonotonefield` to `fit_akima_accelerator` on
+  the accelerator branch, exactly as it already did for `setup_akima` on
+  the host branch.
+- **Found and fixed an unrelated pre-existing test-checker bug** while
+  validating: `tests/refinement/check_test23.py`'s `AKIMA_FIELDS` set
+  still listed the pre-rename field labels `"radius"`/`"evap_radius"`;
+  the `JETSPIN_COMPARE_AKIMA` field-name rename to `"radius_area"`/
+  `"evap_radius_area"` (part of the log-area-fit change earlier in this
+  file) had made the `akima-compare` backend of `tests/refinement/
+  run_test23.sh` fail with "Akima comparison field set is incomplete".
+  Fixed by updating the expected set to the current names.
+- Validation performed, native A30, `nvfortran-openacc` builds from the
+  ported source:
+  - `tests/refinement/run.sh openacc` (Test 21): accepts at step 7122,
+    413->459 active, matching the pre-existing documented native-A30
+    baseline exactly.
+  - `tests/refinement/run_test22.sh openacc`: events
+    `[14301:413->455, 14944:455->498, 15738:499->536]`, capacities
+    `[420->477, 477->520, 520->558]` -- matches the documented pattern
+    (third-event step shifts slightly on native A30, as already
+    documented and accepted for this test).
+  - `tests/refinement/run_test23.sh openacc`: events
+    `[14301:413->455, 14944:455->498, 15737:497->535]`, ten removals,
+    final active 527 -- matches.
+  - `tests/refinement/run_test23.sh akima-compare` (now passing after the
+    checker fix above): coefficient max relative difference `2.4055e-15`,
+    value max absolute `4.3201e-12`, value max relative `3.3142e-15` --
+    at or near the roundoff level of the pre-existing documented baseline
+    (`2.48e-15`/`7.28e-12`/`3.32e-15`), directly confirming the ported
+    monotonicity-limiter serial region matches the host
+    `limit_akima_tangents_monotone` to roundoff on real accepted-event
+    data, not just in isolation.
+  - `tests/refinement/run_test23.sh host-akima` and `refinement-compare`:
+    both pass with the same event/removal signature.
+  - `tests/refinement/run_test23.sh force-oracle`: passes (needed
+    `JETSPIN_REFINEMENT_TIMEOUT` raised above its 240s default, since this
+    development-only host-force oracle is markedly slower than the
+    standard build, as already documented elsewhere in this file; this is
+    a pre-existing property of that oracle, not something this port
+    changed).
+  - A fresh native-A30 `nvfortran-openacc` build of the real
+    `examples/input-24` (with evaporation, the actual untracked input, not
+    a variant) ran cleanly past 2.5 million of its 1e8 target timesteps
+    (12 accepted refinement events) with zero `ERROR` lines and zero
+    `Rattao blowup diagnostic` occurrences, directly paralleling the
+    successful CPU validation earlier in this file at a comparable stage.
+    It was left running rather than driven to full completion, since the
+    CPU validation already established that full completion is a
+    multi-hour endeavor and this GPU run had already produced
+    strictly-sufficient evidence that the ported evlim fix holds on
+    device with the same input that originally exposed it.
+  - GFortran CPU is unaffected: rebuilt clean and re-passed Tests 21/22/23
+    with identical results to before this port (the two water-filling
+    calls are unchanged on the host side; the new `fit_akima_accelerator`/
+    `accelerator_reconstruct_refinement_state` code is entirely inside
+    existing `#ifdef _OPENACC` guards and is not compiled into a GFortran
+    build at all).
+  - A full rebuild with `nvfortran-openacc` and `-Minfo=accel` produced no
+    compiler warnings beyond the expected `Generating ...` diagnostic
+    informational messages.
+- The underlying cross-event compounding mechanism documented above (root
+  cause 2's residual drift, suspected cumulative resampling/
+  requantization effect) is unchanged by this port: it was never specific
+  to CPU vs. GPU, and this work only closes the host/device parity gap for
+  the three fixes that previously existed only on the host.
 
 ## Dynamic-refinement/Test-21 decision (2026-08-15)
 

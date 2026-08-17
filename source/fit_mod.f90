@@ -597,6 +597,7 @@
   character(len=*), intent(in), optional :: field_name
 
   logical :: run_accelerator
+  logical :: lmonotonefield
 #ifdef _OPENACC
   double precision :: coefficient_max_abs,coefficient_max_rel
 #ifdef JETSPIN_COMPARE_AKIMA
@@ -608,6 +609,18 @@
   
   inpjetspline=inpjet
   npjetspline=npjet
+
+! Never physically meaningful to overshoot outside the local data range
+! for these fields (cross-section/evaporation area, mass/charge density);
+! position/velocity/stress keep the unmodified Akima behaviour already
+! validated by the existing test suite.
+  lmonotonefield=.false.
+  if(present(field_name))then
+    lmonotonefield=trim(field_name)=='radius_area' .or. &
+     trim(field_name)=='evap_radius_area' .or. &
+     trim(field_name)=='mass_density' .or. &
+     trim(field_name)=='charge_density'
+  endif
 
   run_accelerator=.false.
 #ifdef _OPENACC
@@ -623,7 +636,7 @@
 #ifdef JETSPIN_COMPARE_AKIMA
     allocate(host_reference(lbound(jvrfit,1):ubound(jvrfit,1)))
     host_reference=jvrfit
-    call setup_akima(jpt,jvr,jetak1,jetak2,jetak3,jetak4)
+    call setup_akima(jpt,jvr,jetak1,jetak2,jetak3,jetak4,lmonotonefield)
     call interp_akima(jptinit,jptend,jpt,jetak1,jetak2,jetak3,jetak4, &
      jptc,host_reference)
 #endif
@@ -645,15 +658,38 @@
 #endif
   else
 #endif
-    call setup_akima(jpt,jvr,jetak1,jetak2,jetak3,jetak4)
+    call setup_akima(jpt,jvr,jetak1,jetak2,jetak3,jetak4,lmonotonefield)
     call interp_akima(jptinit,jptend,jpt,jetak1,jetak2,jetak3,jetak4, &
      jptc,jvrfit)
 #ifdef _OPENACC
   endif
 #endif
-  
+
+! Development-only diagnostic: expose the endpoint segment slopes, the
+! extrapolated tangent actually used at the lower boundary knot, and the
+! raw (pre-dabs) fitted value there and at its global minimum, to check
+! whether the classic Akima endpoint-extrapolation formula is producing an
+! overshoot/undershoot for this field somewhere in the fitted segment
+! (inpjetspline==jptinit is the collector-side endpoint here).
+  if(idrank==0 .and. present(field_name))then
+    if(trim(field_name)=='radius_area' .or. trim(field_name)=='mass_density' &
+     .or. trim(field_name)=='charge_density' .or. trim(field_name)=='stress' &
+     .or. trim(field_name)=='vx' .or. trim(field_name)=='vy' &
+     .or. trim(field_name)=='vz')then
+      write(6,'(a,a,6(a,es14.6),a,i0)')'Akima endpoint diagnostic: field=', &
+       trim(field_name), &
+       ' m_first_segment=',mak(inpjetspline), &
+       ' m_second_segment=',mak(inpjetspline+1), &
+       ' tangent_at_endpoint=',tak(inpjetspline), &
+       ' raw_fit_at_endpoint=',jvrfit(jptinit), &
+       ' raw_fit_min=',minval(jvrfit(jptinit:jptend)), &
+       ' raw_fit_max=',maxval(jvrfit(jptinit:jptend)), &
+       ' raw_fit_min_at=',jptinit-1+minloc(jvrfit(jptinit:jptend),1)
+    endif
+  endif
+
   return
-  
+
  end subroutine fit_akima
 
  subroutine begin_akima_accelerator_data(xpt,x,enable)
@@ -832,28 +868,30 @@
  end subroutine fit_akima_accelerator
 #endif
  
- subroutine setup_akima( xpt, ypt, p0, p1, p2, p3)
+ subroutine setup_akima( xpt, ypt, p0, p1, p2, p3, lmonotone)
 
 !***********************************************************************
-!     
-!     JETSPIN subroutine for computing the Akima 
+!
+!     JETSPIN subroutine for computing the Akima
 !     spline interpolation coefficients
-!     
+!
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
 !     last modification July 2015
-!     
+!
 !***********************************************************************
-  
+
   implicit none
-  
+
   double precision, dimension(:),allocatable, intent(in) :: xpt, ypt
   double precision, dimension(:), allocatable, intent(inout) :: p0, p1, p2, p3
-  
+  logical, intent(in), optional :: lmonotone
+
   integer :: i,ndarray
   double precision :: m1, m2, m3, m4, w1, w2
   double precision :: t1, t2, dx
   double precision, parameter :: eps = 1d-30
+  logical :: uselimiter
   
   mak(-2:narrayakima+1)=0.d0
 ! segment slopes are computed
@@ -889,8 +927,23 @@
   
   ndarray=narrayakima+1
   call sum_world_darr(tak,ndarray)
-  
-  
+
+! Classic Akima gives no guarantee that the resulting cubic stays within
+! the range spanned by the two knots of any segment it interpolates --
+! it can overshoot/undershoot well beyond it even when the source data
+! is itself smooth, and that overshoot compounds across repeated fits
+! (an accepted dynamic-refinement event re-fits from the previous
+! event's already-fitted state). Limiting the knot tangents to satisfy
+! the Fritsch-Carlson sufficient condition for a monotone cubic Hermite
+! removes that oscillation at its source, for every fit, regardless of
+! how the data has already evolved. This is opted into only for fields
+! where an overshoot is never physically meaningful (bead cross-section
+! and evaporation area); position/velocity/stress keep the unmodified
+! Akima behaviour already validated by the existing test suite.
+  uselimiter=.false.
+  if(present(lmonotone))uselimiter=lmonotone
+  if(uselimiter)call limit_akima_tangents_monotone()
+
   p0(0:narrayakima)=0.d0
   p1(0:narrayakima)=0.d0
   p2(0:narrayakima)=0.d0
@@ -916,6 +969,67 @@
   return
   
  end subroutine setup_akima
+
+ subroutine limit_akima_tangents_monotone()
+
+!***********************************************************************
+!
+!     JETSPIN subroutine for limiting the Akima knot tangents (tak) in
+!     place to satisfy the Fritsch-Carlson sufficient condition for a
+!     monotone cubic Hermite interpolant on every segment where the
+!     underlying source data (mak, the segment secant slopes) is itself
+!     monotone. A knot where the two adjacent secant slopes disagree in
+!     sign is a local extremum of the source data; any nonzero tangent
+!     there would force the cubic to overshoot past it, so the tangent
+!     is zeroed. On every remaining segment the two endpoint tangents
+!     are then rescaled, if needed, to stay within the classic
+!     circle-of-radius-3 bound relative to the segment's own secant
+!     slope. Operates directly on the module-level mak/tak arrays over
+!     the current inpjetspline:npjetspline source range; iterated a few
+!     passes since a tangent shared between two segments can only
+!     shrink further on a later pass, never grow back, so this converges
+!     quickly to a fixed point.
+!
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification August 2026
+!
+!***********************************************************************
+
+  implicit none
+
+  double precision, parameter :: eps=1.d-30
+  double precision :: alpha,beta,tau
+  integer :: i,ipass
+
+  do i=inpjetspline,npjetspline
+    if(mak(i-1)*mak(i)<=0.d0)tak(i)=0.d0
+  enddo
+
+  do ipass=1,3
+    do i=inpjetspline,npjetspline-1
+      if(dabs(mak(i))<eps)then
+        tak(i)=0.d0
+        tak(i+1)=0.d0
+        cycle
+      endif
+      alpha=tak(i)/mak(i)
+      beta=tak(i+1)/mak(i)
+      if(alpha<0.d0)tak(i)=0.d0
+      if(beta<0.d0)tak(i+1)=0.d0
+      alpha=tak(i)/mak(i)
+      beta=tak(i+1)/mak(i)
+      if(alpha**2.d0+beta**2.d0>9.d0)then
+        tau=3.d0/dsqrt(alpha**2.d0+beta**2.d0)
+        tak(i)=tau*alpha*mak(i)
+        tak(i+1)=tau*beta*mak(i)
+      endif
+    enddo
+  enddo
+
+  return
+
+ end subroutine limit_akima_tangents_monotone
  
  subroutine interp_akima(iinterp,ninterp,xpt,p0,p1,p2,p3,x,y,dydx)
 

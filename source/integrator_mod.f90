@@ -31,7 +31,7 @@ module integrator_mod
                          pfreq,consistency,findex,yieldstress,att,fve,gr, &
                          ks,li,v,velext,linserting,lremove,lmultiplestep, &
                          airdragamp,noisediff,noisefric,ldragvel,typemass, &
-                         ltrackbeads,ltagbeads,lbreakup
+                         ltrackbeads,ltagbeads,lbreakup,lengthscale
  use dynamic_refinement_mod, only : driver_dynamic_refinement,lrefinement
  use profiling_mod, only : profiling_start,profiling_stop,prof_eom, &
                          prof_rk_update
@@ -381,6 +381,19 @@ contains
            ' vx_nan=',ieee_is_nan(dcos(jetvx(i))), &
            ' vy_nan=',ieee_is_nan(dcos(jetvy(i))), &
            ' vz_nan=',ieee_is_nan(dcos(jetvz(i)))
+! Development-only diagnostic: locate the offending bead relative to the
+! nozzle (high index, npjet) and collector (low index, inpjet) ends, using
+! the last still-finite neighbour bead since the flagged bead's own
+! coordinates/stress may already be NaN.
+          if(i-1>=inpjet .and. .not.ieee_is_nan(dcos(jetxx(i-1))))then
+            write(6,'(a,i0,a,es14.6,a,es14.6)') &
+             'Numerical instability last-good neighbor: bead=',i-1, &
+             ' x_cm=',jetxx(i-1)*lengthscale,' reference_volume_cm3=',jetvl(i-1)
+          endif
+          write(6,'(a,i0,a,es14.6,a,i0,a,es14.6)') &
+           'Numerical instability domain extent: collector_side_bead=',inpjet, &
+           ' x_cm=',jetxx(inpjet)*lengthscale,' nozzle_side_bead=',npjet, &
+           ' x_cm=',jetxx(npjet)*lengthscale
         endif
       endif
     enddo

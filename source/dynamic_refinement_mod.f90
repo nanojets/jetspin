@@ -25,7 +25,7 @@
                   ivolume,jetbd,massratio,imassa,jetfr,h, &
                   lenthresholdbead,ltagbeads,lbreakup,jetbr, &
                   lmultiplestep,lneighlistdo,jetfm,lmassavariable, &
-                  lenprobmassa,icharge,jetce,levaporation
+                  lenprobmassa,icharge,jetce,levaporation,evlim
  use fit_mod,     only : jetptc,allocate_arrayspline,create_spline, &
                    allocate_array_jetptc,driver_fit_spline, &
                    looking_indexes_2,looking_indexes_4, &
@@ -210,6 +210,15 @@ implicit none
         call warning(85,lenthresholdbead)
       endif
     endif
+! A tight threshold forces many accepted refinement events over a short
+! integration window; growing a jet from a single bead under such a
+! cadence was found to compound a nonphysical cross-section thinning
+! across repeated events (examples/input-24/STATUS.md). This is a
+! non-fatal advisory, not an enforced minimum: the historical Example 5
+! and Tests 21-23 all use a threshold below this recommendation and
+! remain validated short-window references.
+    if(refinementthreshold<20.d0*resolution) &
+     call warning(108,refinementthreshold/resolution)
   endif
   
   return
@@ -703,6 +712,13 @@ implicit none
      ' min_radius_cm=',minradius*lengthscale, &
      ' min_reference_volume_cm3=',minvolume, &
      ' min_volume_bead=',minvolumeat,' jptinit=',jptinit
+! Development-only diagnostic: is the thinnest bead a protected anchor
+! (conserved/validated across the remesh) or an ordinary free target knot,
+! and how far is it from the segment endpoint (jptinit==inpjet, which is
+! never tagged as an anchor by construction)?
+    write(6,'(a,i0,a,l1,a,i0)')'Dynamic refinement thin-bead classification: bead=', &
+     minvolumeat,' is_anchor=',jetbd(minvolumeat), &
+     ' distance_from_endpoint=',minvolumeat-jptinit
     write(6,'(a,3(a,i0))')'Dynamic refinement geometry range:', &
      ' jptend=',jptend,' totjptend=',totjptend,' npjet=',npjet
     write(6,'(a,3(a,es12.4),a,l1)')'Dynamic refinement invariants:', &
@@ -888,6 +904,7 @@ implicit none
   integer :: i,ipoint
   double precision :: tempmod0
   logical :: execute_device_akima
+  double precision, allocatable :: jetcrarea(:),jetcearea(:)
 
   execute_device_akima=device_akima
 #ifndef _OPENACC
@@ -1038,36 +1055,85 @@ implicit none
   jetch(newlowerbound:newupperbound)= &
    dabs(buffservice(newlowerbound:newupperbound))
   
+! Fit ln(cross-section AREA) = ln(pi*r^2), not the area or radius itself.
+! Two independent reasons: (1) exp() of anything is strictly positive, so
+! the recovered area can never undershoot past zero the way a raw area
+! fit did (observed directly: a negative raw fitted area); no dabs() is
+! needed as a sign-flipping band-aid any more, only as a defensive final
+! guard. (2) Electrospinning thins the fibre roughly exponentially along
+! its length, so ln(area) is close to LINEAR in path position, while area
+! itself (already steeper than radius, being its square) is the more
+! curved, more overshoot-prone quantity to hand to Akima. jetcr is
+! recovered as sqrt(exp(fit)/pi) once the fit (and the untouched
+! preserved prefix, seeded here in the same log-area units) completes.
+  allocate(jetcrarea(0:ubound(jetcr,1)))
+  jetcrarea(:)=dlog(Pi*max(dabs(jetcr(:)),1.d-300)**2.d0)
   buffservice(:)=0.d0
   if(idrank==0)then
     buffservice(newlowerbound:newlowerbuff)= &
-     jetcr(oldlowerbound:oldlowerbuff)
+     jetcrarea(oldlowerbound:oldlowerbuff)
   endif
-  call fit_akima(jptinit,jptend,jetpt,jetcr,jetptc,buffservice, &
-   execute_device_akima,'radius')
+  call fit_akima(jptinit,jptend,jetpt,jetcrarea,jetptc,buffservice, &
+   execute_device_akima,'radius_area')
+  buffservice(newlowerbound:newupperbound)= &
+   dexp(buffservice(newlowerbound:newupperbound))
+! Remove an isolated interpolation spike/dip (a target point diverging from
+! both its immediate neighbours) before it is squared back into a
+! reconstructed volume; a genuine smooth/monotone trend is left untouched.
+  call despike_median_filter(jptinit,jptend,buffservice(jptinit:jptend),jetbd(jptinit:jptend))
+! Electrospinning genuinely thins the fibre by orders of magnitude along
+! its length, so a small absolute area is not itself a defect. What is a
+! defect is a target value falling far outside the range spanned by the
+! two source points it sits between -- classic Akima gives no such
+! shape-preserving guarantee, unlike e.g. monotone cubic Hermite. Clamp to
+! that local source envelope as a cheap approximation of it.
+  call clamp_to_local_source_range(jptinit,jptend,inpjet,npjet, &
+   jetpt(inpjet:npjet),dexp(jetcrarea(inpjet:npjet)),jetptc(jptinit:jptend), &
+   buffservice(jptinit:jptend),jetbd(jptinit:jptend))
+! The local-source clamp only guards against a fresh artifact within this
+! one event; it cannot catch a drift that already compounded through
+! several previous events, because by now that drift is baked into the
+! "legitimate" source data too. Anchors are the one thing that never
+! drifts (their radius is restored exactly every event, checked above as
+! radius_max_difference_cm=0), so bound interior points between two
+! anchors against that stable reference instead, with a generous margin.
+  call clamp_to_anchor_envelope(jptinit,jptend,buffservice(jptinit:jptend), &
+   jetbd(jptinit:jptend),1.d2)
+  deallocate(jetcrarea)
   if(mydoallocate)then
     deallocate(jetcr)
     allocate(jetcr(0:mxnpjet))
   endif
   jetcr(:)=0.d0
   jetcr(newlowerbound:newupperbound)= &
-   dabs(buffservice(newlowerbound:newupperbound))
-  
+   dsqrt(dabs(buffservice(newlowerbound:newupperbound))/Pi)
+
   if(levaporation)then
+    allocate(jetcearea(0:ubound(jetce,1)))
+    jetcearea(:)=dlog(Pi*max(dabs(jetce(:)),1.d-300)**2.d0)
     buffservice(:)=0.d0
     if(idrank==0)then
       buffservice(newlowerbound:newlowerbuff)= &
-       jetce(oldlowerbound:oldlowerbuff)
+       jetcearea(oldlowerbound:oldlowerbuff)
     endif
-    call fit_akima(jptinit,jptend,jetpt,jetce,jetptc,buffservice, &
-     execute_device_akima,'evap_radius')
+    call fit_akima(jptinit,jptend,jetpt,jetcearea,jetptc,buffservice, &
+     execute_device_akima,'evap_radius_area')
+    buffservice(newlowerbound:newupperbound)= &
+     dexp(buffservice(newlowerbound:newupperbound))
+    call despike_median_filter(jptinit,jptend,buffservice(jptinit:jptend),jetbd(jptinit:jptend))
+    call clamp_to_local_source_range(jptinit,jptend,inpjet,npjet, &
+     jetpt(inpjet:npjet),dexp(jetcearea(inpjet:npjet)),jetptc(jptinit:jptend), &
+     buffservice(jptinit:jptend),jetbd(jptinit:jptend))
+    call clamp_to_anchor_envelope(jptinit,jptend,buffservice(jptinit:jptend), &
+     jetbd(jptinit:jptend),1.d2)
+    deallocate(jetcearea)
     if(mydoallocate)then
       deallocate(jetce)
       allocate(jetce(0:mxnpjet))
     endif
     jetce(:)=0.d0
     jetce(newlowerbound:newupperbound)= &
-     dabs(buffservice(newlowerbound:newupperbound))
+     dsqrt(dabs(buffservice(newlowerbound:newupperbound))/Pi)
   endif
   call end_akima_accelerator_data(jetpt,jetptc)
   
@@ -1274,6 +1340,13 @@ implicit none
 
   jetvl(jptinit:jptend)=jetvl(jptinit:jptend)*voltotsub/newvoltot
 
+! The Akima area fit can occasionally undershoot past zero near a sharp
+! feature (observed directly: a negative raw fitted area before dabs()).
+! dabs() alone only folds that into an arbitrarily tiny, physically
+! meaningless bead. Restore a minimum sane bead radius without breaking
+! the segment's reference-volume conservation just established above.
+  call enforce_radius_floor_conservative(jptinit,jptend,totjptend,voltotsub)
+
   call convert_from_density(jetms,jetch,jetvl)
 
   if(do_evaporation)then
@@ -1304,11 +1377,409 @@ implicit none
 
     jetve(jptinit:jptend)=jetve(jptinit:jptend)*voltotevsub/newvoltotev
 
+! The Akima-interpolated/rescaled jetve above can locally undershoot the
+! evlim floor that every ordinary per-timestep integrator path already
+! enforces (jetve(i)/jetvl(i)>=evlim). Restore the floor without breaking
+! the segment's evaporated-volume conservation just established above.
+    call enforce_evlim_conservative(jptinit,jptend,voltotevsub)
+
   endif
 
   return
 
  end subroutine reconstruct_refinement_state_host
+
+ subroutine enforce_evlim_conservative(jptinit,jptend,voltotevsub)
+
+!***********************************************************************
+!
+!     JETSPIN subroutine for restoring the evlim evaporated-volume floor
+!     (jetve(i)>=evlim*jetvl(i)) on an accepted-event fitted segment
+!     without breaking its evaporated-volume conservation invariant.
+!
+!     Beads found below their own floor are clamped up to it; the
+!     resulting deficit is taken back from the still-compliant beads in
+!     proportion to their surplus above their own floor (water filling),
+!     iterating in case that step itself pushes another bead below its
+!     floor. The segment total is therefore preserved to roundoff, which
+!     is the only physical invariant a non-local redistribution like this
+!     can honestly guarantee; it does not attempt to model why any one
+!     bead undershot. If the floor is intrinsically incompatible with the
+!     segment total (no amount of redistribution can satisfy it), abort
+!     with a clear error instead of silently violating either constraint.
+!
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification August 2026
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: jptinit,jptend
+  double precision, intent(in) :: voltotevsub
+
+  logical, dimension(jptinit:jptend) :: lfloored
+  double precision :: floorval,deficit,surplus,curtotal,requiredmin
+  integer :: i,ipass
+  logical :: lchanged
+
+  requiredmin=0.d0
+  do i=jptinit,jptend
+    requiredmin=requiredmin+evlim*jetvl(i)
+  enddo
+  if(requiredmin>voltotevsub*(1.d0+1.d-10))call error(20)
+
+  lfloored=.false.
+  do ipass=1,jptend-jptinit+1
+
+    lchanged=.false.
+    do i=jptinit,jptend
+      floorval=evlim*jetvl(i)
+      if((.not.lfloored(i)) .and. jetve(i)<floorval)then
+        jetve(i)=floorval
+        lfloored(i)=.true.
+        lchanged=.true.
+      endif
+    enddo
+    if(.not.lchanged)exit
+
+    curtotal=0.d0
+    do i=jptinit,jptend
+      curtotal=curtotal+jetve(i)
+    enddo
+    deficit=curtotal-voltotevsub
+    if(dabs(deficit)<=1.d-14*dabs(voltotevsub))exit
+
+    surplus=0.d0
+    do i=jptinit,jptend
+      if(.not.lfloored(i))surplus=surplus+(jetve(i)-evlim*jetvl(i))
+    enddo
+    if(surplus<=0.d0)call error(20)
+
+    do i=jptinit,jptend
+      if(.not.lfloored(i))then
+        jetve(i)=jetve(i)- &
+         deficit*(jetve(i)-evlim*jetvl(i))/surplus
+      endif
+    enddo
+
+  enddo
+
+  return
+
+ end subroutine enforce_evlim_conservative
+
+ subroutine enforce_radius_floor_conservative(jptinit,jptend,totjptend, &
+  voltotsub)
+
+!***********************************************************************
+!
+!     JETSPIN subroutine for restoring a minimum physically-sane bead
+!     cross-section radius (minimum_bead_radius_cm) on an accepted-event
+!     fitted segment's reconstructed reference volume, without breaking
+!     that segment's reference-volume conservation invariant. The Akima
+!     area fit can occasionally undershoot past zero near a sharp feature
+!     (observed directly: a negative raw fitted area); dabs() alone only
+!     folds that into an arbitrarily tiny, physically meaningless volume.
+!     This applies the same water-filling strategy already used for the
+!     evlim evaporation-volume floor in enforce_evlim_conservative: beads
+!     below the floor are clamped up to it, and the resulting deficit is
+!     taken back from the still-compliant beads in proportion to their
+!     surplus, iterating in case that step itself creates a new violator.
+!     If the floor is intrinsically incompatible with the segment total,
+!     abort with a clear error instead of silently violating either
+!     constraint.
+!
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification August 2026
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: jptinit,jptend,totjptend
+  double precision, intent(in) :: voltotsub
+
+  double precision, parameter :: minimum_bead_radius_cm=1.d-7 ! 1 nm
+
+  double precision, dimension(jptinit:jptend) :: seglen,floorval
+  logical, dimension(jptinit:jptend) :: lfloored
+  double precision :: deficit,surplus,curtotal,requiredmin
+  integer :: i,ipass
+  logical :: lchanged
+
+! Reuse the exact segment-length construction used to build jetvl from
+! jetcr above, so the floor is expressed in the same (whatever they are)
+! volume units as jetvl itself, regardless of the underlying unit system.
+  do i=jptinit,jptend
+    if(i==totjptend)then
+      if(i>jptinit)then
+        seglen(i)=lengthpath*(jetptc(i)-jetptc(i-1))
+      else
+        seglen(i)=resolution
+      endif
+    else
+      seglen(i)=lengthpath*(jetptc(i+1)-jetptc(i))
+    endif
+    floorval(i)=seglen(i)*Pi*(minimum_bead_radius_cm/lengthscale)**2.d0
+  enddo
+
+  requiredmin=0.d0
+  do i=jptinit,jptend
+    requiredmin=requiredmin+floorval(i)
+  enddo
+  if(requiredmin>voltotsub*(1.d0+1.d-10))call error(21)
+
+  lfloored=.false.
+  do ipass=1,jptend-jptinit+1
+
+    lchanged=.false.
+    do i=jptinit,jptend
+      if((.not.lfloored(i)) .and. jetvl(i)<floorval(i))then
+        jetvl(i)=floorval(i)
+        lfloored(i)=.true.
+        lchanged=.true.
+      endif
+    enddo
+    if(.not.lchanged)exit
+
+    curtotal=0.d0
+    do i=jptinit,jptend
+      curtotal=curtotal+jetvl(i)
+    enddo
+    deficit=curtotal-voltotsub
+    if(dabs(deficit)<=1.d-14*dabs(voltotsub))exit
+
+    surplus=0.d0
+    do i=jptinit,jptend
+      if(.not.lfloored(i))surplus=surplus+(jetvl(i)-floorval(i))
+    enddo
+    if(surplus<=0.d0)call error(21)
+
+    do i=jptinit,jptend
+      if(.not.lfloored(i))then
+        jetvl(i)=jetvl(i)- &
+         deficit*(jetvl(i)-floorval(i))/surplus
+      endif
+    enddo
+
+  enddo
+
+  return
+
+ end subroutine enforce_radius_floor_conservative
+
+ subroutine despike_median_filter(jptinit,jptend,arr,lanchor)
+
+!***********************************************************************
+!
+!     JETSPIN subroutine for removing an isolated Akima interpolation
+!     spike/dip from a freshly-fitted field before it is used to
+!     reconstruct a conserved quantity (e.g. squared back into a bead
+!     volume). A branchless 3-point median replaces any target point
+!     that diverges from both its immediate neighbours with whichever
+!     neighbour is closer to the local trend; a genuinely smooth or
+!     monotone trend (the middle value already lies between its
+!     neighbours) is left completely unchanged, so this never distorts a
+!     real physical profile, only a value that neither neighbour agrees
+!     with. Iterated a few passes to also suppress an anomaly spanning
+!     more than a single target point.
+!
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification August 2026
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: jptinit,jptend
+  double precision, dimension(jptinit:jptend), intent(inout) :: arr
+  logical, dimension(jptinit:jptend), intent(in) :: lanchor
+
+  double precision, dimension(jptinit:jptend) :: tmp
+  double precision :: v1,v2,v3,vmed
+  integer :: i,ipass
+  logical :: lchanged
+
+  do ipass=1,3
+
+    lchanged=.false.
+    do i=jptinit,jptend
+      if(lanchor(i))cycle
+      v2=arr(i)
+      if(i>jptinit)then
+        v1=arr(i-1)
+      else
+        v1=v2
+      endif
+      if(i<jptend)then
+        v3=arr(i+1)
+      else
+        v3=v2
+      endif
+      vmed=max(min(v1,v2),min(max(v1,v2),v3))
+      tmp(i)=vmed
+      if(vmed/=v2)lchanged=.true.
+    enddo
+    do i=jptinit,jptend
+      if(.not.lanchor(i))arr(i)=tmp(i)
+    enddo
+    if(.not.lchanged)exit
+
+  enddo
+
+  return
+
+ end subroutine despike_median_filter
+
+ subroutine clamp_to_local_source_range(jptinit,jptend,srcinit,srcend, &
+  srcpt,srcval,tgtpt,tgtval,lanchor)
+
+!***********************************************************************
+!
+!     JETSPIN subroutine for clamping a freshly Akima-fitted field to the
+!     range spanned by its two immediate bracketing source points before
+!     the event's remeshing was performed. This is a cheap, local
+!     approximation of the monotone/shape-preserving guarantee classic
+!     Akima does not provide (unlike e.g. monotone cubic Hermite/PCHIP):
+!     a genuinely smooth physical profile should not need the
+!     interpolated curve to overshoot far beyond the two source values it
+!     sits between. Electrospinning genuinely thins the fibre by orders
+!     of magnitude along its length, so a small absolute value is never
+!     by itself treated as a defect here -- only a large excursion beyond
+!     the local source data envelope is. Anchor target points are exact
+!     knot matches by construction and are left untouched.
+!
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification August 2026
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: jptinit,jptend,srcinit,srcend
+  double precision, dimension(srcinit:srcend), intent(in) :: srcpt,srcval
+  double precision, dimension(jptinit:jptend), intent(in) :: tgtpt
+  double precision, dimension(jptinit:jptend), intent(inout) :: tgtval
+  logical, dimension(jptinit:jptend), intent(in) :: lanchor
+
+  integer :: i,j,jbracket,jhigh
+  double precision :: lo,hi
+
+  do i=jptinit,jptend
+    if(lanchor(i))cycle
+
+    jbracket=srcinit
+    do j=srcend-1,srcinit,-1
+      if(tgtpt(i)>=srcpt(j))then
+        jbracket=j
+        exit
+      endif
+    enddo
+    jhigh=min(jbracket+1,srcend)
+
+    lo=min(srcval(jbracket),srcval(jhigh))
+    hi=max(srcval(jbracket),srcval(jhigh))
+
+    if(tgtval(i)<lo)tgtval(i)=lo
+    if(tgtval(i)>hi)tgtval(i)=hi
+
+  enddo
+
+  return
+
+ end subroutine clamp_to_local_source_range
+
+ subroutine clamp_to_anchor_envelope(jptinit,jptend,arr,lanchor,safetyfactor)
+
+!***********************************************************************
+!
+!     JETSPIN subroutine for bounding a freshly Akima-fitted field
+!     against its two bracketing anchor values instead of its immediate
+!     source neighbours. Anchors are the one quantity that never drifts
+!     across accepted refinement events: their value is restored exactly
+!     every time (the already-validated radius_max_difference_cm=0
+!     invariant), so they remain a stable reference even after several
+!     events have already compounded a drift into the ordinary,
+!     non-anchor interpolated data. Interior (non-anchor) target points
+!     between two anchors are clamped to safetyfactor times their range,
+!     a generous margin: electrospinning genuinely thins the fibre by
+!     orders of magnitude over the full nozzle-to-collector distance, but
+!     a short anchor-to-anchor span is only a small fraction of that
+!     distance, so it should never legitimately need anywhere near as
+!     wide an excursion. A target point with no bracketing anchor at all
+!     on one (or either) side is left unconstrained on that side.
+!
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     author: M. Lauricella
+!     last modification August 2026
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: jptinit,jptend
+  double precision, dimension(jptinit:jptend), intent(inout) :: arr
+  logical, dimension(jptinit:jptend), intent(in) :: lanchor
+  double precision, intent(in) :: safetyfactor
+
+  double precision, dimension(jptinit:jptend) :: leftanchor,rightanchor
+  double precision :: lastval,nextval,lo,hi
+  integer :: i
+  logical :: lhaveleft,lhaveright
+
+  lhaveleft=.false.
+  lastval=0.d0
+  do i=jptinit,jptend
+    if(lanchor(i))then
+      lastval=arr(i)
+      lhaveleft=.true.
+    endif
+    if(lhaveleft)then
+      leftanchor(i)=lastval
+    else
+      leftanchor(i)=-1.d0
+    endif
+  enddo
+
+  lhaveright=.false.
+  nextval=0.d0
+  do i=jptend,jptinit,-1
+    if(lanchor(i))then
+      nextval=arr(i)
+      lhaveright=.true.
+    endif
+    if(lhaveright)then
+      rightanchor(i)=nextval
+    else
+      rightanchor(i)=-1.d0
+    endif
+  enddo
+
+  do i=jptinit,jptend
+    if(lanchor(i))cycle
+    if(leftanchor(i)<0.d0 .and. rightanchor(i)<0.d0)cycle
+    if(leftanchor(i)<0.d0)then
+      lo=rightanchor(i)/safetyfactor
+      hi=rightanchor(i)*safetyfactor
+    elseif(rightanchor(i)<0.d0)then
+      lo=leftanchor(i)/safetyfactor
+      hi=leftanchor(i)*safetyfactor
+    else
+      lo=min(leftanchor(i),rightanchor(i))/safetyfactor
+      hi=max(leftanchor(i),rightanchor(i))*safetyfactor
+    endif
+    if(arr(i)<lo)arr(i)=lo
+    if(arr(i)>hi)arr(i)=hi
+  enddo
+
+  return
+
+ end subroutine clamp_to_anchor_envelope
 
 #ifdef _OPENACC
  subroutine accelerator_reconstruct_refinement_state(jptinit,jptend, &

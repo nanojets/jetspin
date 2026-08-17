@@ -94,6 +94,16 @@
       case (19)
         write(outp,outf2)'ERROR - array yve not found in subroutine', &
          ' compute_coulomelec_driver!'
+      case (20)
+        write(outp,outf2)'ERROR - dynamic refinement cannot satisfy the', &
+         ' evlim evaporation-volume floor while conserving the segment total.'
+        write(outp,outf2)'ERROR - the fitted segment evaporated-volume total', &
+         ' is intrinsically below evlim*sum(reference volume); aborting.'
+      case (21)
+        write(outp,outf2)'ERROR - dynamic refinement cannot satisfy the', &
+         ' minimum bead radius floor while conserving the segment volume.'
+        write(outp,outf2)'ERROR - the fitted segment reference-volume total', &
+         ' is intrinsically below the minimum-radius floor total; aborting.'
       case default
         write(outp,'(a,i18)')'unknown ERROR! code = ',kode
     end select
@@ -517,6 +527,14 @@
     case (107)
       write(outp,'(/,a,g20.10,/)') &
       "WARNING - 'dynamic refinement capacity' must be a positive number of beads, reset to default ",ddata
+    case (108)
+      write(outp,'(/,a,g20.10,a)') &
+       "WARNING - 'dynamic refinement threshold' is only ",ddata, &
+       " times the discretization resolution (recommended >= 20x)."
+      write(outp,'(a)') &
+       "WARNING - Refining this frequently/finely can compound numerical drift"
+      write(outp,'(a,/)') &
+       "WARNING - across repeated events; consider a coarser threshold if unstable."
     case default
       write(outp,'(/,a,i8,/)')"unknown WARNING! code = ",kode
   end select

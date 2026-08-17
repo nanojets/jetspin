@@ -39,6 +39,23 @@ resolution; values below five times the resolution are raised to that safer
 minimum. If internal defaults are used, the code derives them from the base
 resolution and emits a warning.
 
+`anchor` is optional. If omitted, it defaults to five times the base
+resolution (warning 81). If given explicitly but set below one resolution,
+it is likewise raised to five times the resolution (warning 85) -- the same
+floor value used for the default, just reached from an invalid explicit
+input instead. There is no upper bound: an anchor spacing coarser than the
+refinement threshold is accepted without warning.
+
+A threshold below twenty times the base resolution triggers a further
+advisory (warning 108): combined with a short `every` interval on a case
+that accumulates many consecutive accepted events (e.g. a jet growing from a
+single bead over a long run), this cadence was found to compound a
+nonphysical cross-section thinning across events -- see [Numerical
+robustness of the cross-section fit](#numerical-robustness-of-the-cross-section-fit)
+below. The warning is advisory only: the historical Example 5 and Tests
+21-23 references all use thresholds below this recommendation and remain
+validated short-window cases.
+
 [`examples/input-5/input.dat`](../../examples/input-5/input.dat) is the
 historical refinement case. [Test Case 21](../examples/test-21.md) combines
 pre-extended anchors, insertion, Maxwell evaporation, and stochastic Platen
@@ -148,6 +165,123 @@ algorithm preserves the two totals separately:
 They must not be merged, substituted for one another, or normalized with a
 shared factor. Their local distribution may change slightly through spline
 interpolation even though each total is conserved.
+
+After the evaporated-volume rescale, `enforce_evlim_conservative` restores
+the same `evlim` floor (`jetve(i)/jetvl(i)>=evlim`) that every ordinary
+per-timestep integrator path already enforces, but which the reconstruction
+above did not check before 2026-08-16: an Akima undershoot on the
+evaporation-radius field could otherwise leave a bead's evaporated volume
+far below its own floor (observed: to about 1/7 of it, uniformly across
+nearly the whole active jet in one event), inflating the polymer mass
+fraction `cp` well past 1 and, in the Maxwell evaporative stress equation,
+driving the stress derivative toward overflow. The fix is a water-filling
+redistribution: beads below their floor are clamped up to it, and the
+resulting deficit is taken back from the still-compliant beads in
+proportion to their surplus, iterated in case that step creates a new
+violator, so the segment's evaporated-volume total is preserved to
+roundoff rather than broken (as a naive clamp alone would). If the floor is
+intrinsically infeasible against the segment total, the code aborts
+(`error(20)`) instead of silently violating either constraint.
+
+## Numerical robustness of the cross-section fit
+
+The cross-section radius `jetcr` (and the evaporation radius `jetce`) is the
+one field, among the 11 interpolated per accepted event, that is squared
+back into a conserved quantity (`jetvl=length*pi*jetcr**2`, and via
+`jetms=density*jetvl`, into bead mass). A long single-nozzle-bead-start run
+exercising several dozen consecutive accepted refinement events
+(`examples/input-24`, untracked, see its local `STATUS.md`) exposed that
+this specific reconstruction can compound a nonphysical thinning across
+*successive* events, well beyond anything electrospinning's genuine
+order-of-magnitude fibre thinning would produce, eventually collapsing bead
+mass toward zero and overflowing the stress equation -- reproducing with
+evaporation on or off, so it is independent of the `evlim` fix above.
+Position/velocity/stress do not show the same defect: segment length
+(derived from interpolated positions) fluctuates non-monotonically and
+shrinks only modestly over the same run where radius shrinks relentlessly
+and monotonically by two orders of magnitude more, and stress/velocity only
+show large excursions in the single event immediately preceding a crash,
+consistent with a late-stage consequence of the mass collapse (via Newton's
+second law) rather than an independent defect in their own interpolation.
+
+Five layered defenses were added to the `radius_area`/`evap_radius_area`
+handling in `fit_jet_akima` (`dynamic_refinement_mod.f90`) and `fit_mod.f90`,
+each validated against Tests 21-23 with zero regressions, none of which by
+itself has eliminated the failure on this specific long run:
+
+1. Fit `ln(pi*jetcr**2)` (log cross-section area), not the raw radius or
+   area. Volume is quadratic in radius but linear in area, so fitting area
+   removes one amplification step; its logarithm additionally guarantees a
+   strictly positive recovered value by construction (a raw area fit was
+   observed to go measurably negative before an unprincipled `dabs()`) and
+   linearises the roughly exponential thinning trend, which is much better
+   conditioned for Akima's tangent estimate.
+2. `despike_median_filter`: a 3-point median filter over the fitted target
+   segment, skipping anchor points (which must remain exact), removing an
+   isolated single-event interpolation spike.
+3. `clamp_to_local_source_range`: bounds each non-anchor target point to the
+   range spanned by its two immediate bracketing pre-event source points --
+   a cheap local approximation of a shape-preserving interpolation
+   guarantee that classic Akima does not provide. Confirmed unable, by
+   itself, to catch a drift already compounded through earlier events,
+   since that drift is by then baked into the "legitimate" source data too.
+4. `clamp_to_anchor_envelope`: bounds interior points between two
+   bracketing *anchors* instead, with a generous (100x) margin, since
+   anchors are restored exactly every event. Found insufficient in
+   isolation because an anchor can itself already be tagged from an
+   already-degraded bead -- anchors are frozen at tagging time, not
+   validated against anything.
+5. `limit_akima_tangents_monotone` (`fit_mod.f90`): a Fritsch-Carlson
+   sufficient-condition monotonicity limiter on the Akima knot tangents,
+   opted into via `setup_akima`'s optional `lmonotone` argument only for
+   `field_name` in `{radius_area, evap_radius_area, mass_density,
+   charge_density}` (never position/velocity/stress, which may have
+   genuine local extrema). This delayed the failure the most of any single
+   change tried, but the compounding drift still eventually recurs across
+   enough events -- possibly a cumulative resampling/requantization effect
+   distinct from classic Akima overshoot, not yet isolated.
+
+An absolute-floor variant (`enforce_radius_floor_conservative`, same
+water-filling structure as the `evlim` fix, default 1 nm) is also present
+but was found empirically too permissive for this input: the measured
+collapsing radii (order 5-40 nm) never actually cross an absolute
+nanometre-scale floor, since electrospinning legitimately reaches sub-micron
+fibre radii. It remains as a defense-in-depth against a genuine sign
+crossing the other layers might miss, and as the `error(21)` infeasibility
+guard, but a floor relative to the jet's own current scale (rather than an
+absolute physical constant) would be needed to actually engage here, and
+was not implemented. See `docs/STATE.md` for the full investigation,
+including the confirmed-ruled-out alternative explanations and the
+guarded diagnostic instrumentation kept in the tracked source for any
+future continuation.
+
+The practical fix for this specific long run turned out to be its
+refinement **cadence**, not something the five interpolation-side defenses
+above could fully absorb by themselves. The tight `0.10` cm threshold
+(5x resolution) combined with a short `1.d-5` s `every` interval let a jet
+growing from a single bead accumulate several dozen accepted events within
+under `2e5` timesteps -- each re-fitting the cross-section from the
+previous event's own output. Reusing Example 5's coarser, already-validated
+cadence instead (`threshold 0.4` cm, 20x resolution; `every 1.d-3` s) let
+the same input run past `6.5e7` of its `1e8` timesteps (324 accepted
+events) with the minimum bead radius measured at each event staying
+constant at its initial value the entire time, and the active-bead count
+settled into the stationary insertion/removal oscillation the case was
+designed to reach. This is the cadence now shipped with
+`examples/input-24`.
+
+**GPU/OpenACC scope: host-only.** This whole investigation targeted
+GFortran CPU only. Of the fixes above, the log-area transform and the
+three despiking/local-source/anchor-envelope calls apply on both backends
+(they wrap `fit_akima` in `fit_jet_akima` regardless of which backend it
+dispatches to), but `enforce_evlim_conservative`,
+`enforce_radius_floor_conservative`, and `limit_akima_tangents_monotone`
+are reachable only from the host paths
+(`reconstruct_refinement_state_host`, `setup_akima`) and were not ported to
+their OpenACC counterparts (`accelerator_reconstruct_refinement_state`,
+`fit_akima_accelerator`). A GPU build would still reproduce the `evlim`/`cp`
+blowup and would miss the monotonicity limiter's share of the cadence
+mitigation.
 
 ## OpenACC path
 
@@ -327,3 +461,10 @@ For numerical changes, also compare conservation totals immediately before
 and after refinement, verify that `nref` becomes non-zero, check for ordered
 path coordinates and finite state, and compare serial and MPI trajectories
 within an explicitly chosen tolerance.
+
+The five cross-section-fit defenses in the previous section were each
+validated the same way -- `tests/refinement/run.sh gfortran standard` and
+direct GFortran runs of `examples/input-22`/`examples/input-23` -- with zero
+regressions, but they do not yet make the long single-nozzle-bead-start
+`examples/input-24` run to completion; see `docs/STATE.md` for the open
+investigation.

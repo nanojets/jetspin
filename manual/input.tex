@@ -97,12 +97,16 @@ cutoff $f$  & length of the proximal jet sections interacting by Coulomb \tabula
 \uline{density charge} $f$  & electric volume charge density of the nanofiber\tabularnewline
 dynam refin yes  & active the dynamic refinement during the simultion\tabularnewline
 dynam refin threshold $f$  & set the threshold beyond which the refinement is applied\tabularnewline
+ & (recommended $\geq20\times$ the discretization resolution; below that\tabularnewline
+ & a warning is issued -- see Sec.~\ref{subsec:Refinement-robustness})\tabularnewline
 dynam refin every $f$  & the refinement is applied every $f$ seconds\tabularnewline
 dynam refin start $f$  & the refinement is applied only if the simulation time is greater \tabularnewline
  & than or equal to $f$ seconds\tabularnewline
 dynam refin anchor $f$ & during the refinement procedure all the anchor beads inserted\tabularnewline
  & at distance $f$ preserve their positions\tabularnewline
  & (they are manteined as knots of both the old and new meshes)\tabularnewline
+ & (default, if omitted: $5\times$ the discretization resolution;\tabularnewline
+ & values below $1\times$ resolution are raised to that same $5\times$ floor)\tabularnewline
 dynam refin capacity $i$ & number of beads by which array capacity grows/is reserved\tabularnewline
  & at an accepted refinement event (default: 100; must be positive)\tabularnewline
 evaporation yes  & activate solvent evaporation and concentration-dependent rheology (default: no)\tabularnewline

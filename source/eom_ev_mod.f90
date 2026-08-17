@@ -128,6 +128,11 @@
     fxx = yvx(ipoint) 
     fst = (1.d0/rattao)*(yieldstress+ &
      consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+    if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+     write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+     ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+     ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+     ' fst=',fst
     fvx = Gr+Vtvec(1)-Fvet*yve(ipoint)*(yst(ipoint)/beadlenup)+ &
      coulomelec+upwall(ipoint,yxx)
     
@@ -152,6 +157,11 @@
         fxx = yvx(ipoint) 
         fst = (1.d0/rattao)*(yieldstress+ &
          consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+        if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+         write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+         ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+         ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+         ' fst=',fst
         fvx = Gr+Vtvec(1)-Fvet*yve(ipoint)*(yst(ipoint)/beadlenup)+ &
          Fvet*yve(ipoint-1)*(yst(ipoint-1)/beadlendown)+coulomelec+ &
          upwall(ipoint,yxx)
@@ -188,6 +198,11 @@
   fxx = yvx(ipoint) 
   fst = (1.d0/rattao)*(yieldstress+ &
    consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+  if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+   write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+   ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+   ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+   ' fst=',fst
   fvx = Gr+Vtvec(1)-Fvet*yve(ipoint)*(yst(ipoint)/beadlenup)+ &
    Fvet*yve(ipoint-1)*(yst(ipoint-1)/beadlendown)+coulomelec+ &
    upwall(ipoint,yxx)
@@ -541,6 +556,11 @@
       fxx = yvx(ipoint) 
       fst = (1.d0/rattao)*(yieldstress+ &
        consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+      if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+       write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+       ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+       ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+       ' fst=',fst
       fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+coulomelec(1)+ &
        upwall(ipoint,yxx)+aLorx
       
@@ -591,6 +611,11 @@
       fxx = yvx(ipoint) 
       fst = (1.d0/rattao)*(yieldstress+ &
        consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+      if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+       write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+       ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+       ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+       ' fst=',fst
       fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+ &
        Kst*curvature*factor3*vcurvature(1)+coulomelec(1)+ &
        upwall(ipoint,yxx)+aLorx
@@ -656,6 +681,11 @@
         fxx = yvx(ipoint) 
         fst = (1.d0/rattao)*(yieldstress+ &
          consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+        if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+         write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+         ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+         ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+         ' fst=',fst
         fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+ &
          factor2*tangentversordown(1)+ &
          Kst*curvature*factor3*vcurvature(1)+coulomelec(1)+ &
@@ -754,6 +784,11 @@
   fxx = yvx(ipoint) 
   fst = (1.d0/rattao)*(yieldstress+ &
    consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+  if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+   write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+   ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+   ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+   ' fst=',fst
   fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+ &
    factor2*tangentversordown(1)+ &
    Kst*curvature*factor3*vcurvature(1)+coulomelec(1)+ &
@@ -1349,6 +1384,11 @@
       fxx = yvx(ipoint) 
       fst = (1.d0/rattao)*(yieldstress+ &
        consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+      if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+       write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+       ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+       ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+       ' fst=',fst
       fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+coulomelec(1)- &
        factor4*tangentversorup(1)+upwall(ipoint,yxx)+aLorx- &
        noisefric*yvx(ipoint) 
@@ -1404,6 +1444,11 @@
       fxx = yvx(ipoint) 
       fst = (1.d0/rattao)*(yieldstress+ &
        consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+      if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+       write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+       ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+       ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+       ' fst=',fst
       fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+ &
        Kst*curvature*factor3*vcurvature(1)+ &
        coulomelec(1)-factor4*tangentversorup(1)- &
@@ -1479,6 +1524,11 @@
         fxx = yvx(ipoint) 
         fst = (1.d0/rattao)*(yieldstress+ &
          consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+        if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+         write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+         ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+         ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+         ' fst=',fst
         fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+ &
          factor2*tangentversordown(1)+ &
          Kst*curvature*factor3*vcurvature(1)+coulomelec(1)- &
@@ -1593,6 +1643,11 @@
   fxx = yvx(ipoint) 
   fst = (1.d0/rattao)*(yieldstress+ &
    consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+  if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+   write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+   ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+   ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+   ' fst=',fst
   fvx = Gr+Vtvec(1)-factor1*tangentversorup(1)+ &
    factor2*tangentversordown(1)+ &
    Kst*curvature*factor3*vcurvature(1)+coulomelec(1)- &
@@ -1832,6 +1887,11 @@
       
       fst = (1.d0/rattao)*(yieldstress+ &
        consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+      if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+       write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+       ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+       ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+       ' fst=',fst
       
     else
       call compute_geometry(ipoint,yxx,yyy,yzz,beadlendown,beadlenup)
@@ -1842,6 +1902,11 @@
       
       fst = (1.d0/rattao)*(yieldstress+ &
        consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+      if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+       write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+       ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+       ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+       ' fst=',fst
       
     endif
     return
@@ -1859,6 +1924,11 @@
        
         fst = (1.d0/rattao)*(yieldstress+ &
          consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+        if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+         write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+         ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+         ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+         ' fst=',fst
         
       else
         fst=0.d0
@@ -1887,6 +1957,11 @@
   
   fst = (1.d0/rattao)*(yieldstress+ &
    consistency*ratmu*(beadvelup/beadlenup)**findex-yst(ipoint))
+  if(idrank==0 .and. (dabs(rattao)<1.d-2.or.dabs(rattao)>1.d2)) &
+   write(6,'(a,i0,a,i0,6(a,es14.6))')'Rattao blowup diagnostic: ipoint=', &
+   ipoint,' step=',k,' yvl=',yvl(ipoint),' yve=',yve(ipoint), &
+   ' cmass=',cmass,' rattao=',rattao,' inv_rattao=',1.d0/rattao, &
+   ' fst=',fst
   
   
   return

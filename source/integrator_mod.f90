@@ -1076,7 +1076,12 @@ contains
 !$acc& f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f2xx,f2yy,f2zz,f2st, &
 !$acc& f2vx,f2vy,f2vz,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz, &
 !$acc& f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz)
-    call reset_coulomb_accelerator()
+! coulforce must be passed, as every other caller does: without it the ycf
+! device mapping is left behind while the host array is reallocated, which
+! made examples/input-15 (dynamic RK4, insertion-driven capacity growth)
+! produce NaN on GPU from the first capacity growth onwards while the CPU
+! run stayed correct.
+    call reset_coulomb_accelerator(coulforce)
     call accelerator_set_persistent(.false.)
     call set_coulomb_accelerator_persistent(.false.)
     persistent_acc=.false.

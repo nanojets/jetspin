@@ -93,17 +93,29 @@ contains
  subroutine reset_coulomb_accelerator(ycf)
   implicit none
   double precision, allocatable, intent(inout), optional :: ycf(:,:)
+
+! Without ycf the force array cannot be unmapped here, so the whole reset is
+! deferred to the next compute_coulomelec_driver call, which has it. The
+! mapping bookkeeping is deliberately left untouched: clearing
+! accelerator_coulomb_mapped here would make that deferred call skip its own
+! guarded delete, orphaning the device mapping for good while the host array
+! is reallocated underneath it. Every in-tree caller now passes ycf, so this
+! branch is a safety net rather than a routine path.
+  if(.not.present(ycf))then
+    accelerator_persistent_mode=.false.
+    accelerator_coulomb_reset_pending=.true.
+    return
+  endif
+
 #ifdef _OPENACC
   if(accelerator_coulomb_mapped)then
 !$acc exit data delete(coulcrossec)
-    if(present(ycf))then
 !$acc exit data delete(ycf)
-    endif
   endif
 #endif
   accelerator_coulomb_mapped=.false.
   accelerator_persistent_mode=.false.
-  accelerator_coulomb_reset_pending=.not.present(ycf)
+  accelerator_coulomb_reset_pending=.false.
 end subroutine reset_coulomb_accelerator
  
  subroutine allocate_coulcrossec(imiomax)

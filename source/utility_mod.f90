@@ -36,9 +36,38 @@ module utility_mod
  integer,save :: ngaussianhistory=-1
  integer, public, save :: gaussianhistorysteps=-1
  integer, public, parameter :: maxgaussianhistory=100000000
+! Sequential-pool consumption state (JETSPIN_GPU_DYNAMIC_PLATEN).
+!
+! The historical layout indexes the history as a 4D array
+! (step, bead, component, draw) with the bead stride hard-wired to
+! mxnpjet+1, so every capacity change forces a full host rebuild plus a
+! device remap, and the number of covered steps shrinks as capacity grows
+! even when the extra slots are never read.
+!
+! The pool layout instead treats the array as one flat random sequence,
+! allocated once and never remapped. Each timestep consumes exactly
+! (active beads)*6 consecutive values starting at gaussianhistorybase, and
+! gaussianhistorycursor walks forward until the whole sequence is used
+! before wrapping to the start. gaussianhistoryvalues stays <= 0 in builds
+! that keep the historical layout, which is what makes
+! begin_gaussian_history_step a no-op there.
+ integer, public, save :: gaussianhistoryvalues=-1
+ integer, public, save :: gaussianhistorybase=0
+ integer, public, save :: gaussianhistorywindow=0
+ integer, public, save :: gaussianhistoryfirst=0
+ integer, save :: gaussianhistorycursor=0
  double precision,save :: hwiener
  integer,save :: winenernodes
- 
+! Tracks, independently of any caller's guess, whether gaussianhistory is
+! currently present on the accelerator device. The initial mapping happens
+! in integrator_mod.f90 (prepare_integrator_random_history), outside this
+! module, so that caller reports it here via mark_gaussianhistory_device_
+! mapped once done. resize_gaussian_history then trusts this flag instead
+! of a value recomputed once per timestep elsewhere, which can be one step
+! stale relative to an integrator activating its persistent path in the
+! very same step that a capacity-growing refinement event fires.
+ logical, save :: gaussianhistory_device_mapped=.false.
+
  public :: allocate_array_lbuffservice
  public :: allocate_array_ibuffservice
  public :: allocate_array_buffservice
@@ -46,6 +75,8 @@ module utility_mod
  public :: prepare_gaussian_buffer,gaussian_buffer_value
  public :: prepare_gaussian_history,resize_gaussian_history
  public :: gaussian_history_value
+ public :: mark_gaussianhistory_device_mapped
+ public :: begin_gaussian_history_step
  public :: modulvec
  public :: dot
  public :: cross
@@ -300,6 +331,44 @@ module utility_mod
 
   if(mxpnt<0 .or. nsteps<1)stop "Invalid Gaussian-history extent"
   if(ndim<1 .or. ndim>3)stop "Invalid Gaussian-history dimension"
+#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+! One flat random sequence. Nothing about the layout depends on the bead
+! count, so this allocation is final: capacity growth later in the run
+! needs no rebuild here and no device remap (see resize_gaussian_history).
+! nperstep is only a worst-case per-step estimate used to size the pool;
+! actual consumption is (active beads)*6, which is smaller whenever the
+! reserved capacity exceeds the live bead count.
+  nperstep=(mxpnt+1)*3*2
+! Divide before multiplying: nsteps*nperstep would overflow a default
+! integer for a long run, while maxgaussianhistory/nperstep cannot.
+  if(nsteps<=maxgaussianhistory/nperstep)then
+    nvalues=nsteps*nperstep
+  else
+    nvalues=maxgaussianhistory
+  endif
+  if(nvalues<nperstep)stop "One Gaussian timestep exceeds history limit"
+  gaussianhistorysteps=nvalues/nperstep
+  gaussianhistoryvalues=nvalues
+  gaussianhistorycursor=0
+  gaussianhistorybase=0
+  gaussianhistorywindow=0
+  gaussianhistoryfirst=inpnt
+  if(allocated(gaussianhistory))deallocate(gaussianhistory)
+  allocate(gaussianhistory(0:nvalues-1))
+  if(idrank==0)then
+    do index=0,nvalues-1
+      gaussianhistory(index)=gauss()
+    enddo
+  else
+    gaussianhistory(:)=0.d0
+  endif
+  call bcast_world_darr(gaussianhistory,nvalues)
+  ngaussianhistory=mxpnt
+  if(idrank==0)then
+    write(6,'(a,i0,a,i0)')'Gaussian history pool: values=',nvalues, &
+     ' worst_case_steps=',gaussianhistorysteps
+  endif
+#else
   nperstep=(mxpnt+1)*3*2
   gaussianhistorysteps=min(nsteps,maxgaussianhistory/nperstep)
   if(gaussianhistorysteps<1)stop "One Gaussian timestep exceeds history limit"
@@ -322,7 +391,46 @@ module utility_mod
   endif
   call bcast_world_darr(gaussianhistory,nvalues)
   ngaussianhistory=mxpnt
+#endif
  end subroutine prepare_gaussian_history
+
+ subroutine begin_gaussian_history_step(firstpoint,lastpoint)
+
+!***********************************************************************
+!
+!     JETSPIN subroutine for reserving this timestep's slice of the
+!     sequential Gaussian pool and advancing the cursor for the next one.
+!     Must be called exactly once per timestep, before any read, on every
+!     execution path of the integrator that consumes the history.
+!
+!     A no-op unless the pool layout is in use (gaussianhistoryvalues<=0
+!     otherwise), so call sites need no conditional compilation.
+!
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!
+!***********************************************************************
+
+  implicit none
+
+  integer, intent(in) :: firstpoint,lastpoint
+
+  if(gaussianhistoryvalues<=0)return
+  gaussianhistorybase=gaussianhistorycursor
+  gaussianhistoryfirst=firstpoint
+  gaussianhistorywindow=max(1,lastpoint-firstpoint+1)
+! Wrap only once the whole stored sequence has been consumed. The slice is
+! read with the same modulo, so a slice straddling the end of the pool is
+! served correctly rather than by discarding the tail.
+  gaussianhistorycursor=mod(gaussianhistorycursor+gaussianhistorywindow*6, &
+   gaussianhistoryvalues)
+
+ end subroutine begin_gaussian_history_step
+
+ subroutine mark_gaussianhistory_device_mapped(mapped)
+  implicit none
+  logical, intent(in) :: mapped
+  gaussianhistory_device_mapped=mapped
+ end subroutine mark_gaussianhistory_device_mapped
 
  subroutine resize_gaussian_history(mxpnt,device_mapped)
   implicit none
@@ -334,11 +442,24 @@ module utility_mod
   logical :: mapped
   double precision, allocatable :: resizedhistory(:)
 
+#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+! The flat pool is independent of the bead count, so a capacity increase
+! needs no rebuild, no move_alloc and no device remap. Returning here is
+! what structurally removes the stale-device-mapping failure mode that the
+! rebuild path had to be patched for.
+  return
+#else
   if(.not.allocated(gaussianhistory))return
   if(mxpnt<=ngaussianhistory)return
 
-  mapped=.false.
-  if(present(device_mapped))mapped=device_mapped
+! gaussianhistory_device_mapped is the source of truth: it is only ever set
+! by whoever actually mapped or unmapped the array on device, so it cannot
+! go stale the way a once-per-timestep flag borrowed from an unrelated
+! module can. The optional argument is kept for interface compatibility
+! and OR'd in defensively, but should never need to add anything on top of
+! the module-level flag once every mapping site keeps it up to date.
+  mapped=gaussianhistory_device_mapped
+  if(present(device_mapped))mapped=mapped .or. device_mapped
   oldcapacity=ngaussianhistory
   oldsteps=gaussianhistorysteps
   oldnperstep=(oldcapacity+1)*3*2
@@ -403,6 +524,7 @@ module utility_mod
      'Gaussian history capacity: old=',oldcapacity,' new=',mxpnt, &
      ' retained_steps=',newsteps,' values=',newnvalues
   endif
+#endif
  end subroutine resize_gaussian_history
 
  function gaussian_history_value(istep,ipoint,icomponent,idraw)
@@ -412,14 +534,28 @@ module utility_mod
   double precision :: gaussian_history_value
   if(.not.allocated(gaussianhistory))stop "Gaussian history is not prepared"
   if(istep<1)stop "Invalid Gaussian-history step"
-  if(ipoint<0 .or. ipoint>ngaussianhistory)stop "Invalid Gaussian bead index"
   if(icomponent<1 .or. icomponent>3)stop "Invalid Gaussian component"
   if(idraw<1 .or. idraw>2)stop "Invalid Gaussian draw index"
+#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+! Read inside this timestep's reserved slice. The valid bead range is the
+! live window set by begin_gaussian_history_step, not a fixed capacity:
+! the pool never grows, so bounds must follow the beads, not the array.
+! istep is unused here; the position comes from the cursor instead, which
+! is what lets the sequence be consumed end to end.
+  if(ipoint<gaussianhistoryfirst .or. &
+   ipoint>gaussianhistoryfirst+gaussianhistorywindow-1) &
+   stop "Invalid Gaussian bead index"
+  index=mod(gaussianhistorybase+(ipoint-gaussianhistoryfirst)+ &
+   gaussianhistorywindow*((icomponent-1)+3*(idraw-1)),gaussianhistoryvalues)
+  gaussian_history_value=gaussianhistory(index)
+#else
+  if(ipoint<0 .or. ipoint>ngaussianhistory)stop "Invalid Gaussian bead index"
   nperstep=(ngaussianhistory+1)*3*2
   cycle_step=mod(istep-1,gaussianhistorysteps)+1
   index=(cycle_step-1)*nperstep+ipoint+(ngaussianhistory+1)* &
    ((icomponent-1)+3*(idraw-1))
   gaussian_history_value=gaussianhistory(index)
+#endif
  end function gaussian_history_value
   
   subroutine wiener_process1(inpnt,npnt,nvar,ndim,h,fwienersub1)

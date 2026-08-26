@@ -19,7 +19,10 @@ module integrator_mod
  use utility_mod,       only : wiener_process1,wiener_process2, &
                          prepare_gaussian_buffer,gaussian_buffer_value, &
                          prepare_gaussian_history,gaussian_history_value, &
-                         gaussianhistory,gaussianhistorysteps
+                         gaussianhistory,gaussianhistorysteps, &
+                         mark_gaussianhistory_device_mapped, &
+                         begin_gaussian_history_step,gaussianhistoryvalues, &
+                         gaussianhistorybase,gaussianhistorywindow
  use nanojet_mod,       only : doallocate,mxnpjet,npjet,inpjet,systype,&
                          jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetst, &
                          jetms,jetch,jetvl,compute_posnoinserted, &
@@ -64,6 +67,10 @@ module integrator_mod
                          accelerator_platen_stress_statistics
  use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
                          maxstressposx
+#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+ use openacc_dynamic_platen_mod, only : dynamic_platen_accelerator_eligible, &
+                         dynamic_platen_accelerator_configured
+#endif
 #endif
  use electric_field_mod, only : nfieldtype
  use coulomb_force_mod, only : smooth_charge,restore_charge, &
@@ -126,6 +133,16 @@ contains
   fixed_history=npjet==1000 .and. (fixed_accelerator_geometry() .or. &
    fixed_evaporative_platen_eligible())
   dynamic_history=dynamic_evaporative_platen_eligible()
+#if defined(_OPENACC) && defined(JETSPIN_GPU_DYNAMIC_PLATEN)
+! The non-evaporative dynamic Platen fork needs the same indexed noise
+! history as its evaporative sibling, otherwise it silently falls back to
+! prepare_gaussian_buffer and allocated(gaussianhistory) never becomes
+! true, so the persistent gate in platen() (which requires it) never
+! fires. Deliberately checked via the size-independent "configured" test,
+! not dynamic_platen_accelerator_eligible: this runs once, before the loop
+! starts, while the jet may still be a single bead.
+  dynamic_history=dynamic_history .or. dynamic_platen_accelerator_configured()
+#endif
   if(.not.(fixed_history .or. dynamic_history))return
   nsteps=nint((endtime-initime)/h)
   history_last=npjet
@@ -135,8 +152,15 @@ contains
   if(dynamic_history)history_last=mxnpjet
   call prepare_gaussian_history(inpjet,history_last,mxnpjet,3,nsteps)
 #ifdef _OPENACC
+#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+! The pool is a flat sequence whose size is decided once, above; it is not
+! (mxnpjet+1)*6 per step, and it never changes afterwards.
+!$acc enter data copyin(gaussianhistory(0:gaussianhistoryvalues-1))
+#else
 !$acc enter data copyin(gaussianhistory(0:(mxnpjet+1)*6* &
 !$acc& gaussianhistorysteps-1))
+#endif
+  call mark_gaussianhistory_device_mapped(.true.)
 #endif
  end subroutine prepare_integrator_random_history
 
@@ -1749,6 +1773,33 @@ contains
   double precision ::  f3stocvy
   double precision ::  f3stocvz
 
+#if defined(_OPENACC) && defined(JETSPIN_GPU_DYNAMIC_PLATEN)
+! A refinement-driven capacity increase occurs before this integrator call,
+! unlike nozzle insertion which requests the reset from the main loop. In
+! either case, detach the old scratch arrays before reallocating them, as
+! already done for rk4sys/rk4sys_ev/platen_ev.
+  if((persistent_reset_requested .or. doallocate) .and. persistent_acc)then
+!$acc exit data delete(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,d3xx,d3yy,d3zz,d3st, &
+!$acc& d3vx,d3vy,d3vz,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
+!$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
+! coulforce must be passed here, as rk4sys_ev/platen_ev/integrator_kv_ev_mod
+! all do. The argument-less form defers the ycf unmapping via
+! accelerator_coulomb_reset_pending, but it also clears
+! accelerator_coulomb_mapped on the way out, so the deferred call finds the
+! guard already false and skips the delete for good: ycf stays mapped at the
+! old extent while the host array is reallocated underneath it. The next
+! mapping then either fails with "partially present" or, when the extents
+! happen to match, silently reuses a device buffer backed by freed host
+! memory, which surfaces much later as NaN at the collector-side bead.
+    call reset_coulomb_accelerator(coulforce)
+    call accelerator_set_persistent(.false.)
+    call set_coulomb_accelerator_persistent(.false.)
+    persistent_acc=.false.
+  endif
+  persistent_reset_requested=.false.
+#endif
+
 ! check and eventually reallocate the service arrays
   if(doallocate)then
     select case(systype)
@@ -1854,6 +1905,32 @@ contains
   endif
 
 #ifdef _OPENACC
+#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+  if(.not.persistent_acc .and. systype==4 .and. &
+   (fixed_accelerator_geometry() .or. &
+   dynamic_platen_accelerator_eligible()) .and. &
+   allocated(gaussianhistory))then
+! A capacity rebind performed by the topology driver already owns the new
+! jet mapping; entering the jet arrays again would leave a second OpenACC
+! present reference and make a later reallocation fail with a partially
+! present mapping (same reasoning as rk4sys/rk4sys_ev/platen_ev).
+    if(.not.accelerator_is_topology_enabled())then
+!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
+!$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
+!$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
+!$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetfr(0:mxnpjet))
+    endif
+!$acc enter data create(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,d3xx,d3yy,d3zz,d3st, &
+!$acc& d3vx,d3vy,d3vz,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
+!$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
+    call set_coulomb_accelerator_persistent(.true.)
+    call accelerator_set_persistent(.true.)
+    if(dynamic_platen_accelerator_eligible()) &
+     call accelerator_set_topology_enabled(.true.)
+    persistent_acc=.true.
+  endif
+#else
   if(.not.persistent_acc .and. systype==4 .and. &
    fixed_accelerator_geometry() .and. allocated(gaussianhistory))then
 !$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
@@ -1869,7 +1946,8 @@ contains
     persistent_acc=.true.
   endif
 #endif
-  
+#endif
+
   dsqrh=dsqrt(dabs(h))
   tsqh=dsqrh**3.d0
   prefactor1=0.5d0/dsqrh
@@ -1881,7 +1959,13 @@ contains
       call prepare_gaussian_buffer(inpjet,npjet,mxnpjet,3)
     endif
   endif
-  
+
+! Reserve this timestep's slice of the sequential Gaussian pool. Must run
+! before any branch below reads the history, including the persistent path
+! that returns early, so it sits ahead of the dispatch. A no-op unless the
+! pool layout is compiled in.
+  call begin_gaussian_history_step(mystart,myend)
+
 ! select the proper system type
   select case(systype)
     case(1)
@@ -1898,7 +1982,7 @@ contains
       do ipoint=mystart,myend
         call xpsys(ipoint,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
          jetvl,coulforce,fxx,fyy,fzz,fst,fvx,fvy,fvz,timesub,k, &
-         fstocvx,fstocvy,fstocvz) 
+         fstocvx,fstocvy,fstocvz)
         f1xx(j)=fxx
         f1st(j)=fst
         f1vx(j)=fvx
@@ -2055,7 +2139,8 @@ contains
         call accelerator_platen_velocity(mystart,myend,mxnpjet, &
          gaussianhistorysteps,k,h, &
          airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
-         f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz)
+         f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz, &
+         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues)
         call accelerator_platen_positions(mystart,myend,npjet,h,pfreq, &
          liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
@@ -2074,6 +2159,16 @@ contains
         call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
          jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
          maxstressposx)
+#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+! The fixed-geometry benchmark path never runs with ongoing insertion
+! (fixed_accelerator_geometry requires .not.linserting), so it never needed
+! this correction. The dynamic path can, so mirror platen_ev's device-side
+! equivalent here instead of the host-side compute_posnoinserted used by
+! the non-persistent branch below.
+        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+         jetxx,jetyy,jetzz)
+        call accelerator_mark_device_state(.true.)
+#endif
         call restore_charge()
         timesub=timesub+h
         return
@@ -5451,6 +5546,11 @@ contains
     endif
   endif
 
+! Reserve this timestep's slice of the sequential Gaussian pool, ahead of
+! the dispatch for the same reason as in platen(). A no-op unless the pool
+! layout is compiled in.
+  call begin_gaussian_history_step(mystart,myend)
+
 ! select the proper system type
   select case(systype)
     case(1)
@@ -5637,7 +5737,8 @@ contains
         call accelerator_platen_evap_velocity(mystart,myend,mxnpjet, &
          gaussianhistorysteps,k,h,airdragamp(1),noisediff,jetms,jetvl, &
          jetve,gaussianhistory,jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx, &
-         f2vy,f2vz,d3vx,d3vy,d3vz)
+         f2vy,f2vz,d3vx,d3vy,d3vz, &
+         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues)
 
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         call maxwell_evap_device_stage(timesub+h,k,y1xx,y1yy,y1zz,y1st, &

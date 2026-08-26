@@ -18,7 +18,7 @@
  use utility_mod, only : Pi,modulvec,cross,dot,gauss,ibuffservice, &
                    allocate_array_ibuffservice,buffservice, &
                    allocate_array_buffservice,lbuffservice, &
-                   allocate_array_lbuffservice
+                   allocate_array_lbuffservice,resize_gaussian_history
 
  implicit none
 
@@ -519,7 +519,15 @@
       doallocate=.true.
     endif
   endif
-  
+
+! Ordinary insertion-overflow growth of mxnpjet, independent of any dynamic-
+! refinement event. dynamic_refinement_mod.f90 already resizes the indexed
+! Gaussian noise history when IT grows mxnpjet; this path must do the same,
+! otherwise accelerator_platen_velocity keeps indexing gaussianhistory with
+! the new, larger mxnpjet while the array itself is still sized for the old
+! one, reading past its end on device (CUDA_ERROR_ILLEGAL_ADDRESS).
+  if(doallocate)call resize_gaussian_history(mxnpjet)
+
   call allocate_array_lbuffservice(newend)
   
   lbuffservice(newinit:newend)=jetfr(oldinit:oldend)

@@ -58,6 +58,86 @@ transferred. Disabling fused multiply-add preserves the accepted trajectory
 for the initially straight geometry. Configurations outside the explicitly
 validated gates use the original CPU EOM path.
 
+## Dynamic-topology Platen fork
+
+The persistent gates listed above all require a bead count that a realistic
+run does not have when the decision is taken. `prepare_integrator_random_history`
+runs once, before the timestep loop, and every eligibility test it consults
+requires `npjet >= 100`; a jet started from a single bead therefore never
+allocates its Gaussian history, and since `allocated(gaussianhistory)` is a
+required condition in the activation gate, the persistent path can never
+engage for the rest of the run however large the jet grows. This was confirmed
+by profiling: on `examples/input-24`, the only kernel `nsys` recorded on the
+device was the Coulomb summation, with the integrator running on the host.
+
+The `nvfortran-openacc-dynamic-platen` target (see
+[compiling](compiling.md)) addresses this for the non-evaporative Platen
+integrator only. Its eligibility logic lives in
+[`openacc_dynamic_platen_mod.f90`](../../source/openacc_dynamic_platen_mod.f90),
+which splits the decision in two: `dynamic_platen_accelerator_configured` tests
+only size-independent model configuration and is what the one-shot history
+allocation consults, while `dynamic_platen_accelerator_eligible` adds the
+`npjet >= 100` and `mxnpjet > npjet` thresholds and gates the per-step
+activation. The history itself uses the sequential pool described in
+[random numbers](random-numbers.md), which removes the remap that capacity
+growth would otherwise force.
+
+With the macro on, a step in the persistent branch runs entirely on the
+device: charge smoothing and the Coulomb/electric driver four times, four EOM
+stages, then the Platen predictor, velocity, position, stress-statistics, and
+non-inserted-position kernels, with no per-step host transfer. The host is
+reached only for topology events and output.
+
+A single-bead run using `input-24` physics without evaporation engaged at step
+1,379,105 and passed four capacity-growth, reset, and re-engage cycles at
+`npjet` 223, 353, 496, and 576, completing its full six million steps with
+`Program closed correctly`, no NaN, and no device errors. The first two of
+those cycles are exactly where earlier builds failed, before the Coulomb
+mapping reset above was corrected. The jet bridges the collector distance and
+finishes with its bead count oscillating around 570 rather than drifting, so
+the balanced insertion/removal regime is reached on the device from a
+single-bead start.
+
+The same allocation defect affects `platen_ev`, and this was measured rather
+than inferred: with the shipped target and an identical evaporative
+configuration, a 400-bead start engages at step 1 while a single-bead start
+never engages, its history still unallocated once the jet has grown to 262
+beads. Fixing it would switch a production path from host fallback to device
+execution, so it is deliberately left outside this fork and wants its own
+validation pass. `rk4sys_ev` has not been examined for the same defect.
+
+## Persistent Coulomb mapping reset
+
+A persistent run maps the Coulomb force array to the device once and keeps it
+there. When a topology change forces the host array to be reallocated, that
+mapping has to be torn down first, or the device retains a pointer to storage
+the host no longer owns.
+
+`reset_coulomb_accelerator` used to clear its bookkeeping flags without ever
+issuing the matching `exit data delete`, so the mapping was orphaned rather
+than removed. The consequence depends on where the host allocator places the
+new array: if it lands elsewhere, the next `enter data` fails with a
+*partially present* error; if it reuses the same address, OpenACC finds the
+stale entry still valid and silently reuses the old device buffer. The second
+case is the dangerous one, because it produces wrong numbers with no
+diagnostic — a jet that freezes at a fixed bead count, or NaN a few hundred
+steps later.
+
+The routine now takes the force array as an optional argument and, when it is
+supplied, deletes `coulcrossec` and the array before clearing its flags. The
+one caller that omitted it, in `rk4sys`, was corrected to pass it. This is a
+defect of the shipped `nvfortran-openacc` target, not of any development fork:
+`examples/input-15` on the previous commit produced NaN from its first printed
+line with the bead count frozen at 103, against `x = 35.99` and 211 beads on
+CPU; after the fix the GPU result matches the CPU one to eight significant
+digits. `examples/input-13` and `input-14` hide it at their shipped 1,000-step
+length, which performs no reallocation at all, and reproduce it when extended
+to 25,000 steps.
+
+Any future device-resident array must therefore pair its `enter data` with an
+`exit data delete` on every path that can reallocate the host storage.
+Bookkeeping flags alone do not unmap anything.
+
 ## Explicit data region
 
 Coordinates, bead properties, cross sections, and the Coulomb force array are

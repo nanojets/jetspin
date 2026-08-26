@@ -1,5 +1,396 @@
 # JETSPIN Codex Handoff State
 
+## Coulomb device-mapping reset bug: silently wrong GPU results in shipped examples (2026-08-26)
+
+This one is **not** confined to any experimental path: it affects the plain
+`nvfortran-openacc` build, on `development` as shipped, and it makes three
+distributed examples produce wrong results on GPU while the CPU build is
+correct. It was found while validating the Platen fork described in the next
+section, but it is independent of it.
+
+### Symptom
+
+| example | config | CPU (correct) | GPU on `843e7ad` |
+|---|---|---|---|
+| `input-15` | RK4, 100 beads, insertion, no removal | x=35.99 cm, 211 beads | **NaN from the first print**, beads frozen at 103 |
+| `input-13` | RK4, 1024 beads, insertion+removal | evolves normally | **silently frozen** at the reallocation |
+| `input-14` | RK4, 1500 beads, insertion+removal | evolves normally | **silently frozen** at the reallocation |
+
+`input-13`/`input-14` are the nastier case: no NaN, no error, exit code 0,
+and output that looks plausible at a glance. What actually happens is that
+the state stops evolving: `yz` stays identical to ten digits for thousands
+of steps, topology events cease entirely, `rc` drops to zero. Both froze at
+exactly 259 insertions, which is the reallocation point in their default
+capacity reserve.
+
+Note the default 1,000-step configurations of `input-13`/`input-14` do
+**not** trigger it: they only accumulate ~13-19 insertions against 256 of
+reserve, so no reallocation occurs and the run is fine. Extending them to
+25,000 steps (`final time 2.5d-3`) crosses the reserve and exposes it.
+`input-15` starts with zero headroom (`points 100` with `incnpjet=100`), so
+its very first insertion reallocates and it fails within ~25 steps.
+
+### Root cause
+
+`reset_coulomb_accelerator(ycf)` in `coulomb_force_mod.f90` takes `ycf`
+(the Coulomb force array, `coulforce`) as an **optional** argument, with a
+deferral mechanism for callers that do not have it in scope:
+
+```fortran
+  if(accelerator_coulomb_mapped)then
+!$acc exit data delete(coulcrossec)
+    if(present(ycf))then
+!$acc exit data delete(ycf)     ! skipped when called bare
+    endif
+  endif
+  accelerator_coulomb_mapped=.false.          ! cleared either way
+  accelerator_coulomb_reset_pending=.not.present(ycf)
+```
+
+Called without `ycf` it deletes `coulcrossec`, leaves `ycf` mapped on the
+device, and still clears `accelerator_coulomb_mapped`. The deferred
+completion at `coulomb_force_mod.f90:262`
+
+```fortran
+  if(accelerator_coulomb_reset_pending)then
+    call reset_coulomb_accelerator(ycf)
+  endif
+```
+
+does pass `ycf`, but by then the guard `if(accelerator_coulomb_mapped)` is
+already false, so it skips the delete a second time and simply clears the
+flags. The `ycf` device mapping is therefore **never** removed.
+
+`compute_coulomelec` then reallocates the host array when capacity grows
+(`if(imiomax>ncoulforce)` -> `deallocate(ycf)` / `allocate(ycf(0:ncoulforce,3))`)
+and maps it again. What happens next depends on where the host allocator
+places the new array:
+
+- new range overlapping the stale registered range -> `FATAL ERROR:
+  variable in data clause is partially present on the device: name=ycf`
+- new range considered already present -> the kernels keep using a device
+  buffer whose host backing has been freed, which is the silent-corruption
+  case (frozen state in `input-13`/`input-14`, NaN in `input-15`)
+
+That allocator dependence is why the same bug shows up as a hard error in
+one configuration and as silent garbage in another.
+
+`rk4sys` (`integrator_mod.f90`) was the only in-tree caller using the bare
+form; `rk4sys_ev`, `platen_ev` and `integrator_kv_ev_mod` all pass
+`coulforce` and are unaffected.
+
+### Fix
+
+1. `integrator_mod.f90`, `rk4sys` reset block: pass `coulforce`, matching
+   every other caller.
+2. `coulomb_force_mod.f90`, `reset_coulomb_accelerator`: the argument-less
+   form now defers the **whole** reset instead of half-performing it, and
+   deliberately leaves `accelerator_coulomb_mapped` alone so the deferred
+   call can complete the delete. With fix 1 in place no in-tree caller uses
+   that form any more, so this is a safety net against the trap recurring
+   rather than a live code path.
+
+### Verification
+
+- `input-15` on GPU after the fix matches the CPU run to 8 significant
+  digits on `x` (35.99200794 vs 35.99201023) with identical bead counts
+  (211), against NaN before.
+- `input-13`/`input-14` extended to 25,000 steps keep evolving past the
+  reallocation (315 and 463 insertions, last topology events at steps
+  24,996 and 24,975) instead of freezing at 259.
+- `input-13` extended, checked against a CPU run of the same input, which
+  is the trusted reference. The fixed GPU build tracks it on every
+  indicator; the unfixed one does not:
+
+  | | insertions | last topology event | active beads | rc |
+  |---|---|---|---|---|
+  | CPU reference | 313 | step 25,000 | 995 | 1.03e-3 |
+  | GPU, fixed | 315 | step 24,996 | 1008 | 6.04e-4 |
+  | GPU, `843e7ad` | 259 | step 20,544 | 1010 | **0.0** |
+
+  Bit-comparison is meaningless here: by 25,000 steps `yz` has grown to
+  order 1 cm and the bending instability makes the run chaotic, so CPU and
+  GPU diverge legitimately. What distinguishes the broken run is that it
+  stops evolving at all.
+- `input-20` (fixed-topology 1,000-bead evaporative Platen, which engages
+  the persistent path but never reallocates) is **bit-identical** to
+  `843e7ad` on both CPU and GPU, confirming the change does not disturb the
+  non-reallocating path.
+
+### Reproducing
+
+```
+make nvfortran-openacc BINROOT=<dir>/execute
+cd <rundir> && cp <repo>/examples/input-15/input.dat . && ./main.x
+```
+`input-15` fails within seconds. For `input-13`/`input-14`, first change
+`final time 1.d-4` to `2.5d-3` and `print time 1.d-5` to `2.5d-4`, then
+compare `Topology additions` and the last `Topology event` step against a
+CPU run: a frozen GPU run stops emitting topology events entirely while the
+step counter keeps advancing.
+
+## Platen dynamic-topology OpenACC fork and sequential Gaussian pool (2026-08-26)
+
+Goal: extend the OpenACC persistent (fully device-resident) execution path
+of `platen()` -- integrator 4, system 4, no evaporation, the configuration
+used by `examples/input-24` with `evaporation no` -- from the narrow
+fixed-1,000-bead benchmark geometry to genuine dynamic topologies (ongoing
+nozzle insertion plus dynamic mesh refinement), mirroring what `rk4sys`,
+`rk4sys_ev` and `platen_ev` already do in production.
+
+Per the requested methodology, the extension lives in a new file behind a
+new macro and hooks into `integrator_mod.f90` only through
+`#ifdef ... #else ... #endif`, so a build without the macro is unchanged.
+This is verified, not assumed: see the regression results below.
+
+### Files changed
+
+- `source/openacc_dynamic_platen_mod.f90` (new, entirely inside
+  `#ifdef JETSPIN_GPU_DYNAMIC_PLATEN`). Two eligibility functions sharing
+  `dynamic_platen_configured_common()`:
+  - `dynamic_platen_accelerator_configured()` -- every static condition
+    except the current bead count. Used once, before the timestep loop, to
+    decide whether to build the Gaussian history at all (bug 1 below).
+  - `dynamic_platen_accelerator_eligible()` -- the same plus `npjet>=100`
+    and `mxnpjet>npjet`. Used every step to decide whether to switch into
+    the persistent path.
+  - Honours `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` like its siblings.
+- `source/integrator_mod.f90`, inside `platen()`, all macro-guarded: reset
+  block on `persistent_reset_requested .or. doallocate` (copied from
+  `rk4sys`, previously absent from `platen()` entirely); activation gate
+  widened with the `accelerator_is_topology_enabled()` double-map guard and
+  `accelerator_set_topology_enabled(.true.)`; device-side
+  `accelerator_compute_posnoinserted_3d` + `accelerator_mark_device_state`
+  in the persistent branch, needed once `linserting` can be true under
+  persistence. Plus the `begin_gaussian_history_step` call and the widened
+  history mapping extent described below.
+- `source/utility_mod.f90`: sequential Gaussian pool (below).
+- `source/nanojet_mod.f90`, `reallocate_jet()`: calls
+  `resize_gaussian_history(mxnpjet)` on insertion-overflow growth (bug 3).
+  Note this file is **not** preprocessed by the Makefile, so it carries no
+  `#ifdef`; the macro-dependent behaviour lives inside
+  `resize_gaussian_history` itself.
+- `build/Makefile`: `nvfortran-openacc-dynamic-platen` target and the
+  `openacc_dynamic_platen_mod.o` rule, ordered ahead of `integrator_mod.o`.
+
+### Sequential Gaussian pool
+
+The historical layout indexes `gaussianhistory` as a 4D array
+(step, bead, component, draw) with the bead stride hard-wired to
+`mxnpjet+1`. Two consequences: every capacity change forces a full host
+rebuild plus a device remap (a stale-mapping hazard, and the direct cause
+of bugs 2 and 3 below), and because the total is capped at
+`maxgaussianhistory=100,000,000` values, the number of covered steps
+*shrinks* as capacity grows even when the extra slots are never read
+(74,404 -> 51,440 -> 36,791 steps over one observed run).
+
+Under the macro the array is instead one flat random sequence, allocated
+once and never remapped. Each timestep reserves
+`(active beads)*6` consecutive values via
+`begin_gaussian_history_step(mystart,myend)`, called once per step ahead of
+the dispatch in `platen()`/`platen_ev()` so it also covers the persistent
+branch that returns early; a cursor walks forward and wraps only once the
+entire sequence has been consumed, with the read using the same modulo so a
+slice straddling the end is served correctly rather than by discarding the
+tail. `resize_gaussian_history` becomes a no-op, which is what removes the
+remap hazard structurally rather than patching each site.
+
+Consumption tracks live beads instead of reserved capacity, so the sequence
+also lasts longer: at 351 active beads with capacity 452, 2,106 values per
+step (~47,500 steps before wrap) against 2,718 (36,791 steps) before.
+
+Both device kernels (`accelerator_platen_velocity`,
+`accelerator_platen_evap_velocity`) gained three arguments carrying the
+slice and compute the index through one shared expression for both layouts.
+The `mod` is an identity for the historical layout, where the index is
+always below the array size, so the macro-off path is unchanged; this is
+confirmed by the regression results below.
+
+### Bugs found and fixed
+
+1. **Gaussian history never built for a real single-bead start.**
+   `prepare_integrator_random_history`, called once from `main.f90` before
+   the timestep loop, decided whether to allocate `gaussianhistory` using
+   eligibility tests that all require `npjet>=100` -- evaluated at the one
+   moment when `npjet` is still 1. The array was therefore never allocated
+   for the whole run regardless of later growth (nothing else calls
+   `prepare_gaussian_history`, and `resize_gaussian_history` only extends an
+   existing array). Since `allocated(gaussianhistory)` is a required
+   condition in `platen()`'s activation gate, the persistent path could
+   never engage. Confirmed empirically: a run growing from 1 to 165 beads
+   never printed the engagement diagnostic. This matches the earlier `nsys`
+   finding in this session that only the Coulomb kernel ever executed on
+   GPU for `input-24`. Fixed by deciding the one-shot allocation with the
+   size-independent `..._configured()` test.
+
+   **The same defect affects `platen_ev`, and this is measured, not
+   inferred.** A/B test with the shipped `nvfortran-openacc` build (macro
+   off), identical evaporative configuration, changing only the initial
+   bead count:
+
+   ```
+   points 400 -> PROBE: history decision fixed=F dynamic=T npjet=400
+                 PROBE: platen_ev ENGAGED npjet=400 step=1
+   points 1   -> PROBE: history decision fixed=F dynamic=F npjet=1
+                 never engages; history_allocated=F throughout, still false
+                 when the jet had grown to npjet=262
+   ```
+
+   So any GPU run of the dynamic evaporative Platen path that starts from a
+   single bead has been silently falling back to the non-persistent path.
+   Whatever GPU timings were recorded for such runs did not measure the
+   fused path at all. `rk4sys_ev` shares the structure but was not tested.
+
+   Fixing this for `platen_ev` is deliberately **not** done here: it would
+   switch a production path from host fallback to device execution, which
+   changes results at roundoff level and would exercise fused code that has
+   apparently never run in that configuration. It should be a separate,
+   explicitly validated change.
+
+   Separately, a probe of an earlier low-charge configuration of that input
+   never reached 100 beads at all (`npjet` oscillating between 46 and 64
+   over 1.8 million steps), showing that when a configuration stays small
+   the threshold, and not only the history defect, keeps the persistent path
+   off. Test Case 24 as it now ships does grow past the threshold.
+
+2. **Stale device pointer when activation and a capacity-growing refinement
+   land in the same step.** `driver_dynamic_refinement` runs before the
+   integrator dispatch, but the flag it consults
+   (`accelerator_device_state_is_current()`) is only refreshed *after* the
+   integrator, so it reflects the previous step. On the step where
+   `platen()` first activates and a refinement event grows `mxnpjet`,
+   `resize_gaussian_history` saw a stale "not persistent" flag, skipped the
+   device remap, and left the device pointing at a host address that
+   `move_alloc` had already replaced -> `FATAL ERROR: data in PRESENT clause
+   was not found on device ... name=gaussianhistory(:)`. Fixed by tracking
+   the mapping with a dedicated self-maintained flag
+   (`gaussianhistory_device_mapped`) instead of inferring it from another
+   module's once-per-step state. Made moot by the pool redesign, kept
+   because it also fixes the historical layout.
+
+3. **Insertion-driven capacity growth never resized the history.**
+   `resize_gaussian_history` was only ever called from
+   `dynamic_refinement_mod.f90`, i.e. only for refinement-triggered growth.
+   The commoner path -- `reallocate_jet()` growing `mxnpjet` by
+   `reallocation_increment` on insertion overflow, no refinement involved --
+   never touched it, so `accelerator_platen_velocity` indexed with the new
+   `mxnpjet` into an array still sized for the old one ->
+   `CUDA_ERROR_ILLEGAL_ADDRESS`. Reproduced at the identical step across two
+   same-seed runs, and gone afterwards. Also made moot by the pool redesign.
+
+4. The Coulomb reset bug, which turned out to be pre-existing and outside
+   the fork. See the preceding section.
+
+Bugs 2 and 3 were originally patched in the historical layout; the pool
+redesign then removed the failure mode they belong to. Bug 4 was the one
+that actually produced the long-standing NaN.
+
+### Validation
+
+- **Macro off is unchanged, measured not assumed.** `input-20` is
+  bit-identical to `843e7ad` on CPU and on GPU. The GPU run of that example
+  does engage the persistent path (its CPU and GPU outputs differ at
+  roundoff level, as expected), so the comparison genuinely exercises the
+  modified kernels.
+- **Fast reproducer.** Setting `JETSPIN_REFINEMENT_INITIAL_RESERVE=2` on a
+  400-bead start forces a capacity growth within ~55,000 steps instead of
+  ~1.9 million, turning a 25-minute reproduction into about a minute. It
+  now completes cleanly through two growth/reset/re-engage cycles (npjet
+  402 and 1063) and closes correctly.
+- **Real single-bead run** (`input-24` physics with `evaporation no`,
+  `density charge 44000`, `collector distance 16`, `external potential
+  30.02076857`, growing from 1 bead): **completed its full 6,000,000 steps
+  with `Program closed correctly`, zero NaN and zero device errors.** It
+  engages at step 1,379,105 with npjet=121 and passes four
+  growth/reset/re-engage cycles at npjet 223, 353, 496 and 576. The first
+  two are exactly where the earlier builds died (NaN 152 steps after the
+  223 cycle, and at the 353 cycle in a prior run). The jet bridges the
+  collector distance and the state stays physical to the end: at step
+  6,000,000 x=16.00 cm, collector velocity 1986.5 cm/s, yz=4.09 cm,
+  angl=28.7 deg, lp=111.4 cm, 571 beads, rc=3.30e-4. Final totals are 291
+  topology additions, 1,616 removals and 2 array reallocations, with the
+  bead count oscillating around 570 over the last two million steps rather
+  than drifting -- insertion and removal are balanced, which is the regime
+  the persistent path was never previously able to reach from a
+  single-bead start.
+
+### Known limitations
+
+- **Restart is not cursor-aware.** The pool cursor is genuinely stateful
+  (it is the cumulative sum of active bead counts, not derivable from the
+  step number), and it is not written to the checkpoint file. A restarted
+  run resumes the noise sequence from offset zero. Harmless statistically,
+  but it breaks bit-exact restart reproducibility for macro-on builds.
+- **Trajectories differ from the historical layout.** The pool consumes a
+  different noise ordering, so macro-on Platen results are statistically
+  equivalent but not bit-identical to macro-off ones. Macro-off output is
+  unaffected, so no stored reference needs regenerating unless the pool
+  layout is ever promoted to the default; at that point
+  `docs/introduction/random-numbers.md` documents the contract that would
+  change.
+- The `npjet>=100` and `mxnpjet>npjet` thresholds in
+  `dynamic_platen_accelerator_eligible` are inherited from the sibling
+  functions and have not been tuned.
+
+### Suggested next steps
+
+- Decide whether to fix bug 1 for `platen_ev` (confirmed by measurement to
+  never engage from a single-bead start) and check `rk4sys_ev` the same
+  way. This is a behaviour change for a production path, so it wants its
+  own validation pass rather than being folded into the fork.
+- Decide whether the pool layout should become the default rather than a
+  macro-gated fork, given that it removes a whole class of remap hazards.
+- Persist the pool cursor in the checkpoint if macro-on restarts are wanted.
+
+## Test 24 tracking and the Test 25 split (2026-08-26)
+
+`examples/input-24` is now tracked, together with its `README.md`, and
+documented as a normal case in `docs/examples/test-24.md` and
+`manual/test24.tex`. Its electrostatic
+parameters are JETSPIN's canonical set (`density charge 44000`,
+`collector distance 16`, `external potential 30.02076857`), shared with
+Examples 3 and 6 and Tests 10, 15 and 16-20.
+
+### The evaporative configuration is Test Case 25
+
+Test 24 is non-evaporative by definition. The evaporative configuration is a
+separate tracked case, `examples/input-25`, documented in
+`docs/examples/test-25.md` and `manual/test25.tex`. The two `input.dat` files
+differ by exactly one line (`evaporation no` / `evaporation yes`), which keeps
+the controlled comparison reproducible rather than buried in prose. Test 25
+does not run to completion and is explicitly labelled a reproducer for the
+open defect below, not a validation or performance reference.
+
+Controlled comparison, both from a single bead:
+
+```text
+evaporation no   -> 6,000,000 steps, Program closed correctly, zero NaN
+evaporation yes  -> ERROR - numerical instability at nstep 1078685
+                    stress NaN at bead 30, x=12.68 cm, npjet=262
+```
+
+About 1% into the 1e8-step target. The failing run never engaged the
+persistent accelerator path (`persistent=F` at every probe), so this is the
+ordinary host integrator, not an accelerator artifact, and bending was
+developing normally up to the failure (step 800,000: `yz`=1.66 cm, 27 deg,
+48 beads). The stress-NaN signature matches what the `cp`/`evlim` defect and
+the cross-section thinning defect each produced by different routes, so the
+first hypothesis is that the cross-event compounding resurfaces under the
+bending regime, where the re-fitted cross-section field is far less smooth
+than in the configuration where the cadence workaround was validated.
+
+### Open items
+
+- Diagnose the evaporation instability that makes Test 25 stop at step
+  1,078,685. This is the pair's main open item. Test 25 is the reproducer;
+  Test 24 stays non-evaporative regardless of the outcome.
+- Establish a full-length reference for Test 24. The longest clean run is
+  6,000,000 steps on GPU. The bending regime carries several hundred active
+  beads, so direct Coulomb cost per step is substantial; consider whether a
+  shorter `final time` suffices, since the stationary regime is reached well
+  before 6 million steps.
+- The cross-event compounding mechanism remains uncharacterized.
+
 ## Repository
 
 - Location: `/home/marcol/electrospinning/jetspin`
@@ -10,282 +401,15 @@
   `development` as of commit `025f997` ("Port refinement-event volume/
   mass/charge assembly to OpenACC") unless a later entry says otherwise.
 
-## Test-24 long-run stability investigation and Akima robustness hardening (2026-08-16)
+## Refinement robustness investigation (2026-08-15/16)
 
-- `examples/input-24` (untracked, see its local `STATUS.md`) is a long
-  production run intended to reach a statistically stationary active-bead
-  count: Test-23 physics/refinement parameters combined with Example-3's
-  single-nozzle-bead startup and long integration window. It is the first
-  case that grows from one bead through many tens of accepted dynamic-
-  refinement events rather than a short validation window, and it still does
-  not run to completion. This entry documents everything found and fixed in
-  this session; the case remains untracked and unresolved as a checkpoint.
-- GFortran CPU is bit-identical between `master` and `development` for this
-  input: both crash with `ERROR - numerical instability` at the same step,
-  confirming the failure is not a `development`-branch GPU-porting
-  regression but a pre-existing property of the shared CPU refinement model.
-- **Root cause 1 (evaporation path, fixed and committed).** The accepted-
-  event reconstruction of `jetve` (post-evaporation volume) in
-  `reconstruct_refinement_state_host` (`dynamic_refinement_mod.f90`) did not
-  enforce the `evlim` floor that every ordinary per-timestep integrator path
-  already enforces (`jetve(i)/jetvl(i)>=evlim`). An Akima undershoot on the
-  evaporation-radius field let this ratio collapse to about 0.00916 (against
-  a floor of `evlim=cp0/(1-evsolvlim)~=0.0667` for this input), i.e. roughly
-  7x below its own per-bead floor, uniformly across nearly the whole active
-  jet at once. This inflates the polymer mass fraction `cp=cp0*jetvl/jetve`
-  to about 6.55 (655%, matching the number already recorded in
-  `examples/input-24/STATUS.md` issue 2) and, in `eom_ev_mod.f90`'s
-  `eom4_ev` (and the analogous `eom1_ev`/`eom3_ev`/`eom4_pos_ev` branches),
-  the evaporation-corrected viscosity ratio `ratmu` explodes accordingly,
-  driving the Maxwell stress derivative `fst=(1/rattao)*consistency*ratmu*(...)`
-  into the thousands on that same event and then, integrated over roughly
-  1700 further ordinary timesteps, into a genuine double-precision overflow.
-  Fixed with `enforce_evlim_conservative` (new subroutine,
-  `dynamic_refinement_mod.f90`), called right after the existing
-  evaporated-volume conservation rescale: a water-filling algorithm clamps
-  any bead below `evlim*jetvl(i)` up to that floor, then takes the resulting
-  deficit back from the still-compliant beads in proportion to their own
-  surplus above their floor, iterating in case that step creates a new
-  violator. This restores the floor while preserving the segment's
-  evaporated-volume total to roundoff -- the same invariant the existing
-  `evaporation_volume_relative_difference` check already validates -- rather
-  than the previously-reverted naive clamp, which broke that conservation.
-  If the floor is intrinsically infeasible against the segment total (no
-  redistribution can satisfy it), the code now aborts with the new
-  `error(20)` rather than silently violating either constraint. Confirmed
-  by direct instrumentation (`JETSPIN_DEV`-style print, guarded on
-  `rattao<1e-2 .or. rattao>1e2`, added at every `fst=(1/rattao)*(...)`
-  assignment site in `eom_ev_mod.f90`): with the fix, this diagnostic never
-  fires again for this input. Validated with zero regressions on Tests
-  21/22/23 (GFortran).
-- **Root cause 2 (evaporation-independent, mitigated but not eliminated).**
-  Even with evaporation entirely disabled (`evaporation no`), the same class
-  of crash reproduces: `jetcr` (cross-section radius), fit independently by
-  Akima and then squared into `jetvl=length*pi*jetcr**2` (and, via
-  `convert_from_density`, into `jetms`), can collapse across many
-  *successive* accepted refinement events to a physically nonsensical scale,
-  eventually driving `jetms` toward zero. In the non-evaporative `eom4`
-  branch (`eom_mod.f90`) this makes `Fvet=Fve/jetms(ipoint)`,
-  `attt=att/jetms(ipoint)` explode, and the resulting huge acceleration
-  integrates into huge velocity within a handful of steps, which the stress
-  equation's `consistency*(beadvelup/beadlenup)` term then overflows into a
-  `st_nan=T` detection matching the evaporative case's signature. Confirmed
-  this is *not* physically expected breakup: the user's domain expectation
-  is that this jet reaches the collector intact (electrospinning genuinely
-  thins a fibre by orders of magnitude -- up to about 1/1000 of the nozzle
-  radius over the full nozzle-to-collector run is plausible -- but this
-  specific collapse is faster/deeper than that and does not occur at all
-  when Akima refinement is not exercised). `breaking_mod.f90` already
-  implements a physically-motivated breakup detector
-  (`condition_breakup_1`: root-find a local cubic through `jetcr` for an
-  imminent radius-zero singularity) and a mesh-compaction handler
-  (`clean_breakup`), but the `breakup yes` input keyword is gated behind the
-  compile-time `parameter :: ldevelopers=.false.` in `nanojet_mod.f90` (which
-  also gates several other experimental features), so it was never available
-  to this input; it was not enabled during this investigation because
-  flipping `ldevelopers` unlocks that broader, unvalidated developer-mode
-  surface, not just breakup, and the user's diagnosis is that this is an
-  interpolation-oscillation defect rather than a case for that mechanism.
-- Diagnosis method for root cause 2: `Dynamic refinement thin-bead
-  classification` (added to `dynamic_refinement_mod.f90`'s
-  `reconstruct_refinement_state_host`) shows the per-event minimum-radius
-  bead is *never* an anchor (`jetbd`), and for most of the run sits within a
-  few beads of the fitted segment's collector-side endpoint (`jptinit`,
-  which by construction is never tagged as an anchor -- see
-  `initialize_tagged_beads` in `nanojet_mod.f90`). In the last 1-3 events
-  before each crash its minimum-radius location instead jumps tens of beads
-  inward and its value drops roughly an order of magnitude *between two
-  consecutive events*, i.e. each event re-fits from the previous event's
-  already-slightly-degraded state and can make it measurably worse -- a
-  cross-event compounding drift, not a single-event artifact. Explicitly
-  ruled out as contributors, with direct evidence: `mass_density`/
-  `charge_density` are exactly constant throughout this input (uniform
-  `density mass`/`density charge`, nothing in this model varies them
-  spatially) and never show the pattern; position/segment length
-  (`min_segment_length_cm`) fluctuates non-monotonically and shrinks only
-  about 13x over the same 21 events where radius shrinks about 160x and
-  never once increases, so the defect is isolated to the cross-section
-  radius/area reconstruction, not a general Akima weakness across all 11
-  interpolated fields; stress and velocity do eventually show huge
-  excursions, but only in the single event immediately before each crash,
-  after radius has already been collapsing smoothly and monotonically for
-  many prior events -- consistent with them being a late-stage Newton's-law
-  consequence (tiny mass -> huge acceleration -> huge velocity -> stress
-  overflow) rather than an independent source.
-- Five layered, incremental defenses were implemented in
-  `dynamic_refinement_mod.f90`/`fit_mod.f90`, each validated with zero
-  regressions on `tests/refinement/run.sh gfortran standard` (Test 21) and
-  direct GFortran runs of `examples/input-22`/`examples/input-23` (clean
-  completion, matching topology). None of them, individually or combined,
-  fully eliminates the crash; each measurably changes (not monotonically
-  improves, given the stochastic Platen trajectory's sensitivity to any code
-  change) how far the run gets before it. In order of application inside
-  the `radius_area`/`evap_radius_area` fit blocks:
-  1. **Fit `ln(pi*jetcr**2)` (log cross-section area), not the raw radius.**
-     Reference volume is linear in area but quadratic in radius, so a radius
-     undershoot is squared into the reconstructed volume/mass; area removes
-     that amplification. Fitting its *logarithm* additionally guarantees the
-     recovered area is strictly positive by construction (`dexp` of anything
-     is positive -- a raw area fit could and did go measurably negative
-     before `dabs()`, confirmed directly: `raw_fit_min=-1.014459E-06`) and
-     linearises the roughly exponential thinning trend, which is much better
-     conditioned for Akima's tangent estimate than the raw area's steeper
-     curvature. `jetcr` is recovered as `sqrt(exp(fit)/pi)`. The source
-     array passed to `fit_akima` is guarded with
-     `max(dabs(jetcr(:)),1.d-300)` before `dlog` to avoid a spurious
-     `log(0)` (`IEEE_DIVIDE_BY_ZERO`) on unused array slots outside
-     `inpjet:npjet`; this is cosmetic (the run already completed correctly
-     without it) but avoids an unnecessary FP flag.
-  2. **`despike_median_filter`** (new subroutine): a branchless 3-point
-     median filter over the fitted target segment, iterated up to 3 passes,
-     skipping anchor points entirely (an earlier version that did not skip
-     anchors broke the `anchor_displacement`/radius-exactness invariant and
-     was caught by Test 21 -- always exclude `jetbd` from any post-hoc
-     filter on these fields).
-  3. **`clamp_to_local_source_range`** (new subroutine): bounds each
-     non-anchor target point to the range spanned by its two immediate
-     bracketing pre-event source points (a cheap, local approximation of a
-     shape-preserving/monotone-interpolation guarantee that classic Akima
-     does not provide). Confirmed by direct measurement that this clamp
-     cannot by itself catch a drift that already compounded through earlier
-     events, because by the time of a later event that drift is already
-     baked into the "legitimate" local source data too.
-  4. **`clamp_to_anchor_envelope`** (new subroutine, safety factor `1.d2`):
-     bounds interior non-anchor points between two bracketing *anchors*
-     instead of immediate source neighbours, since anchors are restored
-     exactly every event (`radius_max_difference_cm=0`) and so should be
-     drift-immune. Found empirically insufficient in this run because an
-     anchor itself can already be tagged from an already-partially-degraded
-     bead (anchors are frozen at tagging time, not validated against
-     anything), so trusting an anchor as ground truth does not always hold.
-  5. **`limit_akima_tangents_monotone`** (new subroutine in `fit_mod.f90`,
-     operating on the module-level `mak`/`tak` arrays): a Fritsch-Carlson
-     sufficient-condition limiter on the Akima knot tangents -- zero the
-     tangent at any knot where the two adjacent secant slopes disagree in
-     sign (a local extremum), then rescale each segment's two endpoint
-     tangents, iterated a few passes, to satisfy the classic
-     circle-of-radius-3 monotonicity bound. Opted into via a new optional
-     `lmonotone` argument on `setup_akima`, enabled only for
-     `field_name` in `{radius_area, evap_radius_area, mass_density,
-     charge_density}` (never position/velocity/stress, which may have
-     genuine local extrema). This measurably delayed the crash the most of
-     any single change so far, but the compounding drift still eventually
-     recurs -- even a genuinely monotone-consistent fit, re-run from its own
-     prior output across ~20-30 events, appears to accumulate some drift,
-     which may be a resampling/requantization effect distinct from classic
-     Akima overshoot and not yet isolated.
-  6. **`enforce_radius_floor_conservative`** (new subroutine, water-filling
-     identical in structure to the evlim fix, floor
-     `minimum_bead_radius_cm=1.d-7` cm, i.e. 1 nm): found empirically too
-     permissive to matter here -- the measured collapsing radii (order
-     5-40 nm) never actually cross an absolute 1 nm floor, so this call
-     never fires for this input. Electrospinning legitimately reaches
-     sub-micron fibre radii, so an *absolute* floor is the wrong kind of
-     check; a floor relative to the jet's own current/local scale was
-     discussed but not implemented, superseded by the anchor-envelope and
-     monotonicity approaches above. Kept as a defense-in-depth against a
-     genuine sign-crossing that the other layers miss, and as the
-     `error(21)` infeasibility guard.
-- New error codes added to `error_mod.f90`: `case(20)` (evlim floor
-  infeasible against the segment's evaporated-volume total) and `case(21)`
-  (radius floor infeasible against the segment's reference-volume total).
-  Both abort with a clear message rather than silently breaking either the
-  floor or the conservation invariant.
-- **GPU/OpenACC scope of all fixes above: originally host-only; now ported,
-  see the dedicated section below.** This investigation itself, per the
-  user's direction, targeted GFortran CPU only, and at the time of writing
-  three of the six defenses (`enforce_evlim_conservative`,
-  `enforce_radius_floor_conservative`, `limit_akima_tangents_monotone`)
-  were reachable only from the host paths. They have since been ported to
-  their OpenACC counterparts; see "GPU/OpenACC port of the three host-only
-  fixes" below for what changed and how it was validated.
-- Guarded, low-noise diagnostic instrumentation was added and left in the
-  tracked source (development-only, no effect on normal output unless a
-  threshold is crossed): `Rattao blowup diagnostic` in `eom_ev_mod.f90`
-  (fires when `rattao<1e-2 .or. rattao>1e2`, reporting `yvl`, `yve`,
-  `cmass`, `rattao`, `fst` for the offending bead); `Akima endpoint
-  diagnostic` in `fit_mod.f90` (fires for `field_name` in
-  `{radius_area, evap_radius_area, mass_density, charge_density, stress,
-  vx, vy, vz}`, reporting the endpoint segment slopes/tangent and the raw
-  fitted value/min/max before any of the filters above run); `Dynamic
-  refinement thin-bead classification` in `dynamic_refinement_mod.f90`
-  (reports whether the event's minimum-radius bead is an anchor and its
-  distance from the segment endpoint); and, in `integrator_mod.f90`'s
-  instability-detection block, `Numerical instability last-good neighbor`/
-  `domain extent` (reports the physical `x` position in cm of the last
-  still-finite neighbour and of both the collector-side (`inpjet`) and
-  nozzle-side (`npjet`) active-mesh extremes). These were essential for
-  distinguishing "near the nozzle/head" from "near the collector/tail" and
-  for confirming which field's interpolation was implicated; keep them for
-  any future continuation of this investigation.
-- Confirmed collector-reaching state at the point of failure differs by
-  configuration: with evaporation enabled (the actual `examples/input-24`
-  input), the jet does reach the collector and 34 beads have already been
-  removed there when the crash occurs (`collector_side_bead` at
-  `x_cm=12.000000` exactly); with evaporation disabled, it does not (stops
-  at about `x=8.97` of 12 cm, zero removals).
-- Status: `examples/input-24` still does not run to completion under any of
-  the above combinations. This is accepted as an incremental checkpoint, not
-  a resolution. Suggested next directions, not started: investigate whether
-  the residual drift is a cumulative resampling/requantization effect
-  intrinsic to re-fitting the same evolving quantity across dozens of
-  events (rather than a per-event Akima quality issue, which the above five
-  layers already target); consider a true monotone/shape-preserving cubic
-  Hermite (PCHIP) replacement rather than a post-hoc limiter on top of
-  Akima; consider whether a region should stop being re-fit after some
-  number of consecutive events without becoming stable.
-
-### Resolution: refinement cadence, not interpolation quality, was the practical driver
-
-- Comparing against `examples/input-5` (the historical single-nozzle-bead
-  refinement case) showed it uses a much coarser cadence than `input-24`:
-  `dynamic refinement threshold 0.4` cm (20x the 0.02 cm base resolution)
-  and `dynamic refinement every 1.d-3` s, versus `input-24`'s `0.10` cm
-  (5x resolution) and `1.d-5` s. The tight `input-24` cadence lets a jet
-  growing from one bead accumulate several dozen accepted refinement events
-  within under `2e5` timesteps; each event re-fits the cross-section from
-  the previous event's own output, which is exactly the precondition for
-  the cross-event compounding drift documented above.
-- Re-ran `examples/input-24` (with evaporation, the real input) with only
-  `threshold` changed to `0.4d0` and `every` changed to `1.d-3`, all five
-  cross-section-fit defenses and the `evlim` fix still active. The run
-  reached `6.5e7` of its `1e8` timestep target (324 accepted refinement
-  events, active-bead count settled into a stationary ~17/18-to-36/37
-  insertion/removal oscillation) with zero errors before being interrupted
-  externally (not a crash). `min_radius_cm` measured at every one of those
-  324 events stayed at its initial value (`~5.40e-4` cm) for the entire
-  run -- no collapse, gradual or sudden. This is an over 300x improvement
-  in steps-before-failure/interruption compared to the original cadence's
-  best result (~193,748 steps), and the first time this input has shown
-  the stationary active-bead behavior it was designed to reach.
-- `examples/input-24/input.dat` now ships with `dynamic refinement
-  threshold 0.4d0` and `dynamic refinement every 1.d-3` (Example 5's
-  cadence) instead of Test 23's tighter values; the anchor spacing
-  (`dynamic refinement anchor 0.10d0`) is unchanged. `README.md` and the
-  input's header comment were updated to record why.
-- Added a general advisory, `warning(108)` in `error_mod.f90`, raised from
-  `set_refinement_threshold()` (`dynamic_refinement_mod.f90`) whenever the
-  final (configured or auto-derived) `refinementthreshold` is below 20
-  times the base `resolution`. It is advisory only and does not alter
-  behavior: Example 5 itself (5x resolution) and Tests 21-23 all use
-  thresholds below this recommendation and remain validated short-window
-  references where the compounding drift was never exercised long enough
-  to appear. Documented in `manual/input.tex`'s directive table and
-  `manual/refinement.tex` Sec. "Numerical robustness of the cross-section
-  reconstruction", and in `docs/introduction/dynamic-refinement.md`.
-- This is a practical workaround for `input-24`'s specific parameters, not
-  a fix for the underlying cross-event compounding mechanism itself, which
-  remains as documented above (still suspected to be a cumulative
-  resampling/requantization effect, not yet isolated further). An input
-  that genuinely needs both a tight refinement threshold and a long,
-  many-event integration window would still be expected to hit this
-  failure mode; the five interpolation-side defenses reduce its severity
-  but do not eliminate it, per the extensive earlier testing in this
-  section.
-- `examples/input-24/` remains untracked pending a full end-to-end
-  completion run (only 65% of the target `final time` has been validated
-  so far) and pending a decision on whether to also address the underlying
-  mechanism rather than only its cadence-driven trigger for this input.
+Moved out of this file to `docs/refinement-robustness-investigation.md`. It
+records the three defects found when a jet is grown from a single nozzle bead
+through many tens of consecutive accepted refinement events, the five
+interpolation-side defenses added, and the refinement-cadence guidance that
+came out of it. It is kept separate from any example case because the probe
+configuration has since changed, while the fixes and the guidance are in the
+shipped code.
 
 ## GPU/OpenACC port of the three host-only fixes (2026-08-17)
 
@@ -365,12 +489,12 @@
     standard build, as already documented elsewhere in this file; this is
     a pre-existing property of that oracle, not something this port
     changed).
-  - A fresh native-A30 `nvfortran-openacc` build of the real
-    `examples/input-24` (with evaporation, the actual untracked input, not
-    a variant) ran cleanly past 2.5 million of its 1e8 target timesteps
+  - A fresh native-A30 `nvfortran-openacc` build of the probe
+    configuration used in the refinement-robustness investigation (with
+    evaporation) ran cleanly past 2.5 million of its 1e8 target timesteps
     (12 accepted refinement events) with zero `ERROR` lines and zero
     `Rattao blowup diagnostic` occurrences, directly paralleling the
-    successful CPU validation earlier in this file at a comparable stage.
+    successful CPU validation at a comparable stage.
     It was left running rather than driven to full completion, since the
     CPU validation already established that full completion is a
     multi-hour endeavor and this GPU run had already produced

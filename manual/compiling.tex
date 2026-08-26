@@ -108,6 +108,18 @@ by the device result and reports maximum coefficient and interpolated-value
 differences for every field. Neither target is intended for performance
 measurements.
 
+Target \texttt{nvfortran-openacc-dynamic-platen} enables the
+\texttt{JETSPIN\_GPU\_DYNAMIC\_PLATEN} macro. Unlike the oracle and Akima
+targets it is an execution path rather than a validation aid: it extends the
+device-resident integration path to non-evaporative Platen runs whose bead
+count varies during the simulation, including runs started from a single bead.
+All of its changes are enclosed in the macro, so the behaviour of
+\texttt{nvfortran-openacc} is unchanged. It is not yet the default because its
+random-number consumption order differs from the standard build, so the two
+produce statistically equivalent but not identical trajectories, and because a
+restarted run does not resume the random sequence at the point where it was
+interrupted.
+
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
 binary executable file can be run in the \textit{execute} sub-directory.
@@ -154,6 +166,9 @@ nvfortran-openacc-host-akima & retain the historical host Akima routines as a
 development-only refinement oracle.\tabularnewline
 nvfortran-openacc-compare-akima & compare host and device Akima coefficients
 and interpolated values at every accepted refinement.\tabularnewline
+nvfortran-openacc-dynamic-platen & extend the device-resident path to
+non-evaporative Platen runs whose bead count varies during the
+simulation.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
 \hline
 \end{tabular}

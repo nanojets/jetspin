@@ -9,8 +9,19 @@ at shutdown; the acceptance condition is a value greater than zero and at
 least one topology addition. Each subsequent reallocation grows the capacity
 by 100 slots; the initial allocation remains governed by the normal
 100-slot increment. The small persistent GPU topology path is also enabled so
-that capacity growth and device remapping are exercised. The high insertion
-speed amplifies GPU rounding, so acceptance checks completion, topology
-additions, and a positive reallocation count rather than bead-for-bead
-trajectory identity. The input is stored in
+that capacity growth and device remapping are exercised. Acceptance checks
+completion, topology additions, and a positive reallocation count rather than
+bead-for-bead trajectory identity. The input is stored in
 \texttt{examples/input-15/input.dat}.
+
+The relaxed acceptance criterion was originally attributed to the high
+insertion speed amplifying GPU rounding. That explanation was incorrect. The
+divergence was caused by a defect in the accelerator path: on a reallocation
+the persistent device mapping of the Coulomb force array was not released
+before the host array changed, so the device either failed with a
+\textit{partially present} error or silently reused the previous buffer. The
+GPU run produced NaN from its first printed line with the bead count frozen at
+103, against 211 beads and a final abscissa of 35.99 cm on the CPU. Once the
+mapping is released correctly, the two agree to eight significant digits. This
+test is consequently a genuine regression guard for that defect, and a future
+tightening of its acceptance criterion is justified.

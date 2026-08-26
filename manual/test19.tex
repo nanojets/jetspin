@@ -1,0 +1,22 @@
+\section{Test Case 19: high-resolution dynamic Kelvin--Voigt evaporation}
+
+Test Case 19 is the Kelvin--Voigt counterpart of Test Case 18.  It uses the
+Kelvin--Voigt RK4 integrator with Yarin evaporation, nozzle insertion, and
+collector removal enabled.  The initial jet length is 16 cm with
+\texttt{points 800}, the same 0.02 cm nominal spacing as Test Case 18.
+Dynamic refinement is disabled and the case is serial.
+
+The NVFORTRAN CPU reference completed in about 14.5 s with 500 topology
+additions, 76 removals, five reallocations, and 1,224 active beads.  A
+NVFORTRAN 24.3 run on an NVIDIA A30 completed normally with 498 additions, 77
+removals, five reallocations, and 1,221 active beads.  Both the complete-force
+oracle and the Coulomb-only oracle produced the same aggregate GPU totals.
+
+The remaining three-bead difference in the final count is consistent with
+threshold-sensitive topology after roundoff amplification.  Because the direct
+Coulomb force is sensitive to both bead spacing and bending dynamics, CPU and
+GPU trajectories for this case should be compared within a tolerance rather
+than as bitwise-identical states.  Like Test Case 18 it is a porting and
+performance probe rather than a strict pointwise regression case, and it is
+not part of the short smoke and regression matrices.  The input is stored in
+\texttt{examples/input-19/input.dat}.

@@ -132,6 +132,30 @@ enables `JETSPIN_COMPARE_AKIMA`: it computes the trusted host result followed
 by the device result and reports field-wise maximum coefficient and value
 differences. These are numerical-validation builds, not performance builds.
 
+One further target opens the persistent device path to variable-topology
+Platen runs:
+
+```sh
+make -C source -f ../build/Makefile nvfortran-openacc-dynamic-platen GPUCC=80
+```
+
+`nvfortran-openacc-dynamic-platen` enables `JETSPIN_GPU_DYNAMIC_PLATEN`. It is
+a fork rather than a change of default: every edit it introduces is inside the
+macro, so the shipped `nvfortran-openacc` target is byte-for-byte the previous
+behaviour. It applies to the non-evaporative Platen integrator only, adds a
+size-independent eligibility decision so that a jet growing from a single bead
+can still build its Gaussian history, and replaces the stride-indexed history
+with the sequential pool described in
+[random numbers](random-numbers.md). Unlike the akima and oracle targets it is
+a genuine execution path, not a validation harness, but it is not yet the
+default because macro-on trajectories are not bit-identical to macro-off ones
+and restart is not cursor-aware.
+
+Two developer environment variables help when exercising it:
+`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` forces the non-persistent branch, and
+`JETSPIN_REFINEMENT_INITIAL_RESERVE=<n>` lowers the initial capacity reserve so
+that capacity-growth handling can be reached in minutes instead of hours.
+
 ## Other targets
 
 | Target | Purpose |
@@ -152,6 +176,7 @@ differences. These are numerical-validation builds, not performance builds.
 | `nvfortran-openacc-coulomb-oracle` | Development-only host direct-Coulomb oracle, with or without evaporation |
 | `nvfortran-openacc-host-akima` | Development-only historical host-Akima oracle inside the OpenACC refinement path |
 | `nvfortran-openacc-compare-akima` | Development-only host/device Akima A/B comparison |
+| `nvfortran-openacc-dynamic-platen` | Macro-gated fork extending the persistent device path to variable-topology non-evaporative Platen runs |
 | `help` | Display available targets |
 | `clean` | Remove objects and module files from `source/` |
 

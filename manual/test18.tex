@@ -1,0 +1,25 @@
+\section{Test Case 18: high-resolution dynamic Maxwell evaporation}
+
+Test Case 18 is the high-resolution counterpart of Test Case 16.  It uses the
+Maxwell RK4 integrator with Yarin evaporation, nozzle insertion, and collector
+removal enabled.  The initial jet length is 16 cm with \texttt{points 800},
+giving a nominal spacing of 0.02 cm, that is 200 micrometres, between adjacent
+nodes.  As in Test Case 16, dynamic refinement is disabled and the case is
+serial.
+
+Because the initial capacity already contains 800 intervals, the case measures
+the dynamic topology path at a finer spatial resolution rather than forcing
+frequent capacity reallocations.
+
+The NVFORTRAN CPU reference completed in about 14.2 s with 500 topology
+additions, 899 removals, three reallocations, and 401 active beads.  A
+NVFORTRAN 24.3 run on an NVIDIA A30 completed normally with 499 additions, 898
+removals, three reallocations, and 401 active beads.  Both the complete-force
+oracle and the Coulomb-only oracle produced 499 additions, 899 removals, three
+reallocations, and 400 active beads.
+
+This near-event agreement confirms the case's extreme sensitivity to the
+summation order of the direct Coulomb force.  Test Case 18 is therefore a
+performance and porting probe rather than a strict pointwise regression case,
+and it is not part of the short smoke and regression matrices.  The input is
+stored in \texttt{examples/input-18/input.dat}.

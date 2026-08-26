@@ -73,7 +73,13 @@ Therefore `reallocate_jet` can reorder every bead-aligned array without
 increasing the physical allocation. It copies data through shared service
 buffers, clears or reallocates the destination arrays, restores the shifted
 active interval, updates `inpjet` and `npjet`, and sets `doreorder`. When the
-capacity changes it also sets `doallocate` and recomputes `mxchunk`.
+capacity changes it also sets `doallocate` and recomputes `mxchunk`, and calls
+`resize_gaussian_history(mxnpjet)` so that a stride-indexed pre-generated
+Gaussian history follows the new capacity. That last call is easy to miss:
+dynamic refinement is the more visible route to a capacity change, but
+insertion overflow is an independent one, and a history left at the previous
+stride is indexed past its end. See
+[random numbers](random-numbers.md).
 
 This distinction is important for output and tracking code: a stable physical
 bead cannot be identified permanently by its current array index.
@@ -157,7 +163,9 @@ Preserve these invariants:
 - inactive entries supplied to an `MPI_SUM` operation are zero;
 - `set_mxchunk` follows a capacity change and `set_chunk` follows an active
   interval change;
-- `doallocate` reaches every capacity-dependent consumer;
+- `doallocate` reaches every capacity-dependent consumer, including consumers
+  outside the bead arrays themselves such as the pre-generated Gaussian
+  history and any device mapping that depends on the host allocation;
 - `doreorder` reaches code whose identifiers or output depend on bead indices.
 
 Relevant validation includes serial and runtime-checking smoke tests, the

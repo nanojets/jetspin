@@ -1,0 +1,86 @@
+ !Example JETSPIN input file 24: long production run toward nozzle/collector
+ !steady state, growing from a single nozzle bead.
+ !
+ !Electrostatic parameters are JETSPIN's canonical set (density charge
+ !44000, collector distance 16 cm, external potential 30.02076857), shared
+ !with Examples 3 and 6 and Test Cases 10, 15, 16-20.
+ !
+ !Rheology, air drag, insertion and removal are Test Case 23's;
+ !initialization and print directives are Example 3's, so the jet grows from
+ !a single nozzle bead instead of the pre-extended 400-element mesh used to
+ !validate the refinement algorithm.
+ !
+ !This case is non-evaporative by definition. Its evaporative counterpart
+ !is Test Case 25 (examples/input-25/input.dat), which is identical except
+ !for the "evaporation" keyword. The split is deliberate: with evaporation
+ !enabled this configuration reaches the code's own numerical instability
+ !check at step 1078685 (stress NaN), while the non-evaporative one runs
+ !cleanly, so keeping the two as separate inputs makes that controlled
+ !comparison reproducible. See docs/examples/test-25.md.
+ !
+ !The dynamic-refinement threshold/every cadence is Example 5's
+ !(0.4 cm / 1.d-3 s), not Test 23's tighter 0.10 cm / 1.d-5 s: growing this
+ !jet from one bead with Test 23's cadence was found to compound a
+ !nonphysical cross-section thinning across repeated refinement events.
+
+ system 4
+ integrator 4
+
+ timestep 5.d-9
+ final time 0.5d0
+ print time 1.d-2
+ seed 317
+
+ print xyz 1.d-4
+ print xyz maxnumber 400
+
+ print list t x vn vc yz n angl lp rc
+ printstat list t x vn yz n curn curc
+
+ multiple step no
+ dynamic refinement yes
+ dynamic refinement start 2.5d-4
+ dynamic refinement every 1.d-3
+ dynamic refinement threshold 0.4d0
+ dynamic refinement anchor 0.10d0
+
+ airdrag yes
+ airdrag airdensity     0.00121d0
+ airdrag airviscosity   0.1511d0
+ airdrag amplitude      1.d0
+ airdrag airvelocity    -1000.d0
+
+ inserting yes
+ removing yes
+ gravity yes
+
+ points 1
+ initial length 0.02
+ nozzle velocity 0.282942121d0
+ nozzle stress 0.d0
+ yield stress   0.d0
+ nozzle cross   0.005d0
+ density mass   0.839253525d0
+ density charge 44000.d0
+ viscosity      20.d0
+ elastic modulus 50000.d0
+ collector distance 16.d0
+ surface tension 21.133d0
+
+ perturbation yes
+ perturbation frequency 1.d4
+ perturbation amplitude 1.d-3
+
+ !Canonical JETSPIN potential; see the header note.
+ external potential 30.02076857d0
+ evaporation no
+ evaporation polymer frac 0.06d0
+ evaporation airviscosity 0.15d0
+ evaporation temperature 293.15d0
+ evaporation umidity 0.165d0
+ evaporation bconstant 7.d0
+ evaporation mconstant 0.1d0
+ evaporation tconstant 1.d0
+ evaporation diffusivity 0.242d0
+
+ Finish

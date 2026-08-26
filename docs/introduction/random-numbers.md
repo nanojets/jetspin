@@ -65,6 +65,64 @@ limit, timestep addressing wraps to the first stored block. CPU and GPU remain
 reproducible, but the Gaussian sequence then repeats periodically and should
 not be interpreted as independent noise beyond that period.
 
+## Sequential pool for the dynamic Platen fork
+
+The layout above indexes the pre-generated history as a four-dimensional array
+`(step, bead, component, draw)` whose bead stride is hard-wired to
+`mxnpjet + 1`. That stride is the reason a capacity change forces a full host
+repack plus a device remap. It also means the covered timestep count *shrinks*
+as capacity grows, because the 100,000,000-value cap is divided by a
+per-step size that follows allocated capacity rather than live beads: one
+observed run went from 74,404 to 51,440 to 36,791 covered steps without ever
+reading the added slots.
+
+The `nvfortran-openacc-dynamic-platen` build (macro `JETSPIN_GPU_DYNAMIC_PLATEN`,
+see [compiling](compiling.md)) replaces this with a single flat random
+sequence, allocated once and never remapped. Each timestep reserves
+`(active beads) * 6` consecutive values:
+
+```text
+begin_gaussian_history_step(mystart, myend)
+    base   <- cursor            (start of this step's slice)
+    window <- myend - mystart + 1
+    first  <- mystart           (bead index that maps to offset zero)
+    cursor <- mod(cursor + window*6, values)
+```
+
+`begin_gaussian_history_step` is called once per step ahead of the `systype`
+dispatch in `platen()` and `platen_ev()`, so it also covers the persistent
+device branch that returns before the host stage code. A read resolves to
+
+```text
+index = mod(base + (ipoint - first)
+            + window*((icomponent - 1) + 3*(idraw - 1)), values)
+```
+
+The cursor walks forward and wraps only once the entire sequence has been
+consumed, and reservation and read share the same modulo, so a slice
+straddling the end of the pool is served correctly instead of discarding its
+tail. `resize_gaussian_history` becomes a no-op under the macro: the remap
+hazard is removed structurally rather than patched at each call site.
+
+Because consumption tracks live beads instead of reserved capacity, the pool
+also lasts longer. At 351 active beads with capacity 452 it reserves 2,106
+values per step (about 47,500 steps before wrapping) against 2,718 values per
+step (36,791 steps) for the stride layout.
+
+Both device kernels, `accelerator_platen_velocity` and
+`accelerator_platen_evap_velocity`, take three extra arguments carrying the
+slice (`base`, `window`, `values`) and compute the index through one shared
+expression covering both layouts. For the historical layout the index is
+always below the array size, so the `mod` is an identity and macro-off results
+are unchanged; this is confirmed by regression comparison against the previous
+commit.
+
+The pool consumes a different noise ordering from the stride layout, so
+macro-on Platen trajectories are statistically equivalent but not bit-identical
+to macro-off ones. Stored references therefore do not need regenerating unless
+the pool layout is ever promoted to the default, at which point the contract
+described in this document is what changes.
+
 ## Other random paths
 
 Nozzle perturbation draws are generated on rank 0 and broadcast as scalar
@@ -99,6 +157,15 @@ step. It guarantees serial/MPI agreement for the same topology evolution; it
 does not define a permanent stochastic identity for a bead across a remeshing
 event. See [dynamic allocation and bead indexing](dynamic-allocation.md).
 
+Capacity can grow through two independent routes, and the stride layout must
+be resized on both: dynamic refinement, and insertion overflow in
+`reallocate_jet`. Only the first called `resize_gaussian_history` until this
+was corrected; a run that grew through insertion alone kept a history sized
+for the previous `mxnpjet` and indexed past its end, which on the GPU
+surfaces as `CUDA_ERROR_ILLEGAL_ADDRESS` inside
+`accelerator_platen_velocity`. `reallocate_jet` now calls
+`resize_gaussian_history(mxnpjet)` whenever it sets `doallocate`.
+
 ## Restart limitation
 
 The historical restart format does not serialize the Fortran intrinsic
@@ -107,6 +174,13 @@ from the saved physical state but is not guaranteed to reproduce the exact
 uninterrupted random sequence. Exact stochastic restart would require saving
 and restoring `random_seed(get=...)` state, with an explicit restart-format
 version and compatibility policy.
+
+The sequential pool adds a second, distinct restart gap. Its cursor is
+genuinely stateful — it is the cumulative sum of active bead counts, not
+derivable from the step number — and it is not written to the checkpoint, so
+a restarted macro-on run resumes the noise sequence from offset zero. This is
+harmless statistically but breaks bit-exact restart reproducibility, and would
+have to be addressed before the pool layout could become the default.
 
 ## Maintenance invariants
 
@@ -120,7 +194,12 @@ version and compatibility policy.
   bead and stage.
 - Optional branches must not shift later assignments differently on
   different ranks.
-- Capacity changes must resize the buffer before indexed access.
+- Capacity changes must resize the buffer before indexed access, on every
+  route that can change capacity, not only dynamic refinement.
+- A pre-generated history must be allocated by a decision that does not depend
+  on the bead count, because that decision is taken once before the timestep
+  loop, when a jet growing from a single bead has not yet reached any
+  size-based eligibility threshold.
 - Restart reproducibility must not be claimed until generator state is part
   of the restart format.
 

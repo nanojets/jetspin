@@ -238,13 +238,23 @@ from a single nozzle bead accumulated several dozen accepted refinement
 events -- each re-fitting the cross-section from the previous event's own
 output -- within under $2\times10^{5}$ timesteps. Reusing Example 5's
 established, coarser cadence instead ($0.4$~cm threshold, i.e. twenty times
-the resolution, and a $10^{-3}$~s minimum interval) let the same input run
-past $6.5\times10^{7}$ of its $10^{8}$ timesteps (324 accepted events)
-without incident: the minimum bead radius measured at each event stayed
-constant at its initial value across the entire run, and the active-bead
-count settled into the stationary insertion/removal oscillation the case
-was designed to reach. This is now the cadence shipped with that example
-input. A corresponding advisory, warning 108, is issued whenever the
+the resolution, and a $10^{-3}$~s minimum interval) let the same input, on
+GFortran CPU, run to full completion: all $10^{8}$ (one hundred million)
+timesteps, physical time $t=0.5$~s, 499 accepted refinement events,
+closing with zero errors. The jet bridges the full nozzle-to-collector
+distance and reaches its first collector removal at step $95528$, under
+$0.1\%$ into the run, and the active-bead count is already in its final
+stationary regime from that point on: the first accepted refinement event
+(step $249999$) and the last (step $99849999$) report the identical
+active-bead pattern, with no drift across the full run and the minimum
+bead radius staying at its initial value at every one of the 499 events.
+This is the first time this input has demonstrated, over its complete
+intended duration, the stationary insertion/removal oscillation it was
+designed to reach, and is now the cadence shipped with that example
+input. (The OpenACC/GPU path has been validated to $2.5\times10^{6}$ of
+the $10^{8}$ steps at this cadence but not yet driven to full completion;
+see \texttt{docs/STATE.md}.) A corresponding advisory, warning 108, is
+issued whenever the
 configured or auto-derived \uline{dynam refin threshold} is set below
 twenty times the discretization resolution; it does not change behaviour,
 since the historical Example 5 and Tests 21--23 references themselves use

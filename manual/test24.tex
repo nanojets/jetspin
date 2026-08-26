@@ -1,0 +1,66 @@
+\section{Test Case 24: long run to a stationary bead count}
+
+Test Case 24 is a long production run whose purpose is to reach a
+statistically stationary active-bead count.  Once the jet has bridged the
+16 cm nozzle-to-collector gap with a developed bending instability, insertion
+at the nozzle and removal at the collector are expected to balance, so that
+the bead count oscillates around a mean instead of drifting.  Unlike Test
+Cases 21--23 it is not designed to finish within a smoke-test timeframe: it
+integrates \texttt{final time 0.5d0} seconds with \texttt{timestep 5.d-9}
+seconds, about 100 million steps.
+
+The case is assembled from three sources.  Its electrostatic parameters are
+JETSPIN's canonical set, \texttt{density charge 44000},
+\texttt{collector distance 16}, and \texttt{external potential 30.02076857},
+shared with Examples 3 and 6 and with Test Cases 10, 15 and 16--20.  Rheology,
+air drag, insertion and removal are those of Test Case 23: Maxwell rheology,
+stochastic Platen air drag, nozzle insertion, and collector removal.
+Initialization and print directives are those of Example 3, so the jet grows
+from a single nozzle bead (\texttt{points 1}) rather than from the
+pre-extended 400-element mesh used to validate the refinement algorithm.  This
+last point is what distinguishes the case: every other validated refinement
+test starts from an already extended jet, so the young-jet growth regime had
+never been exercised.
+
+Yarin evaporation, which Test Case 23 uses, is not enabled here, and this is a
+definition rather than a temporary state.  The evaporative configuration is
+Test Case 25, whose input differs from this one by exactly one line.  The
+split exists because evaporation does not survive this configuration: Test
+Case 24 completes six million steps cleanly, whereas Test Case 25 stops at
+step 1,078,685 on the code's own numerical instability check.  Keeping the two
+as separate inputs makes that comparison reproducible with a one-keyword
+difference.  Test Case 24 is consequently the case to use for the
+stationary-bead-count study described here, and Test Case 25 carries the
+analysis of the open defect.
+
+The dynamic-refinement cadence is taken from Example 5,
+\texttt{dynamic refinement threshold 0.4} cm and
+\texttt{dynamic refinement every 1.d-3} s, rather than Test Case 23's tighter
+\texttt{0.10} cm and \texttt{1.d-5} s.  This choice is load-bearing rather
+than cosmetic.  With the tighter cadence the jet accumulates dozens of
+accepted refinement events within fewer than 200,000 steps, each one
+re-fitting the cross-section radius from the previous event's own output.  The
+result is a nonphysical thinning compounding far beyond the
+order-of-magnitude reduction that electrospinning genuinely produces,
+collapsing bead mass toward zero until the resulting acceleration overflows
+the stress equation.  The advisory \texttt{warning(108)} is raised whenever a
+refinement threshold is set below twenty times the base discretization
+resolution.  It is informational and not enforced: Example 5 and Test Cases
+21--23 are themselves below that ratio and remain valid short-window
+references.
+
+The longest clean run covers 6,000,000 steps on an
+NVIDIA A30, closing correctly with no NaN and no device errors, and ending
+with 571 active beads, an off-axis distance of 4.09 cm, a bending angle of
+28.7 degrees, and a path length of 111.4 cm.  The bead count oscillates around
+570 over the last two million steps rather than drifting, so the balanced
+insertion and removal regime is reached, although at 6\% of the target
+duration rather than over the full run.  A full-length reference does
+not yet exist, and since the developed bending instability carries several
+hundred active beads, the direct Coulomb cost per step is substantial.
+
+Track the printed \texttt{n} column over time to observe the stationary
+oscillation.  The input is stored in
+\texttt{examples/input-24/input.dat}.  The investigation into refinement
+robustness under repeated remeshing, which produced the cadence used here, is
+recorded in \texttt{docs/refinement-robustness-investigation.md}.

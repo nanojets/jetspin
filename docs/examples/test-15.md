@@ -13,8 +13,19 @@ initial allocation remains governed by the normal 100-slot increment.
 The test enters the small persistent GPU topology gate and exercises the same
 device-to-host synchronization, capacity growth, and device remapping path
 used by the larger dynamic benchmark, but with a deliberately small capacity.
-Because the high insertion speed amplifies GPU rounding, CPU and GPU
-trajectories are not required to match bead-for-bead; acceptance checks the
-successful completion, topology additions, and positive reallocation count.
+CPU and GPU trajectories are not required to match bead-for-bead; acceptance
+checks the successful completion, topology additions, and positive
+reallocation count.
+
+That relaxed criterion was originally attributed to the high insertion speed
+amplifying GPU rounding. That attribution was wrong. The real cause was
+`reset_coulomb_accelerator` clearing its bookkeeping flags without issuing the
+matching `exit data delete`, so a reallocation left the device holding a
+mapping to host storage that no longer existed. The GPU run produced NaN from
+its first printed line with the bead count frozen at 103, against 211 beads
+and `x = 35.99` on CPU. After the fix the two agree to eight significant
+digits, so this test is in fact a regression guard for that defect and its
+acceptance criterion could be tightened. See
+[OpenACC](../introduction/openacc.md).
 
 - [Input file](../../examples/input-15/input.dat)

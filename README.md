@@ -122,6 +122,14 @@ workload. It verifies that the device lower-bound update and bead clearing can
 be interleaved with repeated device Akima events and capacity replacement
 without introducing a full-state transfer on an ordinary removal timestep.
 
+[Test Case 24](docs/examples/test-24.md) is a long production run rather than
+a validation case. It grows a jet from a single nozzle bead until the bending
+instability is fully developed and nozzle insertion balances collector
+removal, giving a stationary active-bead count.
+[Test Case 25](docs/examples/test-25.md) is the same input with evaporation
+enabled and nothing else changed; it does not currently run to completion and
+serves as the reproducer for an open numerical instability.
+
 ## Citation
 
 If JETSPIN contributes to published work, please cite:

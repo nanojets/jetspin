@@ -42,6 +42,12 @@ and documentation-maintenance rules, see the
 - [Test Case 21: anchored dynamic refinement](examples/test-21.md)
 - [Test Case 22: repeated refinement and capacity growth](examples/test-22.md)
 - [Test Case 23: refinement with collector removal](examples/test-23.md)
+- [Test Case 24: long run to a stationary bead count](examples/test-24.md)
+- [Test Case 25: evaporative counterpart of Test 24](examples/test-25.md)
+
+## Investigation notes
+
+- [Refinement robustness under repeated remeshing](refinement-robustness-investigation.md)
 
 ## Scientific model
 

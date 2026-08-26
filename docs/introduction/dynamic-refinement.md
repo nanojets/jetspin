@@ -190,7 +190,8 @@ one field, among the 11 interpolated per accepted event, that is squared
 back into a conserved quantity (`jetvl=length*pi*jetcr**2`, and via
 `jetms=density*jetvl`, into bead mass). A long single-nozzle-bead-start run
 exercising several dozen consecutive accepted refinement events
-(`examples/input-24`, untracked, see its local `STATUS.md`) exposed that
+(see the [refinement robustness note](../refinement-robustness-investigation.md))
+exposed that
 this specific reconstruction can compound a nonphysical thinning across
 *successive* events, well beyond anything electrospinning's genuine
 order-of-magnitude fibre thinning would produce, eventually collapsing bead
@@ -263,12 +264,26 @@ growing from a single bead accumulate several dozen accepted events within
 under `2e5` timesteps -- each re-fitting the cross-section from the
 previous event's own output. Reusing Example 5's coarser, already-validated
 cadence instead (`threshold 0.4` cm, 20x resolution; `every 1.d-3` s) let
-the same input run past `6.5e7` of its `1e8` timesteps (324 accepted
-events) with the minimum bead radius measured at each event staying
-constant at its initial value the entire time, and the active-bead count
-settled into the stationary insertion/removal oscillation the case was
-designed to reach. This is the cadence now shipped with
-`examples/input-24`.
+the same input, on GFortran CPU, **run to full completion**: all `1e8`
+(100 million) timesteps, `t=0.5` s, 499 accepted refinement events,
+`Program closed correctly`, zero errors. This is the cadence now shipped
+with `examples/input-24`.
+
+The jet bridges the full nozzle-to-collector distance and reaches its
+first collector removal at step `95528` -- under 0.1% into the run -- and
+the active-bead count is already in its final stationary regime from that
+point on: the first accepted refinement event (`step=249999`) and the
+last (`step=99849999`) report the identical `active_before=17
+active_after=36` pattern, with every intervening event reporting either
+`17/36` or `18/37` and no drift across the full 100-million-step span.
+Between two consecutive refinement events the active count settles back
+to `17`-`18` from the post-event `36`-`37`, in a sawtooth that repeats
+without change for the entire run. The minimum bead radius measured at
+every one of the 499 events likewise stayed at its initial value
+throughout -- no collapse. The OpenACC/GPU path has not yet been driven to
+full completion at this cadence (2.5 million of `1e8` steps validated so
+far; see `docs/STATE.md`, "GPU/OpenACC port of the three host-only
+fixes").
 
 **GPU/OpenACC scope.** This investigation itself targeted GFortran CPU
 only, and the log-area transform and the three despiking/local-source/

@@ -1,6 +1,6 @@
 # Example simulations
 
-JETSPIN includes eight numerical reference cases and fifteen extended
+JETSPIN includes eight numerical reference cases and seventeen extended
 validation or performance cases. Each case can be run by copying its
 `input.dat` next to a compiled `main.x`. For quick validation of all cases,
 use the repository smoke suite:
@@ -35,5 +35,12 @@ Test Case 22 repeats that event three times and deliberately forces a capacity
 increase at every remesh to stress persistent-data release/rebind.
 Test Case 23 shortens the collector distance so device-side removal occurs
 both before and after the final remesh.
+Test Case 24 is a long production run, about 100 million steps, that grows a
+jet from a single nozzle bead until insertion and collector removal balance
+into a stationary bead count. It is non-evaporative and is excluded from the
+smoke and regression matrices because of its length.
+Test Case 25 is Test Case 24 with evaporation enabled and nothing else
+changed. It does not currently run to completion: it is the reproducer for an
+open numerical instability, not a validation reference.
 
 See the individual pages in this directory for the purpose of each case.

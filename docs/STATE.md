@@ -1,4 +1,90 @@
-# JETSPIN Codex Handoff State
+# JETSPIN development state and handoff log
+
+## Documentation alignment with the code and the input parser (2026-09-28)
+
+Documentation-only increment, apart from one source comment. The working
+rule used, and to be kept: `docs/` is updated first and `manual/` is aligned
+afterwards; where either disagrees with the CPU implementation, the CPU code
+is the specification and both documents are corrected.
+
+### How `input.dat` is actually parsed
+
+Verified in `read_input` (`io_mod.f90`) and `findstring`/`dblstr`/`intstr`
+(`parse_mod.f90`). These rules were undocumented and are now described in
+`docs/data/input.md` and `manual/input.tex`:
+
+- each record is read up to 150 characters (`maxlen`), stripped of leading
+  blanks and lower-cased; records starting with `#` or `!` and blank records
+  are skipped; there are no end-of-line comments;
+- `findstring` matches a keyword at the **beginning of any word** of the
+  record (a prefix match, not a whole-word match, and not only the first
+  word). Top-level directives are tested in a fixed `elseif` order and the
+  first match wins;
+- `dblstr`/`intstr` return the **first number** found scanning the record
+  from the left, then shift the string so that later calls read the next
+  numbers;
+- an unknown top-level directive stops with `error(6)`; an unknown
+  sub-keyword gives warning 61 and, after reading, `error(7)`
+  ("incomplete input file"); end of file before `finish` gives `error(5)`.
+
+Consequences: `dynam refin every` and `dynamic refinement every` are the
+same directive; `timesteps 15000` is silently read as `timestep 15000`
+(a 15000 s step); trailing text such as `viscosity 20.d0 initial value` is
+captured by the earlier `initial` branch.
+
+### Corrections made
+
+- `manual/restarting.tex` advised `timesteps 15000` to extend a restart,
+  which the parser reads as the integration step. It now says to raise
+  `final time` (a restart resumes from the saved `nstep`/time and runs to
+  `final time`) and notes that the random-generator state is not saved.
+- The statistics file is `statout.dat` (text, `printstat list`);
+  `statdat.dat` is a developer binary written only with `printstat binary`.
+  Fixed in `docs/data/output.md`, `manual/output.tex`, `manual/running.tex`
+  and `manual/restarting.tex` (appended on restart: `statout.dat`,
+  `traj.xyz`).
+- `dynamic refinement every` is a minimum interval between accepted events
+  (the counter resets only on acceptance), not a sampling period; `every`
+  and `threshold` are mandatory (warnings 82/83, then `error(7)`); the
+  threshold must be at least 2x the resolution (`error(16)`) and is raised to
+  5x below that (warning 86). Refinement is not attempted while fewer than
+  ten beads are active with insertion on. Manual table and
+  `manual/refinement.tex` aligned; the docs sentence about internal defaults
+  was removed because those defaults are unreachable.
+- Eleven `print list`/`printstat list` keys accepted by `identify_argument`
+  were missing from the manual output table: `nref`, `angl`, `v`, `vol`,
+  `volr`, `visc`, `gc`, `evrc`, `emfc`, `nms`, `erms` (definitions taken from
+  `statistic_mod.f90`; `visc`, `gc`, `evrc`, `emfc` are averages over the
+  beads collected during the print interval, `erms` is cumulative).
+- The nozzle dragging velocity of the manual's jet-insertion section is
+  opt-in since v1.20 (`dragvel yes`, `ldragvel=.false.` by default); without
+  it an inserted bead starts with the nozzle velocity along `x`. The
+  directive is now documented, and a typo in the formula
+  (`v_{i-i}` -> `v_{i-1}`) is fixed.
+- `docs/introduction/dynamic-refinement.md` and `manual/refinement.tex`
+  attributed to `examples/input-24` the 1e8-step completion and the 2.5e6-step
+  GPU run. Those runs used the untracked evaporative probe (Test 23 physics,
+  12 cm collector); the tracked Tests 24/25 use canonical electrostatics.
+  Both documents now say so and point to Tests 24/25 and to
+  `docs/refinement-robustness-investigation.md`.
+- Build-target tables completed from `build/Makefile`: `gfortran-debugger`,
+  `gfortran-mpidebugger`, `intel-debugger`, `intel-mpidebugger`,
+  `nvfortran-openacc-compare-refinement`, `clean`.
+- `source/dynamic_refinement_mod.f90`: comment pointed to a nonexistent
+  `examples/input-24/STATUS.md`; now points to the investigation note.
+- This file: machine-specific details (scratch directories, module setup,
+  host and shell context, repository location) were removed; see
+  "About this file".
+
+The manual rebuilds without errors or undefined references (53 pages); its
+overfull-box warnings are unchanged with respect to the previous commit.
+
+### Not changed, worth checking later
+
+- `docs/introduction/openacc.md`, "Implemented milestones", lists
+  "evaporation is enabled for the serial 3D path" among the conditions for
+  the device Coulomb kernel; the wording looks stale and was not checked
+  against `coulomb_force_mod.f90`.
 
 ## Coulomb device-mapping reset bug: silently wrong GPU results in shipped examples (2026-08-26)
 
@@ -120,7 +206,7 @@ form; `rk4sys_ev`, `platen_ev` and `integrator_kv_ev_mod` all pass
 ### Reproducing
 
 ```
-make nvfortran-openacc BINROOT=<dir>/execute
+make -C source -f ../build/Makefile nvfortran-openacc BINROOT=<dir>/execute
 cd <rundir> && cp <repo>/examples/input-15/input.dat . && ./main.x
 ```
 `input-15` fails within seconds. For `input-13`/`input-14`, first change
@@ -393,8 +479,11 @@ than in the configuration where the cadence workaround was validated.
 
 ## Repository
 
-- Location: `/home/marcol/electrospinning/jetspin`
 - Active branch: `development`
+- Paths in this file are relative to the repository root. Host names,
+  scheduler settings, module names, and scratch directories of the machines
+  used for validation are deliberately not recorded here; keep them in an
+  untracked, machine-local note.
 - This file is a tracked, committed handoff/progress log (`docs/STATE.md`),
   not a local-only scratch file. The Test-21/22/23 dynamic-refinement work
   described below, including the OpenACC porting increments, is committed on
@@ -415,10 +504,8 @@ shipped code.
 
 - Ported `enforce_evlim_conservative`, `enforce_radius_floor_conservative`,
   and `limit_akima_tangents_monotone` to the OpenACC path, closing the gap
-  documented above. NVFORTRAN 24.3 and a native NVIDIA A30 (compute
-  capability 8.0) were available in this session (`module use
-  /opt/nvidia/hpc_sdk/modulefiles`, `module load nvhpc/24.3`, matching the
-  setup already documented elsewhere in this file).
+  documented above. Validation used NVFORTRAN 24.3 and a native NVIDIA A30 (compute
+  capability 8.0).
 - **The two water-filling floors were not reimplemented on device.** Both
   are rare (a few times per run), small (at most a few hundred beads), and
   already inherently sequential (iterative fixed-point redistribution), so
@@ -578,8 +665,7 @@ shipped code.
 - `NVCOMPILER_ACC_NOTIFY=2` on the native A30 run recorded 6,123 eligible
   scans with only those scalars. The full state was downloaded once for the
   accepted Akima event and once for final shutdown; the refined state was
-  uploaded once. No full state is moved on an ordinary timestep. The final
-  audit is `/tmp/jetspin-test21-openacc.bRVAQ5/execute/transfer-final.log`.
+  uploaded once. No full state is moved on an ordinary timestep.
 - The pre-extended anchored allocation normally reserves one `incnpjet=100`
   block, so the standard 400-element case has capacity 500 and does not resize
   during its remesh. Device-aware refinement growth is now implemented. The
@@ -595,17 +681,13 @@ shipped code.
   native A30 accepts at 7155 and differs by at most 0.8% while preserving
   exact event/final topology. The history grows to 26,784,000 doubles
   (214,272,000 bytes).
-- The capacity-growth `NVCOMPILER_ACC_NOTIFY=2` audit is retained at
-  `/tmp/jetspin-refinement.wL4Kvi/execute/transfer-notify.log`. It records
+- The capacity-growth `NVCOMPILER_ACC_NOTIFY=2` audit records
   exactly two full topology/evaporation downloads (accepted event and final
   shutdown), one resized-history upload, one topology/evaporation rebind, and
   one Platen/Coulomb workspace recreation. No ordinary timestep downloads the
   complete state.
 - `tests/refinement/run.sh` now accepts `gfortran` (default), `nvfortran`,
   `openacc`, and `force-oracle`, plus the optional `capacity-growth` mode.
-  Current retained growth directories are `/tmp/jetspin-refinement.o7OopF`
-  (NVFORTRAN CPU), `/tmp/jetspin-refinement.wL4Kvi` (native A30), and
-  `/tmp/jetspin-refinement.vHnqi6` (complete-force oracle).
 - The implemented CPU behavior is the primary model specification.  Whenever
   manual, Markdown documentation, papers, or earlier descriptions disagree
   with the working CPU code, preserve the CPU algorithm for the GPU port and
@@ -629,8 +711,7 @@ shipped code.
   Gaussian-history velocity update, Heun position/volume/stress updates, and
   statistics remain in persistent regions. Kelvin--Voigt Platen evaporation
   is not an input-supported model combination and was not invented.
-- Fresh NVFORTRAN 24.3/A30 validation is retained at
-  `/tmp/jetspin-platen.7ywhma`. Standard GPU, complete-force oracle, and
+- In a fresh NVFORTRAN 24.3/A30 validation, standard GPU, complete-force oracle, and
   Coulomb-only oracle runs for Tests 12 and 20 each match the corresponding
   NVFORTRAN CPU statistical output exactly (`6 x 14`, maximum absolute
   difference `0.0`). One-step Test 12 and Test 20 oracle probes are also
@@ -645,11 +726,10 @@ shipped code.
 - Documentation now includes the Platen oracle scope and the completed Test 20
   GPU path. `manual/test20.tex` is included by `manual/manual.tex`; the rebuilt
   PDF has 44 pages.
-- Final validation passed `tests/smoke/run.sh debug` in
-  `/tmp/jetspin-smoke.cGxfRu` and `tests/regression/run.sh openacc` in
-  `/tmp/jetspin-regression.KHKfEw`. OpenACC cases 1--7 are exact and case 8
-  has worst normalized difference `1.03e-7`. The Test-20 production transfer
-  audit is `/tmp/jetspin-platen20-transfer.Hs1ipB`: the 66 `platen_ev`
+- Final validation passed `tests/smoke/run.sh debug` and
+  `tests/regression/run.sh openacc`. OpenACC cases 1--7 are exact and case 8
+  has worst normalized difference `1.03e-7`. In the Test-20 production transfer
+  audit, the 66 `platen_ev`
   transfer records are one-time descriptor mappings at line 5330; no Platen
   stage array moves during the loop. Runtime transfers are the five scheduled
   point/statistics samples and the final checkpoint. Preprocessing all sources
@@ -666,8 +746,7 @@ shipped code.
   `nvfortran-openacc-evap-oracle`, `JETSPIN_DEV_HOST_EVAP_ORACLE`, and
   `JETSPIN_DEV_HOST_COULOMB_EVAP`, plus the older rheology-specific names in
   historical notes below, are retired and must not be reused.
-- Fresh isolated NVFORTRAN 24.3/A30 builds and runs are retained at
-  `/tmp/jetspin-general-oracle.vrFzFf`. Non-evaporative Tests 10 (Euler), 11
+- In fresh isolated NVFORTRAN 24.3/A30 builds and runs, non-evaporative Tests 10 (Euler), 11
   (RK2), and 9 (RK4) pass the saved CPU records with both general oracles at
   `rtol=1e-6`, `atol=1e-9`. Worst normalized differences for
   standard/complete-force/Coulomb-only are respectively `4e-7/7e-7/5e-7`
@@ -694,12 +773,10 @@ shipped code.
 - The unified oracle builds, the standard OpenACC build, and all Test-16/17
   Euler/RK2/RK4 combinations pass. Both diagnostic targets give
   111 additions, 122 removals, two reallocations, and 89 active beads for all
-  six combinations. The standard CPU/A30 validation is retained at
-  `/tmp/jetspin-dynamic-evaporation.ncATck`; all pre-event comparisons have
+  six combinations. In the standard CPU/A30 validation all pre-event comparisons have
   zero normalized difference, and Maxwell XYZ files are byte-identical.
-- Fresh high-resolution GPU results are retained at
-  `/tmp/jetspin-unified-oracle-build.TQkJwX`; matching CPU references are in
-  `/tmp/jetspin-tests18-19-host-coulomb.0m1t2n`. Test 18 gives CPU
+- In fresh high-resolution GPU runs compared with matching CPU references,
+  Test 18 gives CPU
   500/899/3/401, standard GPU 499/898/3/401, and both oracles 499/899/3/400.
   Test 19 gives CPU 500/76/5/1224 and standard/full-oracle/Coulomb-oracle
   498/77/5/1221. Matching complete-force and Coulomb-only aggregates confirm
@@ -711,8 +788,7 @@ shipped code.
   one/two columns and the diagnostic RK4 path uses all four. Euler executes one GPU
   force stage and state update; RK2 executes two GPU stages and a device Heun
   combination.  Both use the existing common GPU commit/statistics reduction.
-- Fresh NVFORTRAN 24.3 CPU and standard A30 runs are retained in
-  `/tmp/jetspin-maxwell-port.zMlaQL`.  Euler, RK2, and RK4 all report 111
+- In fresh NVFORTRAN 24.3 CPU and standard A30 runs, Euler, RK2, and RK4 all report 111
   additions, 122 removals, two reallocations, and 89 active beads on CPU and
   GPU.  Three-step pre-event `statout.dat` comparisons pass with
   `rtol=1e-12`, `atol=1e-13`, worst normalized difference zero.  The complete
@@ -724,8 +800,7 @@ shipped code.
   explicit persistent columns.  The host-force oracle then reproduces the CPU
   pre-event XYZ files byte-for-byte and the 111/122/2/89 aggregate topology.
   These explicit uploads exist only under the two development macros.
-- Standard-build `NVCOMPILER_ACC_NOTIFY=2` audits are retained at
-  `/tmp/jetspin-maxwell-euler-rk2-audit.KsGwhh`.  Both full 1,000-step runs
+- In standard-build `NVCOMPILER_ACC_NOTIFY=2` audits, both full 1,000-step runs
   have zero transfer records attributed to the Maxwell force-stage helper,
   Euler/RK2 driver, device stage update, RK2 final combination, or common
   commit.  Transfers are limited to one-time mapping, topology decisions and
@@ -735,7 +810,6 @@ shipped code.
   RK4.  Its first complete run passed all 12 full 1,000-step CPU/GPU cases and
   all 12 three-step probes.  Every short `statout.dat` comparison had worst
   normalized difference zero; all three Maxwell XYZ files were byte-identical.
-  Retained output: `/tmp/jetspin-dynamic-evaporation.68Lxx9`.
 - The standard Maxwell/Yarin Test-16 RK4 path is now fully device-resident.
   All four EOM/force stages, the three intermediate RK state updates, the
   final weighted update and commit, evaporative Coulomb, charge smoothing and
@@ -754,26 +828,23 @@ shipped code.
   followed by a device state update and common commit. RK2 performs two device
   stages, a new device Heun final combination with evaporation clipping, and
   the common commit. No state or derivative array crosses between stages.
-- Validation directory `/tmp/jetspin-kv-euler-rk2.wz5zXg` contains clean
-  NVFORTRAN CPU, standard A30, and `nvfortran-openacc-kv-host-forces` runs.
+- Clean NVFORTRAN CPU, standard A30, and `nvfortran-openacc-kv-host-forces`
+  runs were compared.
   For both Euler and RK2 all three paths report 111 additions, 122 removals,
   two reallocations, and 89 active beads. Three-step pre-event CPU/standard-GPU
   and CPU/host-force comparisons pass with `rtol=1e-12`, `atol=1e-13`, worst
   normalized difference zero. CPU inserts first at step 4; both GPU paths at
   step 5, after which pointwise bending trajectories are threshold-sensitive.
-- `NVCOMPILER_ACC_NOTIFY=2` audits are retained under the same directory as
-  `audit-1/run.log` and `audit-2/run.log`. They show only one-time workspace
+- The corresponding `NVCOMPILER_ACC_NOTIFY=2` audits show only one-time workspace
   mapping, topology/output records, and final synchronization; no transfer is
   attributed to the Euler/RK2 force, intermediate, or final-update routines.
-- Final full 1,000-step transfer audits are retained at
-  `/tmp/jetspin-kv-final-audit.lpDqD2`. Euler and RK2 again report
+- In the final full 1,000-step transfer audits, Euler and RK2 again report
   111/122/2/89 and each has zero transfer records attributed to the stage,
   state-update, final-combination, or commit routines. The same final audit run
   confirms Test 16 remains at 111/122/2/89.
 - Final `tests/smoke/run.sh debug` passed all eight cases, the analytical
   evaporation checks, all three Kelvin--Voigt evaporation integrators, and the
-  dynamic-refinement coupling. Its retained log is
-  `/tmp/jetspin-kv-debug-smoke.qK1E9F/run.log`.
+  dynamic-refinement coupling.
 - `driver_integrator` marks the device state authoritative whenever the actual
   persistent accelerator path finishes. This also preserves the existing
   non-evaporative persistent Euler, RK2, RK4, and Platen paths. The main loop
@@ -787,16 +858,14 @@ shipped code.
   each stage state, evaluates the complete trusted CPU KV force/EOM boundary,
   restores the host nozzle charge after Coulomb smoothing, and uploads only
   derivatives. It is a numerical oracle, not a performance build.
-- A runtime `NVCOMPILER_ACC_NOTIFY=2` audit is stored at
-  `/tmp/jetspin-openacc-final-scalar-audit.zVWYwY`. It shows no `jet*`, `y*`,
+- A runtime `NVCOMPILER_ACC_NOTIFY=2` audit shows no `jet*`, `y*`,
   `f1*`--`f4*`, or Coulomb array transfer between RK stages. Per ordinary
   timestep, only `npjet` and `linserted` are copied in/out; `ladd`, `lresize`,
   and `remove_one` are downloaded as device-produced decisions and are no
   longer uploaded. Bead fields move on actual topology/output
   events; full active arrays move only on the two reallocations and final
   checkpoint. Initial persistent mapping is one-time.
-- The corresponding final Test-17 transfer audit is stored at
-  `/tmp/jetspin-test17-transfer-audit.NXYFB0`. It confirms no jet-state,
+- The corresponding final Test-17 transfer audit confirms no jet-state,
   Coulomb-force, stress, or RK-derivative transfer between the four stages.
   Per timestep only topology/control scalars cross; full active state moves at
   the two reallocations and final checkpoint. Event records and ten scheduled
@@ -815,23 +884,20 @@ shipped code.
   - Test 16: 111 additions, 122 removals, 2 reallocations, 89 active, pass.
   - Test 17: 111 additions, 122 removals, 2 reallocations, 89 active, pass;
     these totals now match the NVFORTRAN CPU run.
-- The fresh Test-16 `statout.dat` is bit-for-bit identical to both saved prior
-  standard GPU runs `/tmp/jetspin-test16-fixed2.YYbh9U` and
-  `/tmp/jetspin-test16-transfer-audit.IbhobM`. CPU and GPU Test-16 topology
+- The fresh Test-16 `statout.dat` is bit-for-bit identical to two saved prior
+  standard GPU runs. CPU and GPU Test-16 topology
   totals are identical, but the pointwise dynamic trajectories separate after
   direct-Coulomb roundoff is amplified by bending and threshold events; do not
   use a strict CPU/GPU trajectory comparison as its acceptance criterion.
 - Fresh `tests/regression/run.sh openacc` passed cases 1--8. Cases 1--7 have
   zero difference; case 8 has worst normalized difference `1.03e-7`
-  (`vy` absolute difference `1.7e-5`, allowed `165`). Files are retained at
-  `/tmp/jetspin-regression.SEzb7y`.
+  (`vy` absolute difference `1.7e-5`, allowed `165`).
 - Final post-port validation repeated the complete serial smoke suite and the
-  OpenACC regression suite. Both passed. The retained regression directory is
-  `/tmp/jetspin-regression.MmZAtb`; case 8 again had worst normalized
+  OpenACC regression suite. Both passed. Case 8 again had worst normalized
   difference `1.03e-7`. Tests 9--12 pass their saved A30 baselines, Test 13
   reports 13/13/0/1024, Test 14 reports 19/19/0/1500, and Test 15 satisfies its
   established reallocation criterion with 3/0/1/103. Clean final CPU/GPU
-  Test-17 runs are in `/tmp/jetspin-test17-final.WIfTld`.
+  Test-17 runs were also recorded.
 - The `_OPENACC` guard audit preprocesses every source without `_OPENACC` and
   finds zero surviving `!$acc` directives (334 directives across four files).
 - Documentation now describes Test 16 as fully ported and records the final
@@ -845,22 +911,18 @@ shipped code.
   threshold/bending amplification of floating-point differences. The accepted
   criteria are equal 111/122/2/89 totals, clean completion, and minimal-transfer
   audit rather than strict full-trajectory identity.
-- GPU access is currently healthy in the Codex shell: four NVIDIA A30 devices
-  are visible with compute capability 8.0.
 
 ## Current GPU port status
 
-- NVIDIA HPC SDK setup:
-  - `module purge`
-  - `module use /opt/nvidia/hpc_sdk/modulefiles`
-  - `module use --append "$HOME/modulefiles"`
-  - `module load nvhpc/24.3`
-- Compiler: `nvfortran 24.3`.
+- Toolchain: NVIDIA HPC SDK 24.3 (`nvfortran 24.3`). How the SDK is made
+  available (environment module, local installation) is site-specific and
+  is not recorded here; check `nvfortran --version` and, for MPI targets,
+  `mpif90 --showme:command`.
 - GPU target: NVIDIA A30, `GPUCC=80`, CUDA 12.3.
 - OpenACC directives are protected with `#ifdef _OPENACC`.
 - `build/Makefile` applies preprocessing to `eom_ev_mod.f90` and `integrator_kv_ev_mod.f90`.
 
-## Implemented but not committed
+## Early evaporation GPU increments (historical, since committed)
 
 - GPU evaporative Coulomb 3D kernel in `source/openacc_accelerator_mod.f90`.
 - GPU local Yarin evaporation-force kernel `accelerator_evaporation_force_3d`.
@@ -918,8 +980,8 @@ shipped code.
 - Added Test 18, a high-resolution Maxwell dynamic-topology case with 800 points over 16 cm (0.02 cm spacing). The NVFORTRAN CPU reference produced 500 additions, 899 removals, three reallocations, and 401 active beads in 14.2 s. An exploratory A30 run took 4.1 s but diverged strongly in topology (498/262/5/1036), so Test 18 is currently a performance/porting probe rather than a regression baseline.
 - A short 10-step Test 18 isolation confirms Coulomb is the dominant source of the catastrophic CPU/GPU divergence. With normal OpenACC Coulomb, the GPU trajectory reached approximately `x=-200.6 cm`, `y=46.4 cm`, and `vx=-7.69e7 cm/s`; the Coulomb diagnostic reported GPU-vs-host force differences growing from `~1e-12` initially to `1e2--1e3` after a few force evaluations. Rebuilding with the Coulomb OpenACC path genuinely disabled (temporary Makefile with `-DJETSPIN_DISABLE_COULOMB_EVAP`) kept the trajectory bounded near `x=16 cm`, with 5 insertions, 9 removals, and 796 active beads, although moderate stress/trajectory differences remain from the provisional Maxwell stage. The high-resolution bead spacing amplifies the Coulomb summation error as suspected.
 - Added Test 19, the 800-point Kelvin--Voigt counterpart of Test 18. The NVFORTRAN CPU reference produced 500 additions, 76 removals, five reallocations, and 1224 active beads in 14.5 s. An exploratory A30 run took 2.7 s and produced 499/898/3/401; this is a high-resolution performance/porting probe rather than a strict topology regression.
-- Tested the newly extracted `xpsys_ev_maxwell` boundary with a one-step Test 16 build. The NVFORTRAN CPU reference remains bit-for-bit identical to the previous one-step result, confirming that the wrapper itself is neutral. The OpenACC GPU executable compiled successfully, but execution could not reach the integration step because the active Codex session had no NVIDIA driver access (`nvidia-smi` could not communicate with the driver); this is an environment/runtime-access failure, not evidence of a Maxwell-wrapper numerical error.
-- Re-ran the same one-step Test 16 from the GPU-enabled context with NVHPC 24.3 and `GPUCC=80`. `nvidia-smi` exposed all four A30 GPUs; the OpenACC executable completed normally (370.9 steps/s for the one-step run), and its `statout.dat` is identical to the CPU reference, including the Maxwell evaporative derivatives and stress. The earlier failure was therefore confirmed to be context-specific GPU-driver visibility.
+- Tested the newly extracted `xpsys_ev_maxwell` boundary with a one-step Test 16 build. The NVFORTRAN CPU reference remains bit-for-bit identical to the previous one-step result, confirming that the wrapper itself is neutral. The OpenACC GPU executable compiled successfully, but execution could not reach the integration step because the session had no NVIDIA driver access (`nvidia-smi` could not communicate with the driver); this is an environment/runtime-access failure, not evidence of a Maxwell-wrapper numerical error.
+- Re-ran the same one-step Test 16 from the GPU-enabled context with NVHPC 24.3 and `GPUCC=80`. `nvidia-smi` exposed the A30 GPUs; the OpenACC executable completed normally (370.9 steps/s for the one-step run), and its `statout.dat` is identical to the CPU reference, including the Maxwell evaporative derivatives and stress. The earlier failure was therefore confirmed to be context-specific GPU-driver visibility.
 - Enabled the first Maxwell RK4 evaporative stage through `accelerator_maxwell_evap_stage`, guarded by `evaporative_dynamic_rk4_eligible()` so only the serial 3-D dynamic Test-16-compatible path uses it. The remaining RK stages stay on the validated host path. The GPU build succeeds; the one-step `statout.dat` remains identical to the CPU reference. A 10-step GPU probe completes cleanly with one insertion, one removal, one reallocation, and 100 active beads, but a dedicated CPU 10-step reference still needs to be rebuilt with the host accelerator object before claiming a longer regression match.
 - Extended the same GPU stage-1 probe to 100 steps. It remained stable and completed with 11 additions, 12 removals, one reallocation, and 99 active beads; no present-table or runtime errors occurred. This validates operational stability, but not yet bead-wise derivative equality. The next diagnostic should dump/compare `f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev` before enabling stage 2.
 - Added a compile-time diagnostic (`JETSPIN_COMPARE_MAXWELL_STAGE1`) that recomputes the first-stage Maxwell derivatives with host `xpsys_ev_maxwell` and compares all eight `f1*` arrays against the GPU stage. Test 16 at one step reports `max_abs=1.763478e-12` and `max_rel=1.374251e-12` over all beads/components, consistent with floating-point roundoff. The diagnostic is guarded and does not affect normal builds.
@@ -981,7 +1043,7 @@ shipped code.
 - Fixed the `host-forces` overwrite: under `JETSPIN_DEV_HOST_MAXWELL_GEOMETRY`, `accelerator_maxwell_evap_stage` now uploads the host-computed geometric derivatives (`fxx/fyy/fzz/fvx/fvy/fvz`) before the device stress/evaporation kernel. It also receives and forwards distinct `linserting` and `linserted` arguments. One-step comparisons now agree at roundoff: stage 1 max error `8.9e-16`, stage 2 components at roughly `1e-19`–`7e-16`, stage 3 max `2.4e-12`, and stage 4 max `1.5e-12`; bead-50 `f2xx` agrees exactly at printed precision (`286.7194`). A 2,500-step host-forces run now reproduces the CPU aggregate topology (278 additions, 288 removals, 3 reallocations, 90 active beads) and radial displacement is close (`1.00e-3 cm` versus CPU `1.08e-3 cm`).
 - Residual dynamic separation is threshold-driven: the current CPU inserts first at step 4 while both the standard GPU and corrected host-forces path insert at step 5. Before that event, transverse positions agree at roundoff, but GPU/host-forces axial velocity differs by about `0.314 cm/s` out of `200000 cm/s` (relative `1.6e-6`), enough to cross the insertion threshold one timestep later. There is no insertion-geometry bug: the manual defines the collector/jet direction as the `x` axis and the circular nozzle perturbation in the transverse `y-z` plane (`dy_n/dt=-omega*z_n`, `dz_n/dt=omega*y_n`). The CPU briefly assigns the new bead `x=resolution,y=z=0`, but immediately calls `compute_posnoinserted`, which places it at `resolution` along the 3-D line from the moving nozzle to the preceding jet bead. `accelerator_add_bead` performs this final interpolation directly, so the CPU and GPU insertion geometry are equivalent.
 
-## Current environment note
+## Refinement GPU milestones (2026-08-15)
 
 ### Test 22 repeated-refinement stress milestone (2026-08-15)
 
@@ -1086,8 +1148,6 @@ shipped code.
   port those steps if eliminating the rare full event round trip is worth the
   added complexity.
 
-- GPU access works in the active Codex context after loading NVHPC; four
-  NVIDIA A30 GPUs report compute capability 8.0.
 
 ### Refinement-assembly device milestone (2026-08-15)
 
@@ -1215,3 +1275,11 @@ This is a running handoff/progress log for GPU-porting work on JETSPIN,
 tracked at `docs/STATE.md`. It was previously kept local-only and excluded
 from git; it is now committed intentionally so the history of decisions,
 validation results, and known limitations travels with the repository.
+
+Entries are newest first. Keep them independent of the machine they were
+produced on: record the compiler and version, the GPU model and compute
+capability, the commands relative to the repository root, and the
+numerical results, but not host names, scheduler or module setup, home
+directories, or retained scratch paths (those directories are temporary
+and meaningless elsewhere). Machine-specific notes belong in an untracked
+local file.

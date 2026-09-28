@@ -12,6 +12,23 @@ lines are not processed, and may be added to aid readability. Each
 record is read in words (directives and additional keywords and numbers),
 which are recognized as such by separation by one or more space characters.
 
+The parser (subroutine \texttt{read\_input} in \texttt{io\_mod.f90}, with the
+string utilities of \texttt{parse\_mod.f90}) follows a few simple rules that
+the user should keep in mind. Each record is read up to 150 characters,
+stripped of leading blanks and converted to lower case; records beginning
+with \# or ! are skipped. A keyword is recognized when it matches the
+beginning of any word of the record, and the top-level directives are tested
+in a fixed order, the first match being accepted. Hence abbreviated forms are
+equivalent (e.g. \texttt{dynam refin every} and
+\texttt{dynamic refinement every}), but an invented keyword may silently match
+another directive: \texttt{timesteps 15000} would be read as
+\texttt{timestep 15000}. A numeric value is the first number found in the
+record, scanning from the left, and directives expecting several values take
+the following numbers in order. There are no end-of-line comments: comments
+should be placed on separate records beginning with \#. An unknown directive
+stops the program with an error banner, as does the end of the file before
+the \texttt{finish} record; records after \texttt{finish} are ignored.
+
 As in the example given in \texttt{input test}, the last record is
 a \texttt{finish} directive, which marks the end of the input data.
 Before the \texttt{finish} directive, a wide list of directives may
@@ -95,11 +112,19 @@ cutoff $f$  & length of the proximal jet sections interacting by Coulomb \tabula
  & \quad{}force (default: equal to the collector distance)\tabularnewline
 \uline{density mass} $f$  & mass density of the nanofiber\tabularnewline
 \uline{density charge} $f$  & electric volume charge density of the nanofiber\tabularnewline
-dynam refin yes  & active the dynamic refinement during the simultion\tabularnewline
-dynam refin threshold $f$  & set the threshold beyond which the refinement is applied\tabularnewline
- & (recommended $\geq20\times$ the discretization resolution; below that\tabularnewline
- & a warning is issued -- see Sec.~\ref{subsec:Refinement-robustness})\tabularnewline
-dynam refin every $f$  & the refinement is applied every $f$ seconds\tabularnewline
+dragvel yes  & give each bead inserted at the nozzle the dragging velocity\tabularnewline
+ & \quad{}of Subsec \ref{subsec:Jet-insertion} (default: no, the bead starts with\tabularnewline
+ & \quad{}the nozzle velocity along the \textit{x} axis)\tabularnewline
+dynam refin yes  & active the dynamic refinement during the simultion (default: no;\tabularnewline
+ & \texttt{dynam refin every} and \texttt{dynam refin threshold} become mandatory)\tabularnewline
+dynam refin no  & disable the dynamic refinement\tabularnewline
+dynam refin threshold $f$  & maximum target element length; segments longer than $f$ trigger\tabularnewline
+ & the refinement (must be $\geq2\times$ the discretization resolution,\tabularnewline
+ & values below $5\times$ are raised to $5\times$; recommended $\geq20\times$,\tabularnewline
+ & below that a warning is issued -- see Sec.~\ref{subsec:Refinement-robustness})\tabularnewline
+dynam refin every $f$  & minimum interval in seconds between two accepted refinements;\tabularnewline
+ & \quad{}once it has elapsed the threshold is tested at every step\tabularnewline
+ & \quad{}until a refinement is accepted\tabularnewline
 dynam refin start $f$  & the refinement is applied only if the simulation time is greater \tabularnewline
  & than or equal to $f$ seconds\tabularnewline
 dynam refin anchor $f$ & during the refinement procedure all the anchor beads inserted\tabularnewline

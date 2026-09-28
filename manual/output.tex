@@ -1,8 +1,8 @@
 \section{Output files\label{sec:Output-files}}
 
 A series of specific directives causes the writing of output files
-(see Tab \ref{tab:inputlist}). In JETSPIN three output files can
-be written: 1) the file \texttt{statdat.dat} containing time-dependent
+(see Tab \ref{tab:inputlist}). In JETSPIN four kinds of output files can
+be written: 1) the file \texttt{statout.dat} containing time-dependent
 statistical data of simulated process; 2) the file \texttt{traj.xyz}
 reporting the nanofiber trajectory in XYZ format file; 3) the files
 \texttt{frame\%06d.xyz} reporting the nanofiber geometries in splitted
@@ -13,12 +13,15 @@ case a topological file \texttt{frame\%06d.psf} in PSF (Protein Structure
 File) format will be printed alongside each pdb file. These two files
 (PDB and PSF) can be opened by VMD-Visual Molecular Dyanamics \cite{humphrey1996vmd}.
 
-Various statistical data can be written on the file \texttt{statdat.dat}
-, and the user can select them in input using the directive \texttt{printstat
+Various statistical data can be written on the text file \texttt{statout.dat},
+and the user can select them in input using the directive \texttt{printstat
 list} followed by appropriate symbolic strings, whose the list with
 corresponding meanings is reported in Tab \ref{tab:outputlist}. The
 selected observables will be printed at time interval on the same
-line following the order specified in input file. In the same way,
+line following the order specified in input file, preceded by the
+integration-step number. (The file \texttt{statdat.dat} is a different,
+developer-only binary dump of all observables, written only with the
+directive \texttt{printstat binary}.) In the same way,
 a list of statistical data can be printed on computer terminal using
 the directive \texttt{print list} followed by the symbolic strings
 of Tab \ref{tab:outputlist}.
@@ -119,6 +122,22 @@ l  & index of the last bead \tabularnewline
 \uline{rlp}  & length path of jet divided by the collector distance\tabularnewline
 mxst  & maximum stress along the jet\tabularnewline
 mxsx  & x position of the jet maximum stress\tabularnewline
+nref  & number of accepted dynamic-refinement events\tabularnewline
+angl  & bending angle of the farthest bead, $2\arctan\left(\sqrt{y^{2}+z^{2}}/|x|\right)$,\tabularnewline
+ & \quad{}in degrees\tabularnewline
+v  & external electric potential at the current time\tabularnewline
+vol  & volume of the farthest bead (post-evaporation volume if\tabularnewline
+ & \quad{}evaporation is active)\tabularnewline
+volr  & evaporated volume fraction $1-V_{i}/V_{i}^{0}$ of the farthest bead\tabularnewline
+ & \quad{}(zero without evaporation)\tabularnewline
+\uline{visc}  & viscosity of the jet collected at the collector\tabularnewline
+\uline{gc}  & elastic modulus of the jet collected at the collector\tabularnewline
+\uline{evrc}  & evaporated volume fraction of the jet collected at the collector\tabularnewline
+\uline{emfc}  & evaporated solvent mass flux at the collector\tabularnewline
+nms  & mean number of timesteps per multiple-timestep cycle\tabularnewline
+ & \quad{}(see Sec \ref{sec:Multiple-Timestep-Algorithm})\tabularnewline
+erms  & mean error of the extrapolated Coulomb force in the multiple\tabularnewline
+ & \quad{}timestep algorithm, averaged since the start of the run\tabularnewline
 \hline
 \label{tab:outputlist}  & \tabularnewline
 \end{longtable}

@@ -20,11 +20,14 @@ distance of $2\cdot l_{step}$ away from the nozzle, a new jet bead
 (third body) is placed at distance $l_{step}$ from the nozzle along
 the straight line joining the two previous bodies. Let us now label
 $i-1$ the farthest bead from the nozzle, and $i$ the last inserted
-bead. The $i-th$ bead is inserted with the initial velocity $\upsilon_{i}=\upsilon_{s}+\upsilon_{d}$,
+bead. By default the $i-th$ bead is inserted with the initial velocity
+$\upsilon_{s}$ along the $x$ axis. If the directive \texttt{dragvel yes} is
+given (see Tab \ref{tab:inputlist}), it is instead inserted with the initial
+velocity $\upsilon_{i}=\upsilon_{s}+\upsilon_{d}$,
 where $\upsilon_{d}$ denotes the dragging velocity computed as
 
 \begin{equation}
-\upsilon_{d}=\frac{\upsilon_{i-i}-\upsilon_{s}}{2}.
+\upsilon_{d}=\frac{\upsilon_{i-1}-\upsilon_{s}}{2}.
 \end{equation}
 
 Here, the dragging velocity should be interpreted as an extra term

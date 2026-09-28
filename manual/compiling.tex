@@ -105,8 +105,13 @@ refinement lifecycle enabled. Target
 \texttt{nvfortran-openacc-compare-akima} enables
 \texttt{JETSPIN\_COMPARE\_AKIMA}; it computes the trusted host result followed
 by the device result and reports maximum coefficient and interpolated-value
-differences for every field. Neither target is intended for performance
-measurements.
+differences for every field. Target
+\texttt{nvfortran-openacc-compare-refinement} enables
+\texttt{JETSPIN\_COMPARE\_REFINEMENT\_ASSEMBLY} and applies the same
+host-then-device comparison to the reconstruction of bead volume,
+evaporated volume, mass, and charge that follows the Akima interpolation
+(see Sec.~\ref{sec:Dynamic-refinement}). None of these targets is intended
+for performance measurements.
 
 Target \texttt{nvfortran-openacc-dynamic-platen} enables the
 \texttt{JETSPIN\_GPU\_DYNAMIC\_PLATEN} macro. Unlike the oracle and Akima
@@ -140,6 +145,10 @@ we suggest to use that provided by the Open MPI Project.
 gfortran  & compile in serial mode using the GFortran compiler.\tabularnewline
 gfortran-mpi  & compile in parallel mode using the GFortran compiler and the Open
 Mpi library.\tabularnewline
+gfortran-debugger & compile in serial mode using GFortran without optimization and
+with runtime checks (\texttt{-O0 -g -fcheck=all}).\tabularnewline
+gfortran-mpidebugger & as \texttt{gfortran-debugger}, in parallel mode with the Open
+Mpi library.\tabularnewline
 cygwin  & compile in serial mode using the GFortran compiler under the command-line\tabularnewline
  & interface Cygwin for Windows.\tabularnewline
 cygwin-mpi  & compile in parallel mode using the GFortran compiler and the Open
@@ -150,6 +159,10 @@ intel  & compile in serial mode using the Intel compiler.\tabularnewline
 intel-mpi  & compile in parallel mode using the Intel compiler and the Intel Mpi
 library.\tabularnewline
 intel-openmpi  & compile in parallel mode using the Intel compiler and the Open Mpi
+library.\tabularnewline
+intel-debugger & compile in serial mode using the Intel compiler with runtime checks
+and traceback.\tabularnewline
+intel-mpidebugger & as \texttt{intel-debugger}, in parallel mode with the Intel Mpi
 library.\tabularnewline
 nvfortran & compile in serial CPU mode using NVIDIA Fortran; OpenACC offloading
 is disabled.\tabularnewline
@@ -166,10 +179,13 @@ nvfortran-openacc-host-akima & retain the historical host Akima routines as a
 development-only refinement oracle.\tabularnewline
 nvfortran-openacc-compare-akima & compare host and device Akima coefficients
 and interpolated values at every accepted refinement.\tabularnewline
+nvfortran-openacc-compare-refinement & compare host and device reconstruction of
+volume, mass, and charge at every accepted refinement.\tabularnewline
 nvfortran-openacc-dynamic-platen & extend the device-resident path to
 non-evaporative Platen runs whose bead count varies during the
 simulation.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
+clean  & remove object and module files from the \textit{source} sub-directory.\tabularnewline
 \hline
 \end{tabular}
 \par\end{centering}

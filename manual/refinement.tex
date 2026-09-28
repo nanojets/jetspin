@@ -74,6 +74,18 @@ to this emended version of the Ren model
 as DyRen model. Further details on the implemented dynamic refinement
 procedure are available in Ref \cite{lauricella2016refinement}.
 
+The refinement is tested and accepted according to the following rules.
+No refinement is attempted before the time given by \texttt{dynam refin
+start}, nor, when bead insertion is active, while the jet contains fewer than
+ten active beads. The directive \texttt{dynam refin every} sets the minimum
+interval between two accepted refinements, not a fixed sampling period: once
+that interval has elapsed, the threshold is tested at every time step until a
+refinement is accepted, and only then is the interval counter reset. A
+threshold crossing alone is not sufficient: the refinement is accepted only if
+the estimated target mesh contains more points than the current active mesh.
+The number of accepted refinements is available as the output key
+\texttt{nref} (see Tab \ref{tab:outputlist}).
+
 For the serial Maxwell/Platen OpenACC path exercised by Test Case 21, the
 time integrator, Gaussian history, insertion logic, and bead state remain in a
 persistent device data region. After the configured minimum interval, a
@@ -248,12 +260,18 @@ stationary regime from that point on: the first accepted refinement event
 (step $249999$) and the last (step $99849999$) report the identical
 active-bead pattern, with no drift across the full run and the minimum
 bead radius staying at its initial value at every one of the 499 events.
-This is the first time this input has demonstrated, over its complete
-intended duration, the stationary insertion/removal oscillation it was
-designed to reach, and is now the cadence shipped with that example
-input. (The OpenACC/GPU path has been validated to $2.5\times10^{6}$ of
-the $10^{8}$ steps at this cadence but not yet driven to full completion;
-see \texttt{docs/STATE.md}.) A corresponding advisory, warning 108, is
+This is the first time this development probe demonstrated, over its
+complete intended duration, the stationary insertion/removal oscillation it
+was designed to reach. (The OpenACC/GPU path has been validated to
+$2.5\times10^{6}$ of the $10^{8}$ steps at this cadence but not yet driven to
+full completion; see \texttt{docs/STATE.md}.) The same cadence is now used by
+the tracked Test Cases 24 and 25, which differ from the probe: they adopt the
+canonical JETSPIN electrostatics and a 16~cm collector distance. Test Case 24,
+without evaporation, runs cleanly, whereas its evaporative counterpart, Test
+Case 25, still stops on a numerical instability (see
+Sec.~\ref{sec:Test-Case-25}); this cadence is therefore a workaround, not a
+complete cure. The full investigation is recorded in
+\texttt{docs/refinement-robustness-investigation.md}. A corresponding advisory, warning 108, is
 issued whenever the
 configured or auto-derived \uline{dynam refin threshold} is set below
 twenty times the discretization resolution; it does not change behaviour,
@@ -281,7 +299,7 @@ device region that kernel already uses for its endpoint-slope
 extrapolation. Validated on a native NVIDIA A30: Tests 21--23 pass on all
 five available comparison backends, including a device-versus-host Akima
 coefficient/value comparison at the same roundoff level as the
-pre-existing documented baseline, and a GPU run of the real
-\texttt{examples/input-24} ran past 2.5 million steps (12 accepted
+pre-existing documented baseline, and a GPU run of the evaporative
+development probe described above ran past 2.5 million steps (12 accepted
 refinement events) with no error and no recurrence of the evlim/$c_p$
 blowup.

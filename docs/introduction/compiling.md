@@ -167,6 +167,8 @@ that capacity-growth handling can be reached in minutes instead of hours.
 | `intel` | Optimized serial Intel Fortran build |
 | `intel-mpi` | Intel MPI build |
 | `intel-openmpi` | Intel Fortran with OpenMPI |
+| `intel-debugger` | Serial Intel Fortran build with runtime checks and traceback |
+| `intel-mpidebugger` | Intel MPI build with runtime checks and traceback |
 | `cygwin`, `cygwin-mpi` | Windows/Cygwin builds |
 | `nvfortran` | Optimized serial CPU build with NVIDIA Fortran |
 | `nvfortran-mpi` | MPI CPU build with the HPC SDK NVFORTRAN wrapper |
@@ -176,6 +178,7 @@ that capacity-growth handling can be reached in minutes instead of hours.
 | `nvfortran-openacc-coulomb-oracle` | Development-only host direct-Coulomb oracle, with or without evaporation |
 | `nvfortran-openacc-host-akima` | Development-only historical host-Akima oracle inside the OpenACC refinement path |
 | `nvfortran-openacc-compare-akima` | Development-only host/device Akima A/B comparison |
+| `nvfortran-openacc-compare-refinement` | Development-only host/device A/B comparison of the accepted-event volume, mass, and charge reconstruction (`JETSPIN_COMPARE_REFINEMENT_ASSEMBLY`) |
 | `nvfortran-openacc-dynamic-platen` | Macro-gated fork extending the persistent device path to variable-topology non-evaporative Platen runs |
 | `help` | Display available targets |
 | `clean` | Remove objects and module files from `source/` |

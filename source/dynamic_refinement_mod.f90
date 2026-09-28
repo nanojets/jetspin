@@ -213,7 +213,7 @@ implicit none
 ! A tight threshold forces many accepted refinement events over a short
 ! integration window; growing a jet from a single bead under such a
 ! cadence was found to compound a nonphysical cross-section thinning
-! across repeated events (examples/input-24/STATUS.md). This is a
+! across repeated events (docs/refinement-robustness-investigation.md). This is a
 ! non-fatal advisory, not an enforced minimum: the historical Example 5
 ! and Tests 21-23 all use a threshold below this recommendation and
 ! remain validated short-window references.

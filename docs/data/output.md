@@ -39,7 +39,8 @@ profiling either enabled in both or disabled in both.
 
 | Output | Description |
 | --- | --- |
-| `statdat.dat` or `statout.dat` | Time-dependent and statistical observables |
+| `statout.dat` | Time-dependent and statistical observables selected with `printstat list` (text, one row per `print time`) |
+| `statdat.dat` | Developer-only binary dump of all observables, written only with `printstat binary` |
 | `traj.xyz` | A time-ordered XYZ trajectory with a fixed bead count |
 | `frame%06d.xyz` | Individual XYZ geometry frames |
 | `frame%06d.pdb` | Individual PDB geometry frames |
@@ -58,6 +59,8 @@ select columns written to the statistics file. Common keys include:
 | `rc` | Jet radius at the collector |
 | `curn`, `curc` | Current at the nozzle and collector |
 | `mxst`, `mxsx` | Maximum stress and its axial position |
+| `nref` | Number of accepted dynamic-refinement events |
+| `angl` | Bending (cone) angle of the farthest bead, in degrees |
 
 XYZ and PDB coordinates are expressed in centimetres multiplied by the
 configured output rescaling factor. The full list of observables is in the

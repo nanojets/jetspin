@@ -34,10 +34,10 @@ The supported controls are:
 
 Times and lengths use the normal input units: seconds and centimetres before
 internal nondimensionalization. Both `every` and `threshold` are required
-when refinement is enabled. The threshold must be at least twice the base
-resolution; values below five times the resolution are raised to that safer
-minimum. If internal defaults are used, the code derives them from the base
-resolution and emits a warning.
+when refinement is enabled: omitting either prints warning 82 or 83 and stops
+the run with `ERROR - incomplete input file`. The threshold must be at least
+twice the base resolution (otherwise `error(16)`); values below five times the
+resolution are raised to that safer minimum (warning 86).
 
 `anchor` is optional. If omitted, it defaults to five times the base
 resolution (warning 81). If given explicitly but set below one resolution,
@@ -251,10 +251,18 @@ fibre radii. It remains as a defense-in-depth against a genuine sign
 crossing the other layers might miss, and as the `error(21)` infeasibility
 guard, but a floor relative to the jet's own current scale (rather than an
 absolute physical constant) would be needed to actually engage here, and
-was not implemented. See `docs/STATE.md` for the full investigation,
-including the confirmed-ruled-out alternative explanations and the
-guarded diagnostic instrumentation kept in the tracked source for any
-future continuation.
+was not implemented. See the
+[refinement robustness note](../refinement-robustness-investigation.md) for
+the full investigation, including the confirmed-ruled-out alternative
+explanations and the guarded diagnostic instrumentation kept in the tracked
+source for any future continuation.
+
+The long run in question was an untracked development probe: Test 23
+physics (Maxwell rheology, Yarin evaporation, stochastic Platen air drag,
+12 cm collector) grown from a single nozzle bead over `1e8` steps. It is not
+the current `examples/input-24`, which uses the canonical electrostatics and
+no evaporation (see [Test Case 24](../examples/test-24.md) and its evaporative
+twin [Test Case 25](../examples/test-25.md)).
 
 The practical fix for this specific long run turned out to be its
 refinement **cadence**, not something the five interpolation-side defenses
@@ -266,8 +274,9 @@ previous event's own output. Reusing Example 5's coarser, already-validated
 cadence instead (`threshold 0.4` cm, 20x resolution; `every 1.d-3` s) let
 the same input, on GFortran CPU, **run to full completion**: all `1e8`
 (100 million) timesteps, `t=0.5` s, 499 accepted refinement events,
-`Program closed correctly`, zero errors. This is the cadence now shipped
-with `examples/input-24`.
+`Program closed correctly`, zero errors. The same cadence is now shipped
+with `examples/input-24` and `examples/input-25`; the completion results
+below refer to the probe, not to those inputs.
 
 The jet bridges the full nozzle-to-collector distance and reaches its
 first collector removal at step `95528` -- under 0.1% into the run -- and
@@ -281,9 +290,14 @@ to `17`-`18` from the post-event `36`-`37`, in a sawtooth that repeats
 without change for the entire run. The minimum bead radius measured at
 every one of the 499 events likewise stayed at its initial value
 throughout -- no collapse. The OpenACC/GPU path has not yet been driven to
-full completion at this cadence (2.5 million of `1e8` steps validated so
-far; see `docs/STATE.md`, "GPU/OpenACC port of the three host-only
-fixes").
+full completion on the probe at this cadence (2.5 million of `1e8` steps
+validated so far; see `docs/STATE.md`, "GPU/OpenACC port of the three
+host-only fixes").
+
+Under the canonical electrostatics this cadence is not sufficient once
+evaporation is enabled: Test Case 25 stops at step 1,078,685 with a stress
+NaN, while its non-evaporative twin Test Case 24 runs cleanly for 6 million
+steps. That instability is open; see [Test Case 25](../examples/test-25.md).
 
 **GPU/OpenACC scope.** This investigation itself targeted GFortran CPU
 only, and the log-area transform and the three despiking/local-source/
@@ -301,9 +315,9 @@ arrays, mirroring `setup_akima`'s host algorithm verbatim. Validated on a
 native NVIDIA A30 (NVFORTRAN 24.3): Tests 21/22/23 pass on all five
 `tests/refinement/run_test23.sh` backends including `akima-compare`
 (device-vs-host tangent/coefficient agreement at the same roundoff level
-as the pre-existing documented baseline), and a fresh GPU run of the real
-`examples/input-24` ran past 2.5 million steps (12 accepted events) with
-zero errors and zero evlim/cp blowups. See `docs/STATE.md` ("GPU/OpenACC
+as the pre-existing documented baseline), and a fresh GPU run of the
+evaporative probe configuration described above ran past 2.5 million steps
+(12 accepted events) with zero errors and zero evlim/cp blowups. See `docs/STATE.md` ("GPU/OpenACC
 port of the three host-only fixes") for full detail.
 
 ## OpenACC path
@@ -488,6 +502,9 @@ within an explicitly chosen tolerance.
 The five cross-section-fit defenses in the previous section were each
 validated the same way -- `tests/refinement/run.sh gfortran standard` and
 direct GFortran runs of `examples/input-22`/`examples/input-23` -- with zero
-regressions, but they do not yet make the long single-nozzle-bead-start
-`examples/input-24` run to completion; see `docs/STATE.md` for the open
-investigation.
+regressions. By themselves they did not make the long single-nozzle-bead
+probe run to completion; that required the coarser refinement cadence
+described above. With that cadence, the non-evaporative
+[Test Case 24](../examples/test-24.md) runs cleanly, whereas its evaporative
+twin [Test Case 25](../examples/test-25.md) still fails and is the reproducer
+for the open instability.

@@ -18,22 +18,36 @@ JETSPIN job (see Section \ref{sec:Input-file}). Further, whenever
 a job is restarted, it is also possible to reset the accumulated statistical
 data, collected in the previous run, by adding the directive ``\textit{restart
 reset}'' in input file. It is worth stressing that JETSPIN will append
-new data to the files \texttt{statdat.dat},\texttt{ traj.xyz} , while
+new data to the files \texttt{statout.dat} and \texttt{traj.xyz} (and to
+the developer binary \texttt{statdat.dat}, if enabled), while
 all the other output files will be \textbf{overwritten} (included
 the \texttt{save.dat} file). Thus, the user is advised to keep backup
 copies of the \texttt{restart.dat} file, noting the times it was written,
 to help you avoid going right back to the start of a simulation.
 
 The same restarting procedure can be also used for extending a simulation
-beyond its initial allocation of timesteps. In this case, the directive
-\textit{timesteps} should be adjusted in input file to the new total
-number of steps required for the simulation. For instance, if a 10000
-step simulation needs to be extended by a further 5000 steps, the
-user should use the directive ``\textit{timesteps 15000}'' in the
-input file and include the ``\textit{restart yes}'' directive. Further,
+beyond its initial duration. The restarted job resumes from the step and
+time stored in \texttt{restart.dat} and integrates up to the value of the
+directive \texttt{final time}, which should therefore be increased to the new
+total simulated time. For instance, if a simulation run with
+``\textit{final time 1.d-3}'' needs to be extended by a further
+$5\times10^{-4}$ seconds, the user should set ``\textit{final time 1.5d-3}''
+and include the ``\textit{restart yes}'' directive, leaving
+\texttt{timestep} unchanged. Note that there is no directive for the number
+of steps: since directives are matched by the leading characters of each
+word, a record such as ``\textit{timesteps 15000}'' would be read as
+``\textit{timestep 15000}'' and would set the integration step to 15000
+seconds. Further,
 the restarting procedure can be useful in the event of machine failure.
 Here, the job can be restarted in the same way from the \texttt{save.dat}
 file, which is written at regular time intervals in order to meet
 just such an emergency. We stress that the procedure is not foolproof
 in the last event, since the job could be crash while the \texttt{save.dat}
 file is being written.
+
+The restart file stores the physical state and the accumulated statistics,
+but not the state of the random-number generator. A restarted stochastic
+simulation (noise, air drag with the Platen integrator, or nozzle
+perturbations) therefore continues from the saved configuration with a
+statistically equivalent, but not identical, random sequence; bit-for-bit
+reproduction of an uninterrupted run is not guaranteed.

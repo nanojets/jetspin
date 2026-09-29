@@ -62,15 +62,25 @@ viscosity 49.7 P and modulus 6.9e4 (cutoff values); 20 refinement events,
 reaches 2.9 cm at the collector. Test 24 over the same interval: 3.8 cm,
 27 degrees.
 
-### Sensitivity of the cone (preliminary)
+### Sensitivity of the cone
 
-With the new Test 25 as base: doubling `density charge` opened the cone and
-stretched the jet (path length 72 cm against 17 cm at step 1 million);
-that run was stopped at 1 million steps. Halving `viscosity` opens the cone
-(about 24-26 degrees at 2.6-2.8 million steps, stable), halving
-`elastic modulus` alone does not change it; `viscosity` and
-`elastic modulus` at one quarter behave like halving the viscosity. These
-runs were still in progress when this entry was written.
+With the new Test 25 as base (5 million steps, NVFORTRAN CPU, all clean;
+means over steps 4-5 million):
+
+| `viscosity`, `elastic modulus` | Off-axis | `angl` | Active beads | Path | Fibre radius |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 20 P, 5e4 (Test 25) | 2.78 cm | 19.7 | 267 | 112 cm | 2.77 um |
+| 20 P, 2.5e4 | 2.66 cm | 18.9 | 256 | 106 cm | 2.75 um |
+| 10 P, 5e4 | 3.60 cm | 25.4 | 364 | 154 cm | 2.39 um |
+| 10 P, 2.5e4 | 3.39 cm | 23.9 | 338 | 143 cm | 2.42 um |
+| 5 P, 1.25e4 | 3.71 cm | 26.1 | 365 | 157 cm | 2.26 um |
+
+The cone and the stretching are controlled by the viscosity; halving the
+elastic modulus alone changes nothing. Collector velocity (about 2550 cm/s)
+and the collector arrival (2.04-2.12 million steps) barely change. Doubling
+`density charge` instead opened the cone and stretched the jet much more
+(path length 72 cm against 17 cm at step 1 million); that run was stopped
+at 1 million steps.
 
 ### Open items
 

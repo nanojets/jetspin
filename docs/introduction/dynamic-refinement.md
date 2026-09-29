@@ -294,10 +294,15 @@ full completion on the probe at this cadence (2.5 million of `1e8` steps
 validated so far; see `docs/STATE.md`, "GPU/OpenACC port of the three
 host-only fixes").
 
-Under the canonical electrostatics this cadence is not sufficient once
-evaporation is enabled: Test Case 25 stops at step 1,078,685 with a stress
-NaN, while its non-evaporative twin Test Case 24 runs cleanly for 6 million
-steps. That instability is open; see [Test Case 25](../examples/test-25.md).
+Under the canonical electrostatics, evaporation with Yarin's 6 % polymer
+fraction stops at step 1,078,685 with a stress NaN, while the
+non-evaporative Test Case 24 runs cleanly for 6 million steps. This turned out
+not to be a refinement defect: the dried jet keeps its charge while losing
+fifteen times its mass and cross-section, its head is ejected laterally, and
+the next accepted event has to remesh a jet that has already left the
+physical regime. With a 50 % initial polymer fraction, which bounds the mass
+loss, the same input runs stably; that is the current
+[Test Case 25](../examples/test-25.md).
 
 **GPU/OpenACC scope.** This investigation itself targeted GFortran CPU
 only, and the log-area transform and the three despiking/local-source/
@@ -505,6 +510,6 @@ direct GFortran runs of `examples/input-22`/`examples/input-23` -- with zero
 regressions. By themselves they did not make the long single-nozzle-bead
 probe run to completion; that required the coarser refinement cadence
 described above. With that cadence, the non-evaporative
-[Test Case 24](../examples/test-24.md) runs cleanly, whereas its evaporative
-twin [Test Case 25](../examples/test-25.md) still fails and is the reproducer
-for the open instability.
+[Test Case 24](../examples/test-24.md) runs cleanly, and so does its
+evaporative twin [Test Case 25](../examples/test-25.md) with a 50 % initial
+polymer fraction.

@@ -1,5 +1,84 @@
 # JETSPIN development state and handoff log
 
+## Test 25 instability diagnosed; Test 25 redefined (2026-09-29)
+
+The open item of 2026-08-26 ("Diagnose the evaporation instability that makes
+Test 25 stop at step 1,078,685") is closed. It is a property of the
+evaporation parameter regime, not a code or refinement defect.
+`examples/input-25` now uses `evaporation polymer frac 0.50d0` instead of
+Yarin's `0.06d0`, with the Yarin law otherwise unchanged (`bconstant 7`,
+`mconstant 0.1`, `tconstant 1`, humidity 0.165), and runs stably.
+`docs/examples/test-25.md` carries the full analysis; Test 24 and its pages
+are unchanged apart from the cross-references.
+
+### Mechanism
+
+- The old input reproduces exactly on an A30 (step 1,078,685, bead 30) and
+  stops at step 1,067,695 with the NVFORTRAN CPU build, same signature.
+- In the model an evaporating element keeps its charge while mass and
+  cross-section scale with `V/V0`, which falls to `cp0/0.9 = 0.067` for
+  `cp0 = 0.06`: the charge-to-mass ratio grows fifteenfold. With
+  `theta ~ cp` (`tconstant 1`), `G` grows only 2.9 times, so the elastic
+  resistance `G*A` of a dried element is about five times weaker than that
+  of the fresh jet. Every collected bead reaches the cutoff; a thin jet dries
+  in well under a millisecond at humidity 0.165.
+- The dried head is ejected laterally (off-axis distance 3 -> 20 cm between
+  steps 1.00 and 1.04 million, CPU). The next accepted refinement event
+  inserts 164 beads with segments near `1e-5` cm, and a stress NaN follows
+  about 2,700 steps later.
+
+### Diagnostic runs (NVFORTRAN 24.3 CPU unless noted, same seed)
+
+- `cp0 = 0.06`, 1.5 million steps: `bconstant 0` (G/15) NaN 1,016,381, head
+  at 2100 cm; `bconstant 0`, `tconstant 0` (rheology frozen) NaN 1,019,317;
+  Yarin law NaN 1,067,695; `tconstant 0` with viscosity and modulus x2, x5,
+  x10, x15 at the cutoff NaN at 1,017,070, 1,038,065, 1,066,199, 1,430,536;
+  x30 and x44 clean. The ordering follows `G*A` at the cutoff, not the
+  viscosity alone. `evaporation no` clean.
+- `evaporation umidity 1.0` (no net evaporation): with `bconstant 0`,
+  `tconstant 0` the output is bit-identical to Test 24; with the Yarin law
+  it agrees to `2.6e-8` (recomputed `cp` equals `cp0` to roundoff). The
+  evaporative path adds nothing spurious.
+- 5 million steps, `tconstant 0` and `bconstant` set for x2 at the cutoff:
+  `cp0` 0.20 (humidity 0.165), 0.30, 0.45, 0.60 (humidity 0.165 and 0.9) all
+  clean. Humidity only changes how fast the cutoff is reached.
+- 5 million steps, Yarin law: `cp0` 0.50 (viscosity x2.49, modulus x1.38)
+  and 0.577 (viscosity x2.00, modulus x1.28) both clean. 0.50 was adopted.
+- Yarin et al. fitted `B = 7`, `m = 0.1` to the envelope cone of a 6 % PEO
+  jet with `mu0 = 1e4` P, `theta0 = 10` ms, `G0 = 1e6`, nozzle radius
+  150 um; the `theta ~ cp` law is their rheological assumption (Yarin 1993).
+  The 6 % value is not transferable to JETSPIN's canonical 20 P / `5e4`
+  rheology.
+
+### Reference results of the new Test 25
+
+NVFORTRAN 24.3 CPU, truncated at 5,000,000 steps: first collector removal at
+step 2,116,788; between 4 and 5 million steps collector velocity 2535 cm/s,
+leading-bead off-axis distance 2.8 cm, `angl` 19.7 degrees, 242-294 active
+beads, path length 112 cm, fibre radius at the collector 2.8 um; collected
+viscosity 49.7 P and modulus 6.9e4 (cutoff values); 20 refinement events,
+221 additions, 921 removals, no reallocations. The envelope cone from
+`traj.xyz` opens from the nozzle with a local half-angle of 8-12 degrees and
+reaches 2.9 cm at the collector. Test 24 over the same interval: 3.8 cm,
+27 degrees.
+
+### Sensitivity of the cone (preliminary)
+
+With the new Test 25 as base: doubling `density charge` opened the cone and
+stretched the jet (path length 72 cm against 17 cm at step 1 million);
+that run was stopped at 1 million steps. Halving `viscosity` opens the cone
+(about 24-26 degrees at 2.6-2.8 million steps, stable), halving
+`elastic modulus` alone does not change it; `viscosity` and
+`elastic modulus` at one quarter behave like halving the viscosity. These
+runs were still in progress when this entry was written.
+
+### Open items
+
+- Full-length (1e8-step) reference and a GPU run of the new Test 25; the
+  reference above is a single seed at 5 % of the target duration.
+- The `xyz` coordinates are cm times the output rescaling factor (28.67 for
+  this case); any envelope analysis must divide by it.
+
 ## Test 22/23 reference values after `72e3af1`, newer CPU compilers (2026-09-29)
 
 Documentation-only increment. A fresh validation of commit `09ba185` on

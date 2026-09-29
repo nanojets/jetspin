@@ -39,8 +39,9 @@ Test Case 24 is a long production run, about 100 million steps, that grows a
 jet from a single nozzle bead until insertion and collector removal balance
 into a stationary bead count. It is non-evaporative and is excluded from the
 smoke and regression matrices because of its length.
-Test Case 25 is Test Case 24 with evaporation enabled and nothing else
-changed. It does not currently run to completion: it is the reproducer for an
-open numerical instability, not a validation reference.
+Test Case 25 is Test Case 24 with Yarin evaporation enabled and a 50 %
+initial polymer fraction; with Yarin's 6 % the dried jet becomes unstable, as
+analysed on its page. It is equally long and equally excluded from the
+matrices.
 
 See the individual pages in this directory for the purpose of each case.

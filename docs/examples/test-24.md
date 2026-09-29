@@ -27,23 +27,15 @@ regime had never been exercised.
 
 ## This case is non-evaporative by definition
 
-Test 23, the rheology parent, uses Yarin evaporation; Test 24 does not. That
-is now a definition rather than a temporary state: the evaporative
-configuration is [Test Case 25](test-25.md), whose `input.dat` differs from
-this one by exactly one line.
+Test 23, the rheology parent, uses Yarin evaporation; Test 24 does not, and
+its evaporation directives are read but unused. The evaporative configuration
+is [Test Case 25](test-25.md), whose `input.dat` differs from this one by two
+lines: `evaporation yes` and `evaporation polymer frac 0.50d0`.
 
-The split exists because evaporation does not survive this configuration, and
-keeping the two as separate inputs makes the comparison reproducible with a
-one-keyword difference:
-
-```text
-Test 24 (evaporation no)   -> 6,000,000 steps, Program closed correctly
-Test 25 (evaporation yes)  -> ERROR - numerical instability at nstep 1078685
-```
-
-Test 24 is therefore the case to use for the stationary-bead-count study it
-was designed for; Test 25 is the reproducer for the open evaporation defect,
-and carries its analysis.
+With Yarin's own 6 % polymer fraction the evaporative configuration stops on a
+stress NaN near step 1.07 million, because the dried jet keeps its charge
+while losing fifteen times its mass and cross-section. With 50 % it runs
+stably; [Test Case 25](test-25.md) carries that analysis.
 
 ## The refinement cadence is load-bearing
 
@@ -62,14 +54,12 @@ times the base discretization resolution. It is informational, not enforced:
 Example 5 and Tests 21--23 are themselves below that ratio and remain valid
 short-window references.
 
-## Related open work
+## Related work
 
 Long single-bead-start runs with repeated remeshing exposed three
 refinement-robustness defects, two fixed and one contained through the cadence
 choice above; they are recorded in
 [the refinement robustness note](../refinement-robustness-investigation.md).
-The remaining open item bearing on this case is the evaporation instability
-that keeps the evaporative configuration in [Test Case 25](test-25.md).
 
 ## Reference results
 

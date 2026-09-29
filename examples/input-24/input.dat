@@ -10,13 +10,10 @@
  !a single nozzle bead instead of the pre-extended 400-element mesh used to
  !validate the refinement algorithm.
  !
- !This case is non-evaporative by definition. Its evaporative counterpart
- !is Test Case 25 (examples/input-25/input.dat), which is identical except
- !for the "evaporation" keyword. The split is deliberate: with evaporation
- !enabled this configuration reaches the code's own numerical instability
- !check at step 1078685 (stress NaN), while the non-evaporative one runs
- !cleanly, so keeping the two as separate inputs makes that controlled
- !comparison reproducible. See docs/examples/test-25.md.
+ !This case is non-evaporative by definition; the evaporation directives
+ !below are read but unused. Its evaporative counterpart is Test Case 25
+ !(examples/input-25/input.dat), identical except for "evaporation yes" and
+ !"evaporation polymer frac 0.50d0". See docs/examples/test-25.md.
  !
  !The dynamic-refinement threshold/every cadence is Example 5's
  !(0.4 cm / 1.d-3 s), not Test 23's tighter 0.10 cm / 1.d-5 s: growing this

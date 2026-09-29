@@ -1,19 +1,19 @@
  !Example JETSPIN input file 25: the evaporative counterpart of Test Case 24.
  !Every directive is identical to examples/input-24/input.dat except
- !"evaporation yes": same canonical electrostatics (density charge 44000,
- !collector distance 16 cm, external potential 30.02076857), same Maxwell
- !rheology, stochastic Platen air drag, insertion and removal from Test
- !Case 23, same single-nozzle-bead start and print directives from
- !Example 3, and the same Example 5 refinement cadence (0.4 cm / 1.d-3 s).
+ !"evaporation yes" and "evaporation polymer frac 0.50d0": same canonical
+ !electrostatics (density charge 44000, collector distance 16 cm, external
+ !potential 30.02076857), same Maxwell rheology, stochastic Platen air drag,
+ !insertion and removal from Test Case 23, same single-nozzle-bead start and
+ !print directives from Example 3, and the same Example 5 refinement cadence
+ !(0.4 cm / 1.d-3 s).
  !
- !The pair exists because evaporation does not currently survive this
- !configuration. Test Case 24 (evaporation off) runs cleanly; this input
- !reaches the code's own numerical instability check at step 1078685 with a
- !stress NaN at bead 30, about 1% into its 1e8-step target, on the ordinary
- !host integrator path. Keeping the two inputs side by side makes the
- !controlled comparison reproducible with a single keyword difference.
- !
- !See docs/examples/test-25.md.
+ !The evaporation law is Yarin (2001) unchanged (bconstant 7, mconstant 0.1,
+ !tconstant 1, humidity 0.165). Only the initial polymer fraction is raised
+ !from Yarin's 6% to 50%: at the cutoff cp=0.9 the element keeps 56% of its
+ !volume, viscosity grows x2.49 and the elastic modulus x1.38. With 6% the
+ !dried jet loses 15x its mass and cross-section while keeping its charge,
+ !is ejected laterally, and the run stops with a stress NaN near step
+ !1.07e6. See docs/examples/test-25.md.
 
  system 4
  integrator 4
@@ -66,7 +66,7 @@
  !Canonical JETSPIN potential; see the header note.
  external potential 30.02076857d0
  evaporation yes
- evaporation polymer frac 0.06d0
+ evaporation polymer frac 0.50d0
  evaporation airviscosity 0.15d0
  evaporation temperature 293.15d0
  evaporation umidity 0.165d0

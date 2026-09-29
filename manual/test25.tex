@@ -1,41 +1,63 @@
 \section{Test Case 25: evaporative counterpart of Test Case 24\label{sec:Test-Case-25}}
 
-Test Case 25 is Test Case 24 with evaporation enabled and nothing else
-changed.  The two input files differ by exactly one line,
-\texttt{evaporation no} against \texttt{evaporation yes}.  Everything else is
-shared: the canonical electrostatic parameters
-(\texttt{density charge 44000}, \texttt{collector distance 16},
-\texttt{external potential 30.02076857}), Maxwell rheology, stochastic Platen
-air drag, nozzle insertion and collector removal from Test Case 23, the
-single-nozzle-bead start and print directives from Example 3, and Example 5's
-refinement cadence.
+{\sloppy
+Test Case 25 is Test Case 24 with Yarin evaporation enabled.  The two input
+files differ by two directives, \texttt{evaporation yes} and
+\texttt{evaporation polymer frac 0.50d0}.  Everything else is shared: the
+canonical electrostatic parameters (\texttt{density charge 44000},
+\texttt{collector distance 16}, \texttt{external potential 30.02076857}),
+Maxwell rheology with $\mu_0=20$ P and $G_0=5\times10^{4}$ dyn/cm$^{2}$,
+stochastic Platen air drag, nozzle insertion and collector removal from Test
+Case 23, the single-nozzle-bead start and print directives from Example 3,
+and Example 5's refinement cadence.  The evaporation law of
+Sec.~\ref{sec:Evaporation} is used with the coefficients of
+Ref.~\cite{yarin2001bending} unchanged, $B=7$, $m=0.1$, $t_{\mathrm{ev}}=1$,
+and a relative humidity of 0.165 at 293.15 K; only the initial polymer mass
+fraction is raised from 0.06 to 0.50.\par}
 
-This case does not currently run to completion, and that is its purpose.  Test
-Case 24 was originally intended to carry Test Case 23's Yarin evaporation
-together with its rheology, but evaporation does not survive the corrected
-electrostatics.  Rather than dropping it silently, the two configurations are
-kept as separate inputs so that the failure remains reproducible with a
-one-keyword difference.  Test Case 24 completes six million steps cleanly with
-571 active beads in a stationary oscillation, whereas Test Case 25 stops at
-step 1,078,685, about 1\% of its target, on the code's own numerical
-instability check, with a stress NaN at bead 30 at $x=12.68$ cm and 262 active
-beads.
+With $c_{p,0}=0.50$ the solidification cutoff $c_p=0.9$ is reached at
+$V/V_0=0.556$, and every bead collected in the reference run has reached it:
+at the collector the jet is 90\% polymer by mass, 89\% of the initial solvent
+has evaporated, the viscosity has grown by a factor of 2.49 (to 49.7 P), the
+relaxation time by 1.80, and the elastic modulus by 1.38.
 
-Two observations narrow the search.  The failing run never engages the
-persistent accelerator path, so the failure belongs to the ordinary host
-integrator and is not an accelerator artifact.  And the bending instability
-develops normally up to the failure: at step 800,000 the jet is at an off-axis
-distance of 1.66 cm with a bending angle of 27 degrees and 48 active beads.
+The initial polymer fraction of Ref.~\cite{yarin2001bending} does not survive
+this configuration.  With $c_{p,0}=0.06$ the run stops on the code's
+numerical instability check at step 1,078,685 on an NVIDIA A30 (step
+1,067,695 with the NVFORTRAN CPU build), with a stress NaN.  The cause lies
+in the parameter regime.  An evaporating element keeps its charge while its
+mass and cross-section decrease with its volume, down to $V/V_0=c_{p,0}/0.9$,
+that is one fifteenth; its charge-to-mass ratio therefore grows fifteenfold.
+Because $\theta\propto c_p$, the elastic modulus grows only 2.9 times, so the
+elastic resistance $G\,\pi a^2$ of a dried element is about five times weaker
+than that of the fresh jet.  The dried head of the jet is then pushed
+laterally by Coulomb repulsion, its off-axis distance growing from 3 to 20 cm
+within 40,000 steps; the next accepted refinement event has to remesh a jet
+that has left the physical regime, and the stress NaN follows.  Diagnostic
+variants confirm that the outcome follows the elastic resistance of the dried
+jet: freezing viscosity, relaxation time and modulus leads to an earlier
+failure; keeping the relaxation time constant, so that the modulus grows with
+the viscosity, fails when the growth at the cutoff is 10 or less and runs
+cleanly when it is 30 or more.  With the relative humidity set to one, so
+that no net evaporation occurs, the evaporative code path reproduces Test
+Case 24.  Raising the initial polymer fraction bounds the mass loss without
+altering the concentration law, whose coefficients $B$ and $m$ were fitted by
+Yarin et al.\ to the envelope cone of a much more viscous 6\% PEO solution
+($\mu_0=10^{4}$ P, $\theta_0=10$ ms).
 
-The stress-NaN signature is the same one produced, by two different routes, by
-the polymer-mass-fraction defect and the cross-section thinning defect that
-Test Case 24's investigation identified and addressed.  The first hypothesis
-to test is therefore whether the cross-event compounding of the cross-section
-radius resurfaces under genuine bending: the refinement-cadence workaround
-that contains it was validated on a configuration whose cross-section field
-was far smoother than it is here.
+The reference run uses the NVFORTRAN 24.3 CPU build and is truncated at
+5,000,000 steps, 5\% of the target duration; it closes correctly.  The jet
+first reaches the collector at step 2,116,788.  Between 4 and 5 million steps
+the collector velocity is 2535 cm/s, the off-axis distance of the leading
+bead 2.8 cm, the cone angle 19.7 degrees, the active-bead count between 242
+and 294, the path length 112 cm, and the fibre radius at the collector
+2.8~$\mu$m against a nozzle radius of 50~$\mu$m.  The envelope cone opens from
+the nozzle with a local half-angle growing from about 8 to 12 degrees.
+Compared with Test Case 24 (3.8 cm, 27 degrees over the same interval),
+evaporation and the stiffening it causes make the bending loops smaller, as
+reported in Ref.~\cite{yarin2001bending}.  A full-length reference does not
+yet exist.
 
-This case should be used as the reproducer for that open instability, not as a
-validation or performance reference, and it is excluded from the short smoke
-and regression matrices.  The input is stored in
-\texttt{examples/input-25/input.dat}.
+The case is excluded from the short smoke and regression matrices because of
+its length.  The input is stored in \texttt{examples/input-25/input.dat}, and
+\texttt{docs/examples/test-25.md} lists the diagnostic variants in detail.

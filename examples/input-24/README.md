@@ -22,16 +22,15 @@ It combines three sources:
 ## This case is non-evaporative by definition
 
 Test Case 23, from which the rheology is taken, uses Yarin evaporation. This
-input does not. The evaporative configuration is Test Case 25
-(`../input-25/`), whose input differs from this one by exactly one line.
+input does not; its evaporation directives are read but unused. The
+evaporative configuration is Test Case 25 (`../input-25/`), whose input
+differs from this one by two lines: `evaporation yes` and
+`evaporation polymer frac 0.50d0`.
 
-The split is deliberate. With evaporation enabled this configuration reaches
-the code's own numerical instability check at step 1,078,685 with a stress NaN
-at bead 30, roughly 1% into its target, while the non-evaporative one runs
-cleanly for six million steps. Keeping the two as separate inputs makes that
-controlled comparison reproducible with a one-keyword difference. The failure
-occurs on the ordinary host integrator path, so it is not an accelerator
-artifact.
+With Yarin's 6 % polymer fraction the evaporative configuration stops on a
+stress NaN near step 1.07 million: the dried jet keeps its charge while losing
+fifteen times its mass and cross-section, and its head is ejected laterally.
+With 50 % it runs stably. See `docs/examples/test-25.md`.
 
 ## Refinement cadence
 

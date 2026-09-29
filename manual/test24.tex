@@ -23,15 +23,14 @@ test starts from an already extended jet, so the young-jet growth regime had
 never been exercised.
 
 Yarin evaporation, which Test Case 23 uses, is not enabled here, and this is a
-definition rather than a temporary state.  The evaporative configuration is
-Test Case 25, whose input differs from this one by exactly one line.  The
-split exists because evaporation does not survive this configuration: Test
-Case 24 completes six million steps cleanly, whereas Test Case 25 stops at
-step 1,078,685 on the code's own numerical instability check.  Keeping the two
-as separate inputs makes that comparison reproducible with a one-keyword
-difference.  Test Case 24 is consequently the case to use for the
-stationary-bead-count study described here, and Test Case 25 carries the
-analysis of the open defect.
+definition rather than a temporary state; the evaporation directives of the
+input are read but unused.  The evaporative configuration is Test Case 25
+(Sec.~\ref{sec:Test-Case-25}), whose input differs from this one by two
+lines, \texttt{evaporation yes} and \texttt{evaporation polymer frac 0.50d0}.
+With the 6\% polymer fraction of Ref.~\cite{yarin2001bending} the evaporative
+configuration stops on a numerical instability near step 1.07 million,
+because the dried jet keeps its charge while losing fifteen times its mass
+and cross-section; Test Case 25 carries that analysis.
 
 The dynamic-refinement cadence is taken from Example 5,
 \texttt{dynamic refinement threshold 0.4} cm and

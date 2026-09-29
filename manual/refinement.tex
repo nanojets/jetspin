@@ -267,10 +267,12 @@ $2.5\times10^{6}$ of the $10^{8}$ steps at this cadence but not yet driven to
 full completion; see \texttt{docs/STATE.md}.) The same cadence is now used by
 the tracked Test Cases 24 and 25, which differ from the probe: they adopt the
 canonical JETSPIN electrostatics and a 16~cm collector distance. Test Case 24,
-without evaporation, runs cleanly, whereas its evaporative counterpart, Test
-Case 25, still stops on a numerical instability (see
-Sec.~\ref{sec:Test-Case-25}); this cadence is therefore a workaround, not a
-complete cure. The full investigation is recorded in
+without evaporation, runs cleanly, and so does its evaporative counterpart,
+Test Case 25, with a 50\% initial polymer fraction.  With the 6\% fraction
+of Ref.~\cite{yarin2001bending} the evaporative case stops on a numerical
+instability that originates in the evaporation parameter regime rather than
+in the refinement (see Sec.~\ref{sec:Test-Case-25}).  The cadence remains a
+workaround for the cross-event compounding, not a complete cure. The full investigation is recorded in
 \texttt{docs/refinement-robustness-investigation.md}. A corresponding advisory, warning 108, is
 issued whenever the
 configured or auto-derived \uline{dynam refin threshold} is set below

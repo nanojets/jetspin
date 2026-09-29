@@ -26,13 +26,16 @@ With NVFORTRAN 24.3, the validated results are:
 
 | Path | Refinement steps | First removal | Removals | Final elements |
 | --- | --- | ---: | ---: | ---: |
-| CPU | 14,301; 14,944; 15,718 | 15,647 | 10 | 527 |
-| Native A30 | 14,301; 14,944; 15,700 | 15,647 | 4 | 532 |
-| A30 complete-force oracle | 14,301; 14,944; 15,717 | 15,647 | 7 | 530 |
+| CPU | 14,301; 14,944; 15,763 | 15,648 | 10 | 526 |
+| Native A30 | 14,301; 14,944; 15,737 | 15,648 | 10 | 527 |
+| A30 complete-force oracle | 14,301; 14,944; 15,763 | 15,648 | 10 | 526 |
 
+NVFORTRAN 25.5 reproduces the CPU row and its removal schedule exactly.
 All three paths preserve 81 active anchors at each accepted event and grow
-capacity from 420 to 477, then 520, and finally 557. The native trajectory is
-not expected to reproduce the exact later removal schedule: direct Coulomb
+capacity from 420 to 477, then 520. The final capacity is 556 on the CPU and
+the force oracle and 557 on the native A30. The force oracle reproduces the
+CPU removal schedule step for step. The native trajectory is not expected to
+reproduce the exact later removal schedule: direct Coulomb
 accumulation uses a different floating-point summation order on the GPU, and
 the stochastic bending trajectory amplifies that difference near the
 collector. The event-level topology and conservation contracts therefore
@@ -53,9 +56,9 @@ only the collected point fields and clears that one device slot.
 
 The Akima A/B build evaluates the historical host routine and the new device
 routine at every event. Across 33 field/event comparisons, the largest
-coefficient relative error is `2.48e-15`, the largest interpolated absolute
-error is `7.28e-12`, and the largest interpolated relative error is
-`3.32e-15`. Mass and charge density are identical at printed precision. An
+coefficient relative error is `2.41e-15`, the largest interpolated absolute
+error is `4.32e-12`, and the largest interpolated relative error is
+`3.31e-15`. Mass and charge density are identical at printed precision. An
 independent normal-device run and host-Akima-oracle run produce byte-identical
 `statout.dat` files and the same event/removal topology.
 

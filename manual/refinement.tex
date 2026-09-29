@@ -135,23 +135,23 @@ interval. Complete intermediate state transfers remain confined to accepted
 refinement events.
 
 Its CPU/GPU statistics agree within tolerance for all but the last two rows;
-once the jet reaches the collector the two builds accumulate a different
-number of collector removals (ten on the CPU, four on the GPU) because
-direct-Coulomb summation order is amplified by the stochastic bending
-trajectory near the collector. Isolating only the direct Coulomb sum on the
-host while keeping topology and the reconstruction kernel below on the device
-confirms this: the isolated build's third event and first seven removals then
-match the CPU step-for-step, and only the last statistics row still
-diverges. Matching topology, conservation, and this tolerance -- not
+once the jet reaches the collector the two builds follow slightly different
+removal schedules and end one active element apart (526 on the CPU, 527 on
+the GPU, both after ten removals) because direct-Coulomb summation order is
+amplified by the stochastic bending trajectory near the collector. Isolating
+only the direct Coulomb sum on the host while keeping topology and the
+reconstruction kernel below on the device confirms this: the isolated build's
+third event and all ten removals then match the CPU step-for-step, and all
+statistics rows agree. Matching topology, conservation, and this tolerance -- not
 bit-for-bit trajectory identity -- remain the acceptance criteria for this
 test.
 
 A development host-Akima target retains the historical coefficient and
 interpolation routines as an oracle. A second comparison target executes both
 paths for each field. Across the 11 fields and three Test Case 23 events, the
-largest coefficient relative difference is $2.48\times10^{-15}$; interpolated
-values differ by at most $7.28\times10^{-12}$ absolutely and
-$3.32\times10^{-15}$ relatively.
+largest coefficient relative difference is $2.41\times10^{-15}$; interpolated
+values differ by at most $4.32\times10^{-12}$ absolutely and
+$3.31\times10^{-15}$ relatively.
 
 A third development target applies the same host-then-device oracle pattern
 to the volume-reconstruction/conservation/density kernel: it backs up the

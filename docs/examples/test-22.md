@@ -28,16 +28,18 @@ The validated NVFORTRAN 24.3 results are:
 
 | Path | Event steps | Active elements | Capacity sequence | Final elements |
 | --- | --- | --- | --- | ---: |
-| CPU | 14,301; 14,944; 15,719 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
-| Native A30 | 14,301; 14,944; 15,701 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
-| A30 complete-force oracle | 14,301; 14,944; 15,719 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
+| CPU | 14,301; 14,944; 15,765 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
+| Native A30 | 14,301; 14,944; 15,738 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
+| A30 complete-force oracle | 14,301; 14,944; 15,765 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
 
-All anchor-field differences are zero at printed precision. Reference volume,
+NVFORTRAN 25.5 reproduces the CPU row exactly. All anchor-field differences
+are zero at printed precision. Reference volume,
 evaporated volume, mass, and charge are conserved at approximately `1e-16`.
-The native CPU/GPU comparison passes with `rtol=2.5e-2`; its largest relative
-difference is about 2.38 percent in final `vz`. The force oracle reproduces
-the CPU topology and passes with `rtol=6e-7`. The 18-step shift in the third
-native event is therefore attributed to amplification of the different direct
+In the native CPU/GPU comparison the first 79 of the 80 statistics rows agree
+within `4e-4` relatively. The final row, sampled after both third events,
+differs by up to 3.3 percent in `vz`. The force oracle reproduces the CPU
+topology and passes with `rtol=6e-7`. The 27-step shift in the third native
+event is therefore attributed to amplification of the different direct
 Coulomb summation order rather than to the reallocation lifecycle.
 
 The normal OpenACC path computes Akima coefficients and spline interpolation

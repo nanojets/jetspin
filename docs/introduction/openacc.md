@@ -228,10 +228,11 @@ refinement.
 Test 22 repeats this lifecycle three times in 15,800 steps. The native A30 and
 NVFORTRAN CPU runs retain the same active counts across all events and finish
 with 536 elements. The first two event steps are identical; the third occurs
-at step 15,701 on the A30 and 15,719 on the CPU because of the target-centric
-Coulomb accumulation order. Their 80-row statistics compare within 2.5
-percent. The complete-force oracle reproduces all CPU event steps and compares
-within `6e-7` relatively.
+at step 15,738 on the A30 and 15,765 on the CPU because of the target-centric
+Coulomb accumulation order. The first 79 of their 80 statistics rows agree
+within `4e-4` relatively; the final row, after both third events, differs by
+up to 3.3 percent. The complete-force oracle reproduces all CPU event steps
+and compares within `6e-7` relatively.
 
 An A30 transfer audit records four complete state downloads: one for each of
 the three accepted refinement events and one at final shutdown. It also records
@@ -250,20 +251,21 @@ Akima events retain the event-only target-mesh/anchor-bookkeeping boundary
 described above.
 The A30 audit again finds four complete state downloads (three refinement
 events plus shutdown) and three history/topology/evaporation rebinds. The
-ordinary removal check returns one four-byte control scalar; each of the four
-accepted removals downloads and clears only one bead.
+ordinary removal check returns one four-byte control scalar; each accepted
+removal downloads and clears only one bead.
 
 The standard build's CPU/GPU `statout.dat` agreement (`rtol=3e-2`) holds for
-79 of 81 rows; the last two diverge once the jet reaches the `x=12 cm`
-collector and the two builds fork onto different removal schedules (CPU ten
-removals/527 final active beads, GPU four/532). Rebuilding Test 23 with the
+79 of 81 rows; in the last two, once the jet reaches the `x=12 cm` collector,
+the two builds fork onto slightly different removal schedules and differ by
+one active bead (both make ten removals; the CPU ends with 526 active beads,
+the GPU with 527). Rebuilding Test 23 with the
 existing narrow `nvfortran-openacc-coulomb-oracle` target -- direct Coulomb
 sum on the host, everything else including topology and the reconstruction
 kernel above still on the device -- confirms direct-Coulomb summation order
-as the dominant source: its third event lands at the CPU's own step (15718),
-its first seven removals match the CPU step-for-step, and its final active
-count (530) matches the complete-force oracle exactly. Agreement then holds
-for 80 of 81 rows, leaving only the last row diverging. This is a diagnostic
+as the dominant source: its third event lands at the CPU's own step (15763),
+all ten removals match the CPU step-for-step, and its final active count
+(526) matches the CPU and the complete-force oracle exactly. Agreement then
+holds for all 81 rows. This is a diagnostic
 confirmation of an already-documented sensitivity, not a change to the
 standard build's accepted topology.
 
@@ -393,8 +395,8 @@ trajectory.
 Test 23 validates the Akima device kernels directly. A comparison build runs
 the historical host spline and the accelerator spline for 11 fields at each
 of three remeshes. The maximum coefficient relative difference is
-`2.48e-15`; interpolated values differ by at most `7.28e-12` absolutely and
-`3.32e-15` relatively. The calculation has no reduction: source slopes,
+`2.41e-15`; interpolated values differ by at most `4.32e-12` absolutely and
+`3.31e-15` relatively. The calculation has no reduction: source slopes,
 interior tangents, cubic coefficients, and target interpolations are
 independent, with
 only the constant-size endpoint extrapolation executed serially.

@@ -1,5 +1,56 @@
 # JETSPIN development state and handoff log
 
+## Test 22/23 reference values after `72e3af1`, newer CPU compilers (2026-09-29)
+
+Documentation-only increment. A fresh validation of commit `09ba185` on
+NVIDIA A30 hardware matched every recorded value except the third refinement
+event of the NVFORTRAN CPU runs of Tests 22 and 23 (15765 and 15763, against
+15719 and 15718 in the documentation). Running NVFORTRAN 24.3 CPU builds of
+earlier commits on the same host located the change:
+
+| Commit | Test 22 events | Test 23 events | Test 23 removals | Test 23 final active |
+| --- | --- | --- | --- | --- |
+| `025f997`, `024cf09` | 14301/14944/15719 | 14301/14944/15718 | 15647, 15715, 15758, 15787, 15812, 15847, 15884, 15923, 15971, 15988 | 527 |
+| `72e3af1`, `09ba185` | 14301/14944/15765 | 14301/14944/15763 | 15648, 15714, 15774, 15787, 15813, 15847, 15882, 15921, 15971, 15988 | 526 |
+
+The old values are reproduced exactly before `72e3af1` (evlim floor fix and
+hardened Akima cross-section refit), so the shift is a code change, not a
+host floating-point effect. The first two events, the active counts, and the
+capacity sequences are unchanged. The documentation had kept the pre-`72e3af1`
+CPU, native-GPU, and oracle values; all were re-measured at `09ba185` and
+`docs/examples/test-22.md`, `docs/examples/test-23.md`,
+`docs/introduction/openacc.md`, `docs/introduction/dynamic-refinement.md`,
+`manual/test22.tex`, `manual/test23.tex`, and `manual/refinement.tex` now
+quote them:
+
+- Test 22: CPU and complete-force oracle 14301/14944/15765, native A30
+  14301/14944/15738, all 413->455, 455->498, 499->536 and capacities
+  420->477->520->558. Native CPU/GPU statistics: rows 1-79 of 80 agree within
+  `4e-4` relatively, the final row (after both third events) differs by up to
+  3.3 percent in `vz`; it previously passed `rtol=2.5e-2` with a 2.38 percent
+  maximum. The force oracle still passes `rtol=6e-7` (worst `3.4e-7`).
+- Test 23: CPU, complete-force oracle, and direct-Coulomb host oracle
+  14301/14944/15763 with the ten removals of the table above, final active
+  526, final capacity 556. Native A30 14301/14944/15737, removals
+  `15648, 15714, 15765, 15787, 15813, 15847, 15882, 15920, 15971, 15988`,
+  final active 527, final capacity 557 (events, removal count, and final
+  active count as recorded on 2026-08-17). CPU/GPU
+  statistics agree within `rtol=3e-2` for 79 of 81 rows (the last two differ
+  by one active bead); with the direct-Coulomb host oracle all 81 rows agree,
+  so the direct Coulomb summation order remains the dominant CPU/GPU source.
+  Akima A/B: `2.4055e-15` coefficient, `4.3201e-12` absolute and
+  `3.3142e-15` relative value differences, as recorded on 2026-08-17. The
+  host-Akima oracle `statout.dat` is byte-identical to the native run;
+  `refinement-compare` passes.
+
+Newer CPU compilers were also checked on the same commit. GFortran 12.2.1
+with OpenMPI 4.1.6 passes the smoke (serial, debug, MPI), regression
+(difference 0 in all eight cases, including the stochastic case 4), and
+Test 21 (step 7134, 413->454) suites, identical to GFortran 8.5.0.
+NVFORTRAN 25.5 CPU passes the regression suite (cases 4 and 8 differ from the
+24.3 baselines by 0.1 and 16 percent of the tolerance, all other cases 0) and
+reproduces the NVFORTRAN 24.3 CPU results of Tests 21, 22, and 23 exactly.
+
 ## Documentation alignment with the code and the input parser (2026-09-28)
 
 Documentation-only increment, apart from one source comment. The working

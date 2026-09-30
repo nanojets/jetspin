@@ -295,7 +295,7 @@ validated so far; see `docs/STATE.md`, "GPU/OpenACC port of the three
 host-only fixes").
 
 Under the canonical electrostatics, evaporation with Yarin's 6 % polymer
-fraction stops at step 1,078,685 with a stress NaN, while the
+fraction stops at step 1,078,685 on an A30 with a stress NaN, while the
 non-evaporative Test Case 24 runs cleanly for 6 million steps. This turned out
 not to be a refinement defect: the dried jet keeps its charge while losing
 fifteen times its mass and cross-section, its head is ejected laterally, and

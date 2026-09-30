@@ -79,15 +79,18 @@ roundoff), so the evaporative code path itself adds nothing spurious.
 Raising the initial polymer fraction bounds the mass loss, and therefore the
 growth of the charge-to-mass ratio, without touching the Yarin law. With
 `tconstant 0` and `bconstant` chosen so that viscosity and modulus only double
-at the cutoff, polymer fractions from 0.20 to 0.60 (0.20 at relative humidity
-0.165, the others at both 0.165 and 0.9) all ran 5 million steps cleanly. The humidity changes only how
-fast the cutoff is reached: every collected bead had reached it in all
-cases. The value 0.50 was chosen because it keeps all three Yarin
+at the cutoff, polymer fractions from 0.20 to 0.60 (0.20 at relative
+humidity 0.165, the others at both 0.165 and 0.9) all ran 5 million steps
+cleanly. The humidity changes only how fast the cutoff is reached: every
+collected bead had reached it in all cases.
+
+Test 25 therefore changes only the polymer fraction and keeps all three Yarin
 coefficients, which carry the literature justification: `B` and `m` were
 fitted by Yarin et al. to the envelope cone of a 6 % aqueous PEO jet, and the
-relaxation-time law is their stated rheological assumption. A polymer
-fraction of 0.577 limits the viscosity increase to exactly two (modulus
-×1.28) and behaves the same way.
+relaxation-time law is their stated rheological assumption. With the Yarin
+law, 0.50 and 0.577 both run 5 million steps cleanly; 0.577 would limit the
+viscosity increase to exactly two (modulus ×1.28), and 0.50 was adopted as
+the round value.
 
 Yarin's fit was obtained for a much more viscous solution than JETSPIN's
 canonical rheology (`mu0 = 1e4` P, `theta0 = 10` ms, `G0 = 1e6`, nozzle radius
@@ -111,7 +114,8 @@ NVFORTRAN 24.3 CPU build, truncated at 5,000,000 steps (5 % of the target),
 - 20 accepted refinement events, 221 topology additions, 921 removals, no
   array reallocations.
 
-Test 24 over the same interval has a 3.8 cm off-axis distance and a 27° cone:
+An NVFORTRAN CPU run of Test 24 over the same interval has a 3.8 cm off-axis
+distance and a 27° cone:
 evaporation and the stiffening it causes make the bending loops smaller, as
 reported by Yarin et al.
 

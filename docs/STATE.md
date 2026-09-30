@@ -570,6 +570,10 @@ that actually produced the long-standing NaN.
 
 ## Test 24 tracking and the Test 25 split (2026-08-26)
 
+*Superseded on 2026-09-29: the Test 25 instability below was diagnosed as a
+parameter-regime effect and Test 25 now uses a 50 % polymer fraction; see the
+first section of this file.*
+
 `examples/input-24` is now tracked, together with its `README.md`, and
 documented as a normal case in `docs/examples/test-24.md` and
 `manual/test24.tex`. Its electrostatic

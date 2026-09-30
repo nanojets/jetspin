@@ -38,7 +38,11 @@ That iteration visits every other active bead and writes only its target
 force. This target-centric formulation is race-free and needs no atomics. It
 evaluates each physical pair twice instead of sharing a pair contribution as
 the CPU implementation does, so its floating-point accumulation order is
-different.
+different. The evaporative 3D kernel (`accelerator_coulomb_evap_3d`)
+additionally spreads the sources of each target over the vector lanes of one
+gang and combines them with a reduction, for the pair and the mirror terms
+alike; the previous one-thread-per-target layout left the device almost idle
+for jets of a few hundred beads.
 
 The implementation preserves the existing model conventions, including:
 
@@ -395,8 +399,8 @@ trajectory.
 Test 23 validates the Akima device kernels directly. A comparison build runs
 the historical host spline and the accelerator spline for 11 fields at each
 of three remeshes. The maximum coefficient relative difference is
-`2.41e-15`; interpolated values differ by at most `4.32e-12` absolutely and
-`3.31e-15` relatively. The calculation has no reduction: source slopes,
+`4.23e-15`; interpolated values differ by at most `3.64e-12` absolutely and
+`2.53e-15` relatively. The calculation has no reduction: source slopes,
 interior tangents, cubic coefficients, and target interpolations are
 independent, with
 only the constant-size endpoint extrapolation executed serially.
@@ -416,21 +420,63 @@ invariant by tens of percent before being fixed; this is the reason every new
 device stage in this project must be validated with an A/B oracle rather than
 trusted from inspection alone.
 
+## Dynamic evaporative Platen from a single bead (Test 25)
+
+Test 25 grows the jet from one bead, so the device sees tens to a few hundred
+beads. Per-step wall times (NVFORTRAN 24.3, one A30, 2.5 million steps,
+median per bead-count band, from the `cpu` statistics key):
+
+| Active beads | CPU | GPU, old Coulomb kernel | GPU, current kernel | Current kernel, persistent path |
+| --- | ---: | ---: | ---: | ---: |
+| 1-30 | 33 us | 281 us | 253 us | 248 us |
+| 60-100 | 280 us | 503 us | 407 us | 390 us |
+| 100-150 | 542 us | 641 us | 490 us | 458 us |
+| 150-200 | 849 us | 799 us | 568 us | 454 us |
+| 250-300 | 1899 us | 1155 us | 784 us | 447 us |
+| Whole run | 1522 s | 1557 s | 1188 s | 931 s |
+
+The persistent column needs a fix that is not yet in the code: the Gaussian
+history of `platen_ev` is allocated only if the jet already has 100 beads
+when `prepare_integrator_random_history` runs, which is never true for a
+single-bead start, so the persistent path never engages and only the Coulomb
+kernel runs on the device. With a size-independent test for that one-shot
+decision the path engages at step 1,446,263 (121 beads).
+
+Nsight Systems profiles explain the remaining cost:
+
+- non-persistent path: three Coulomb calls per Platen step, each with 13
+  host-to-device copies, 2 device-to-host copies, 6 stream synchronizations,
+  and 2 kernels, about 120 us of fixed cost per call;
+- persistent path (about 170 beads): 29 kernel launches, 54 stream
+  synchronizations and 5 small device-to-host copies per step. With the old
+  kernel the three Coulomb calls took 88 us each, 72 % of the device time,
+  and the device was busy 41 % of the wall time. With the current kernel the
+  step time is flat at about 450 us from 120 to 300 beads, that is, almost
+  entirely launch and synchronization overhead.
+
+The CPU remains faster below about 110 beads.
+
 ## Next porting stages
 
-1. Investigate packing the maximum stress and bead index into one deterministic
+1. For the dynamic evaporative Platen path: make the one-shot history
+   decision size-independent (above), then run the persistent step on one
+   asynchronous queue with a single synchronization per step and
+   non-blocking reads of the removal and refinement scalars; fuse each force
+   stage into fewer kernels afterwards if needed.
+
+2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
-2. Extend the refinement-capacity lifecycle beyond the currently validated
+3. Extend the refinement-capacity lifecycle beyond the currently validated
    serial Maxwell/Platen combination when additional GPU model combinations
    are enabled; current transfers occur only on resize events.
-3. The remaining host-side work at an accepted event is the data-dependent
+4. The remaining host-side work at an accepted event is the data-dependent
    mass-boundary walk, target-mesh/anchor-mesh construction, and anchor
    save/restore/final-assembly bookkeeping. It is a small, rare (a few events
    per run), inherently sequential scan rather than a per-bead parallel
    operation, so it is not a priority target; the next candidate is instead
    determining whether the accepted-event full-state round trip can be
    removed without duplicating that bookkeeping's model logic.
-4. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
+5. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 
 The intended steady state is a persistent device-resident simulation with

@@ -1,5 +1,75 @@
 # JETSPIN development state and handoff log
 
+## Evaporative Coulomb kernel rewrite and Test 25 GPU profile (2026-09-30)
+
+Why the GPU build was slower than the CPU for Test 25 (evaporative Platen,
+single-bead start), and the first fix.
+
+### Diagnosis
+
+- As shipped, bug 1 of 2026-08-26 still applies to `platen_ev`: the Gaussian
+  history is allocated only when `npjet>=100` at the one-shot decision in
+  `prepare_integrator_random_history`, so the persistent path never engages
+  from a single bead. Only `accelerator_coulomb_evap_3d` runs on the device:
+  per Platen step 3 calls, each with 13 H2D copies, 2 D2H copies,
+  6 `cuStreamSynchronize` and 2 kernels (Nsight Systems, 80-100 beads).
+- With a size-independent test for that decision (scratch patch, not
+  committed) the persistent path engages at step 1,446,263, npjet 121. Per
+  step: 29 kernel launches, 54 stream synchronizations, 5 small D2H copies.
+  With the old kernel the Coulomb calls took 3 x 88 us at about 170 beads,
+  72 % of the device time; the device was busy 41 % of the wall time.
+- `accelerator_coulomb_evap_3d` ran one thread per target bead over all
+  sources sequentially.
+
+### Change
+
+`accelerator_coulomb_evap_3d` now uses one gang per target and a vector(128)
+reduction over sources, for the pair and the mirror terms (formulas,
+exclusions and the higher-index softening lookup unchanged; the per-target
+`jetms*cmass1` product is hoisted).
+
+Validation on an A30 (NVFORTRAN 24.3): `tests/regression/run.sh openacc`
+passes (cases 1-7 difference 0, case 8 1.13e-7 of the tolerance, 1.03e-7
+before); Tests 16/17 pass with the same topology counts and pre-event
+agreement; Test 21 7122 412->459, Test 22 14301/14944/15738, Test 23
+14301/14944/15737 with the same ten removals and 527 final active, all
+unchanged; Test 23 Akima A/B 4.23e-15 / 3.64e-12 / 2.53e-15 (the docs and
+the manual now quote these), host-Akima `statout.dat` byte-identical to the
+device run, `refinement-compare` passes.
+
+### Test 25 per-step time (2.5 million steps, one A30, median per band)
+
+| Beads | CPU | Old kernel | New kernel | New kernel + persistent (patch) |
+| --- | ---: | ---: | ---: | ---: |
+| 1-30 | 33 us | 281 us | 253 us | 248 us |
+| 100-150 | 542 us | 641 us | 490 us | 458 us |
+| 250-300 | 1899 us | 1155 us | 784 us | 447 us |
+| Whole run | 1522 s | 1557 s | 1188 s | 931 s |
+
+With the persistent path the step time is flat at about 450 us from 120 to
+300 beads: what remains is launch and synchronization overhead. Documented in
+`docs/introduction/openacc.md`.
+
+### Found along the way (not fixed)
+
+- Restart with evaporation fails. `read_dat_restart` accepts only formats
+  11-14 before reading `mxnpjet`, while `set_sprintdat_restart` writes 15 or
+  16 when evaporation is on ("restart file is corrupted"). Accepting 15/16 is
+  not enough: the parameter section written by `write_dat_parameter` has more
+  records than `read_dat_parameter_empty` skips, and the read then runs past
+  the end of the file.
+- `JETSPIN_COULOMB_DIAGNOSTIC=1` aborts in the non-persistent path (`update
+  self` of `ycf`, which is not present on the device there), with the old and
+  the new kernel alike.
+
+### Next
+
+1. Validated fix of bug 1 for `platen_ev` (switches Test 25 to the persistent
+   path above 100 beads; changes results at roundoff level).
+2. One asynchronous queue in the persistent step, a single synchronization
+   per step, non-blocking reads of the removal and refinement scalars.
+3. Restart with evaporation.
+
 ## Test 25 instability diagnosed; Test 25 redefined (2026-09-29)
 
 The open item of 2026-08-26 ("Diagnose the evaporation instability that makes

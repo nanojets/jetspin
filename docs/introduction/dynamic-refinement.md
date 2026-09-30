@@ -395,8 +395,8 @@ retains the historical host coefficient/interpolation path as an oracle.
 `JETSPIN_COMPARE_AKIMA` executes the host reference and the GPU path at each
 accepted event and reports coefficient and interpolated-value errors for all
 11 fields. Test 23 performs 33 such comparisons; its largest relative errors
-are `2.41e-15` for coefficients and `3.31e-15` for values. The largest
-absolute value difference is `4.32e-12`.
+are `4.23e-15` for coefficients and `2.53e-15` for values. The largest
+absolute value difference is `3.64e-12`.
 
 A third development build, `JETSPIN_COMPARE_REFINEMENT_ASSEMBLY`, applies the
 same host-then-device oracle pattern to the volume/conservation/density

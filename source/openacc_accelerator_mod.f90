@@ -855,7 +855,8 @@ contains
   logical, intent(in) :: jetfr(0:),lmirror,ldcutoff,linserting,linserted
   double precision, intent(in) :: q,h,dcutoff,icrossec
   integer :: ipoint,jpoint
-  double precision :: dx,dy,dz,norm,cmass1,cmass2,qt,coef,distance
+  double precision :: dx,dy,dz,norm,cmass1,qt,coef,distance,rmass
+  double precision :: sumx,sumy,sumz
   integer :: ihigh
 #ifdef _OPENACC
 !$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
@@ -879,55 +880,73 @@ contains
 #ifdef _OPENACC
 !$acc end parallel loop
 #endif
+! One gang per target bead; its vector lanes share the source beads and
+! combine their contributions with a reduction.  The former layout ran one
+! thread per target over all sources sequentially, which left the device
+! almost idle for jets of a few hundred beads.  The summation order differs
+! from both the host pair loop and the former kernel only at roundoff.
 #ifdef _OPENACC
-!$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
+!$acc parallel loop gang present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
 !$acc& yzz(0:npjet),yvl(0:npjet),yve(0:npjet),jetms(0:npjet), &
 !$acc& jetch(0:npjet),jetfr(0:npjet),coulcrossec(0:npjet)) &
-!$acc& present_or_copyout(ycf(0:npjet,1:3)) private(jpoint,ihigh,dx,dy,dz,norm, &
-!$acc& cmass1,cmass2,qt,coef)
+!$acc& present_or_copyout(ycf(0:npjet,1:3)) private(cmass1,qt,rmass, &
+!$acc& sumx,sumy,sumz)
 #endif
   do ipoint=inpjet,npjet
-    ycf(ipoint,1:3)=0.d0
-    if(jetfr(ipoint))cycle
-    cmass1=yve(ipoint)/yvl(ipoint)
-    qt=jetch(ipoint)*q
-    do jpoint=inpjet,npjet
-      if(jpoint==ipoint .or. jetfr(jpoint))cycle
-      dx=yxx(ipoint)-yxx(jpoint)
-      dy=yyy(ipoint)-yyy(jpoint)
-      dz=yzz(ipoint)-yzz(jpoint)
-      norm=dsqrt(dx*dx+dy*dy+dz*dz)
-      ! Match the host Maxwell 3D evaporation path: the ordinary bead-bead
-      ! interaction does not apply the cutoff. The mirror interaction below
-      ! retains the host cutoff behavior.
-      if(norm>1.d-30)then
-        cmass2=yve(jpoint)/yvl(jpoint)
-        ! The host pair loop stores the cross-section of the higher-index
-        ! bead for both directions.  Use the same symmetric lookup here.
-        ihigh=max(ipoint,jpoint)
-        coef=(jetch(jpoint)*qt)/((norm+coulcrossec(ihigh))**2.d0)
-        ycf(ipoint,1)=ycf(ipoint,1)+coef/(jetms(ipoint)*cmass1)*dx/norm
-        ycf(ipoint,2)=ycf(ipoint,2)+coef/(jetms(ipoint)*cmass1)*dy/norm
-        ycf(ipoint,3)=ycf(ipoint,3)+coef/(jetms(ipoint)*cmass1)*dz/norm
-      endif
-    enddo
-    if(lmirror)then
+    sumx=0.d0
+    sumy=0.d0
+    sumz=0.d0
+    if(.not.jetfr(ipoint))then
+      cmass1=yve(ipoint)/yvl(ipoint)
+      qt=jetch(ipoint)*q
+      rmass=jetms(ipoint)*cmass1
+#ifdef _OPENACC
+!$acc loop vector reduction(+:sumx,sumy,sumz) private(ihigh,dx,dy,dz,norm,coef)
+#endif
       do jpoint=inpjet,npjet
-        if(jetfr(jpoint))cycle
-        dx=yxx(ipoint)-(dabs(yxx(jpoint)-h)+h)
-        dy=yyy(ipoint)-yyy(jpoint)
-        dz=yzz(ipoint)-yzz(jpoint)
-        norm=dsqrt(dx*dx+dy*dy+dz*dz)
-        if(ldcutoff .and. norm>dcutoff)cycle
-        if(norm>1.d-30)then
-          cmass2=yve(jpoint)/yvl(jpoint)
-          coef=(jetch(jpoint)*qt)/((norm+coulcrossec(jpoint))**2.d0)
-          ycf(ipoint,1)=ycf(ipoint,1)-coef/(jetms(ipoint)*cmass1)*dx/norm
-          ycf(ipoint,2)=ycf(ipoint,2)-coef/(jetms(ipoint)*cmass1)*dy/norm
-          ycf(ipoint,3)=ycf(ipoint,3)-coef/(jetms(ipoint)*cmass1)*dz/norm
+        if(jpoint/=ipoint .and. .not.jetfr(jpoint))then
+          dx=yxx(ipoint)-yxx(jpoint)
+          dy=yyy(ipoint)-yyy(jpoint)
+          dz=yzz(ipoint)-yzz(jpoint)
+          norm=dsqrt(dx*dx+dy*dy+dz*dz)
+          ! Match the host Maxwell 3D evaporation path: the ordinary
+          ! bead-bead interaction does not apply the cutoff. The mirror
+          ! interaction below retains the host cutoff behavior.
+          if(norm>1.d-30)then
+            ! The host pair loop stores the cross-section of the
+            ! higher-index bead for both directions.  Use the same
+            ! symmetric lookup here.
+            ihigh=max(ipoint,jpoint)
+            coef=(jetch(jpoint)*qt)/((norm+coulcrossec(ihigh))**2.d0)
+            sumx=sumx+coef/rmass*dx/norm
+            sumy=sumy+coef/rmass*dy/norm
+            sumz=sumz+coef/rmass*dz/norm
+          endif
         endif
       enddo
+      if(lmirror)then
+#ifdef _OPENACC
+!$acc loop vector reduction(+:sumx,sumy,sumz) private(dx,dy,dz,norm,coef)
+#endif
+        do jpoint=inpjet,npjet
+          if(.not.jetfr(jpoint))then
+            dx=yxx(ipoint)-(dabs(yxx(jpoint)-h)+h)
+            dy=yyy(ipoint)-yyy(jpoint)
+            dz=yzz(ipoint)-yzz(jpoint)
+            norm=dsqrt(dx*dx+dy*dy+dz*dz)
+            if(norm>1.d-30 .and. .not.(ldcutoff .and. norm>dcutoff))then
+              coef=(jetch(jpoint)*qt)/((norm+coulcrossec(jpoint))**2.d0)
+              sumx=sumx-coef/rmass*dx/norm
+              sumy=sumy-coef/rmass*dy/norm
+              sumz=sumz-coef/rmass*dz/norm
+            endif
+          endif
+        enddo
+      endif
     endif
+    ycf(ipoint,1)=sumx
+    ycf(ipoint,2)=sumy
+    ycf(ipoint,3)=sumz
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop

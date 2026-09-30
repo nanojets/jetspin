@@ -56,9 +56,9 @@ only the collected point fields and clears that one device slot.
 
 The Akima A/B build evaluates the historical host routine and the new device
 routine at every event. Across 33 field/event comparisons, the largest
-coefficient relative error is `2.41e-15`, the largest interpolated absolute
-error is `4.32e-12`, and the largest interpolated relative error is
-`3.31e-15`. Mass and charge density are identical at printed precision. An
+coefficient relative error is `4.23e-15`, the largest interpolated absolute
+error is `3.64e-12`, and the largest interpolated relative error is
+`2.53e-15`. Mass and charge density are identical at printed precision. An
 independent normal-device run and host-Akima-oracle run produce byte-identical
 `statout.dat` files and the same event/removal topology.
 

@@ -29,3 +29,31 @@ In \texttt{input} file, the user should specified both $D_{rand}$
 and $\sigma_{rand}{}^{2}$. The $\gamma_{rand}$ is automatically
 set to be equal to $\gamma_{rand}=D_{rand}/\sigma_{rand}{}^{2}$ by
 exploiting the Langevin relation.
+
+\subsection{Pre-generated Gaussian pool\label{sec:Noise-pool}}
+
+When the stochastic Platen integrator (\texttt{integrator 4}) runs a
+three-dimensional serial jet that the OpenACC build can keep on the device
+(the fixed 1,000-bead benchmarks and the dynamic evaporative path with
+insertion, removal and dynamic refinement), its Gaussian numbers are not drawn
+during the run. Rank zero generates a pool of values once, before the time
+loop, and the OpenACC build copies it to the device once; CPU and GPU read
+the same values. Every time step reads the next $6\,n_{\mathrm{active}}$
+values, two draws for each of the three components of every active bead.
+
+The pool is read cyclically, so the noise sequence repeats with a period of
+\begin{equation}
+N_{\mathrm{period}}=\frac{N_{\mathrm{pool}}}{6\,n_{\mathrm{active}}}
+\end{equation}
+time steps. With the default $N_{\mathrm{pool}}=10^{8}$ and 270 active beads
+the period is about 62,000 steps, so a $10^{8}$-step run reuses the pool about
+1,600 times; the noise is not independent beyond one period. The directive
+\texttt{noise pool} sets $N_{\mathrm{pool}}$ between $10^{6}$ and
+$2\times10^{9}$. A larger pool lengthens the period proportionally at a cost
+of 8 bytes per value on the host and again on the GPU ($4\times10^{8}$ values
+need about 3~GiB on each side). Whether the period is adequate is a choice
+left to the user. The run log reports the pool once, as
+\texttt{Gaussian history pool: values=}$N_{\mathrm{pool}}$ \texttt{covers}
+$N$ \texttt{steps at} $n$ \texttt{beads}; for a dynamic topology $n$ is the
+initial capacity rather than the active count. The pool position is not saved in the restart file, so a
+restarted run starts again from the beginning of a newly generated pool.

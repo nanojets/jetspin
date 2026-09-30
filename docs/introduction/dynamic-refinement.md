@@ -369,17 +369,17 @@ validation instead uses the developer-only `JETSPIN_REFINEMENT_INITIAL_RESERVE`
 environment override to reduce that reserve to 50 entries, independently of
 the input value. When the accepted mesh exceeds the old capacity, JETSPIN detaches
 the topology and evaporation mappings before the host allocations are
-replaced. It then resizes the Platen workspaces, semantically repacks the
-pre-generated Gaussian history for the new stride, generates values only for
-new bead indices, and binds the completed host mesh and resized history once.
+replaced. It then resizes the Platen workspaces and binds the completed host
+mesh once; the pre-generated Gaussian pool does not depend on capacity and
+stays mapped unchanged.
 The same device Akima kernels operate before and after capacity growth.
 
 Test Case 22 validates repeated use of this lifecycle. Its physical input is
 derived from Test 21, while developer-only environment overrides reduce the
 initial reserve and refinement growth increment to 20 entries. Three accepted
 events must therefore perform three independent mapping releases, device Akima
-remeshes, Gaussian-history repacks, workspace reallocations, and device
-rebinds. Normal runs still reserve and grow by `incnpjet`, which defaults to
+remeshes, workspace reallocations, and device rebinds, while the Gaussian pool
+is allocated once and never rebuilt. Normal runs still reserve and grow by `incnpjet`, which defaults to
 100 and is otherwise set by the `dynamic refinement capacity <i>` input
 directive.
 
@@ -395,16 +395,16 @@ retains the historical host coefficient/interpolation path as an oracle.
 `JETSPIN_COMPARE_AKIMA` executes the host reference and the GPU path at each
 accepted event and reports coefficient and interpolated-value errors for all
 11 fields. Test 23 performs 33 such comparisons; its largest relative errors
-are `4.23e-15` for coefficients and `2.53e-15` for values. The largest
-absolute value difference is `3.64e-12`.
+are `1.03e-14` for coefficients and `1.89e-15` for values. The largest
+absolute value difference is `1.82e-12`.
 
 A third development build, `JETSPIN_COMPARE_REFINEMENT_ASSEMBLY`, applies the
 same host-then-device oracle pattern to the volume/conservation/density
 kernel: back up the pre-reconstruction state, evaluate the trusted host
 reference, restore that state, run the device kernel so it stays
 authoritative, then compare. All three Test 23 events agree with the host
-reference at or near roundoff (worst absolute `7.1e-15`, worst relative
-`4.05e-16`). Building this oracle caught two real ordering mistakes before
+reference at or near roundoff (worst absolute `8.9e-16`, worst relative
+`1.4e-16`). Building this oracle caught two real ordering mistakes before
 they could reach the standard path: an early version invoked the device
 kernel a second time after the comparison helper already ran it, silently
 reapplying the density-to-mass conversion; a later version evaluated the host

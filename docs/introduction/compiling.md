@@ -141,15 +141,12 @@ make -C source -f ../build/Makefile nvfortran-openacc-dynamic-platen GPUCC=80
 
 `nvfortran-openacc-dynamic-platen` enables `JETSPIN_GPU_DYNAMIC_PLATEN`. It is
 a fork rather than a change of default: every edit it introduces is inside the
-macro, so the shipped `nvfortran-openacc` target is byte-for-byte the previous
-behaviour. It applies to the non-evaporative Platen integrator only, adds a
+macro. It applies to the non-evaporative Platen integrator only and adds a
 size-independent eligibility decision so that a jet growing from a single bead
-can still build its Gaussian history, and replaces the stride-indexed history
-with the sequential pool described in
-[random numbers](random-numbers.md). Unlike the akima and oracle targets it is
-a genuine execution path, not a validation harness, but it is not yet the
-default because macro-on trajectories are not bit-identical to macro-off ones
-and restart is not cursor-aware.
+can build its Gaussian pool and use the persistent device path. The sequential
+pool itself ([random numbers](random-numbers.md)) is the default layout in
+every build since 2026-09-30. Unlike the akima and oracle targets it is a
+genuine execution path, not a validation harness.
 
 Two developer environment variables help when exercising it:
 `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` forces the non-persistent branch, and

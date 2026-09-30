@@ -47,12 +47,18 @@ Yarin et al.\ to the envelope cone of a much more viscous 6\% PEO solution
 
 The reference run uses the NVFORTRAN 24.3 CPU build and is truncated at
 5,000,000 steps, 5\% of the target duration; it closes correctly.  The jet
-first reaches the collector at step 2,116,788.  Between 4 and 5 million steps
+first reaches the collector at step 2,120,839.  Between 4 and 5 million steps
 the collector velocity is 2535 cm/s, the off-axis distance of the leading
 bead 2.8 cm, the cone angle 19.7 degrees, the active-bead count between 242
-and 294, the path length 112 cm, and the fibre radius at the collector
+and 295, the path length 112 cm, and the fibre radius at the collector
 2.8~$\mu$m against a nozzle radius of 50~$\mu$m.  The envelope cone opens from
-the nozzle with a local half-angle growing from about 8 to 12 degrees.
+the nozzle with a local half-angle growing from about 8 to 12 degrees.  Four
+more CPU seeds give mean active counts between 267.8 and 268.4 and the same
+path length, so the stationary regime does not depend on the noise
+realization.  One NVIDIA A30 runs the same 5 million steps in about 2060 s
+against 5893 s for the CPU build; it reads the same Gaussian pool, stays on the CPU
+trajectory until about 3 million steps, and gives the same stationary
+values.
 Compared with an NVFORTRAN CPU run of Test Case 24 over the same interval
 (3.8 cm, 27 degrees),
 evaporation and the stiffening it causes make the bending loops smaller, as

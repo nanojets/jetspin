@@ -24,8 +24,8 @@ tests/refinement/run.sh force-oracle
 
 Append `capacity-growth` to any backend to reduce only the developer reserve
 from 100 to 50 entries. The accepted Akima mesh must then exceed the original
-capacity, which validates topology/evaporation release and rebind, Platen
-scratch reallocation, and Gaussian-history stride resizing:
+capacity, which validates topology/evaporation release and rebind and Platen
+scratch reallocation, with the Gaussian pool allocated once and never rebuilt:
 
 ```sh
 tests/refinement/run.sh nvfortran capacity-growth
@@ -47,7 +47,7 @@ The test takes roughly half a minute on the development host. Set
 three accepted remeshing events and three capacity increases, and checks every
 event for anchor preservation, ordered coordinates, separate reference and
 evaporated-volume conservation, mass/charge conservation, finite output, and
-a consistent repacked Gaussian history.
+a single Gaussian pool allocation that capacity growth does not rebuild.
 
 This is intentionally a same-compiler NVFORTRAN CPU/GPU test. The chaotic,
 stochastic trajectory is not expected to accept the same number of events at

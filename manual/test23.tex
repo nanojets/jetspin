@@ -12,22 +12,24 @@ The dedicated runner sets developer-only initial and growth reserves of 20
 entries. Three accepted Akima events therefore cause three capacity changes.
 Collector removal changes the lower active bound before the third remesh and
 continues afterwards. This combines all relevant topology transitions:
-insertion, removal, remeshing, capacity replacement, Platen workspace resize,
-and semantic repacking of the pre-generated Gaussian history.
+insertion, removal, remeshing, capacity replacement, and Platen workspace
+resize, with the pre-generated Gaussian pool left untouched.
 
-With NVFORTRAN 24.3, the CPU refinement events occur at steps 14,301, 14,944,
-and 15,763; NVFORTRAN 25.5 gives the same steps. The first collector removal
-occurs at step 15,648, and the CPU makes ten removals and ends with 526 active
-elements. The complete force oracle reproduces the CPU event steps and removal
-schedule exactly. The native NVIDIA A30 places the last remesh at step 15,737
-and also makes ten removals, ending with 527 active elements. All paths
-preserve 81 active anchors and grow capacity from 420 to 477, then 520; the
-final capacity is 556 on the CPU and the force oracle and 557 on the A30.
+With NVFORTRAN 24.3, the CPU refinement events occur at steps 14,268, 14,971,
+and 15,691; NVFORTRAN 25.5 gives the same steps and removals. The first collector removal
+occurs at step 15,656, and the CPU makes nine removals and ends with 526 active
+elements. The native NVIDIA A30 path and the complete force oracle reproduce
+the CPU event steps and removal schedule exactly; all 81 statistics rows agree
+with the CPU within $8.0\times10^{-10}$ and $6.1\times10^{-8}$ relatively,
+including the rows written after the leading bead has reached the collector.
+All paths preserve 81 active anchors, and capacity grows from 420 to 481, 517,
+and 556.
 
-The exact later removal sequence is not a CPU/GPU identity requirement.
-Target-centric direct Coulomb accumulation changes the floating-point order
-of summation, and the stochastic bending trajectory amplifies this difference
-near the collector. Validation instead requires collector removal both before
+The CPU event and removal sequence is not a CPU/GPU identity requirement.
+The device kernels evaluate in a different floating-point order, and the
+stochastic bending trajectory can amplify that difference near the
+collector.  A build that evaluates only the direct Coulomb sum on the host
+writes a statistics file byte-identical to the native one. Validation instead requires collector removal both before
 and after the final remesh, finite output, ordered coordinates, unchanged
 anchor fields, and conservation of reference volume, evaporated volume, mass,
 and charge at every Akima event.
@@ -40,15 +42,15 @@ interpolations execute on the GPU.
 
 An NVIDIA A30 transfer audit records four complete state downloads, namely
 the three accepted Akima events and final shutdown, together with exactly
-three Gaussian-history uploads, topology rebinds, and evaporation-state
-rebinds. The ordinary collector check returns one four-byte control value;
+three topology rebinds and three evaporation-state rebinds; the Gaussian pool
+is uploaded once at startup. The ordinary collector check returns one four-byte control value;
 an accepted removal transfers and clears only the collected point.
 
 A dedicated A/B build evaluates the historical host Akima routines and the
 device implementation at all three events. Across 33 field/event comparisons,
-the maximum coefficient relative difference is $4.23\times10^{-15}$, while
-interpolated values differ by at most $3.64\times10^{-12}$ absolutely and
-$2.53\times10^{-15}$ relatively. Independent device and host-Akima-oracle
+the maximum coefficient relative difference is $1.03\times10^{-14}$, while
+interpolated values differ by at most $1.82\times10^{-12}$ absolutely and
+$1.89\times10^{-15}$ relatively. Independent device and host-Akima-oracle
 runs produce byte-identical statistics files and the same event and removal
 topology.
 

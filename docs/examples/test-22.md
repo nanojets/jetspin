@@ -21,32 +21,32 @@ For each event the checker requires:
 - an unchanged active-anchor count and unchanged anchor fields;
 - separate conservation of reference and evaporated volume;
 - conservation of mass and charge;
-- a consistent Gaussian-history stride and positive retained cycle; and
+- a single Gaussian pool allocation that capacity growth does not rebuild; and
 - finite output with a final `nref` of three.
 
 The validated NVFORTRAN 24.3 results are:
 
 | Path | Event steps | Active elements | Capacity sequence | Final elements |
 | --- | --- | --- | --- | ---: |
-| CPU | 14,301; 14,944; 15,765 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
-| Native A30 | 14,301; 14,944; 15,738 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
-| A30 complete-force oracle | 14,301; 14,944; 15,765 | 413→455; 455→498; 499→536 | 420→477→520→558 | 536 |
+| CPU | 14,268; 14,971; 15,698 | 413→459; 459→495; 496→535 | 420→481→517→557 | 535 |
+| Native A30 | 14,268; 14,971; 15,698 | 413→459; 459→495; 496→535 | 420→481→517→557 | 535 |
+| A30 complete-force oracle | 14,268; 14,971; 15,698 | 413→459; 459→495; 496→535 | 420→481→517→557 | 535 |
 
 NVFORTRAN 25.5 reproduces the CPU row exactly. All anchor-field differences
 are zero at printed precision. Reference volume,
 evaporated volume, mass, and charge are conserved at approximately `1e-16`.
-In the native CPU/GPU comparison the first 79 of the 80 statistics rows agree
-within `4e-4` relatively. The final row, sampled after both third events,
-differs by up to 3.3 percent in `vz`. The force oracle reproduces the CPU
-topology and passes with `rtol=6e-7`. The 27-step shift in the third native
-event is therefore attributed to amplification of the different direct
-Coulomb summation order rather than to the reallocation lifecycle.
+The native A30 run and the force oracle reproduce the CPU events and
+topology; all 80 statistics rows agree with the CPU within `8.0e-10` and
+`3.2e-8` relatively. Before the persistent-path fixes of 2026-09-30 (see
+[OpenACC](../introduction/openacc.md)) the native rows separated after step
+4,000, when the fourth nozzle insertion fell one step earlier, and the three
+native events moved to steps 14,256, 14,976, and 15,785.
 
 The normal OpenACC path computes Akima coefficients and spline interpolation
 on the GPU. An A30 transfer audit found four complete state downloads: the
 three accepted refinement events and final shutdown. The event path performs
-exactly three
-Gaussian-history uploads, topology rebinds, and evaporation-state rebinds.
+exactly three topology rebinds and three evaporation-state rebinds; the
+Gaussian pool is uploaded once at startup and never transferred again.
 Unsuccessful threshold scans return only three reduction scalars, so ordinary
 timesteps do not download the complete jet state.
 

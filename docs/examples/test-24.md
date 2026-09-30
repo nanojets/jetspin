@@ -66,11 +66,22 @@ choice above; they are recorded in
 The longest clean run is 6,000,000 steps on an NVIDIA A30,
 `Program closed correctly`, zero NaN and zero device errors, ending with
 x = 16.00 cm, collector velocity 1986.5 cm/s, `yz` = 4.09 cm, 28.7 degrees,
-path length 111.4 cm, 571 active beads, 291 topology additions and 1,616
-removals. The bead count oscillates around 570 over the last two million steps
-rather than drifting, so this run does demonstrate the balanced
-insertion/removal regime the case was designed to reach — at 6% of the
-target duration, not over the full run.
+571 active beads, 291 topology additions and 1,616 removals. The bead count
+oscillates around 570 over the last two million steps rather than drifting, so
+this run does demonstrate the balanced insertion/removal regime the case was
+designed to reach — at 6% of the target duration, not over the full run.
+
+That run used the `nvfortran-openacc-dynamic-platen` development build. It
+printed a path length of 111.4 cm, but the persistent Platen path then counted
+every timestep twice in the path-length average, halving `lp` (fixed on
+2026-09-30). The same build still lacks the device-side charge smoothing of
+the bead being inserted at the nozzle, a defect found and fixed for the
+evaporative path on 2026-09-30 (see [OpenACC](../introduction/openacc.md));
+in Test 25 it made the A30 jet about 10 percent longer and denser than the
+CPU one. The A30 run is therefore not a reference. An NVFORTRAN CPU run of
+5,000,000 steps gives, between steps 4 and 5 million, a path length of
+212 cm, collector velocity 1962 cm/s, `yz` = 3.8 cm, 26.8 degrees, and about
+512 active beads.
 
 A full-length reference does not yet exist. The developed bending instability
 carries several hundred active beads, so the direct Coulomb cost per step is

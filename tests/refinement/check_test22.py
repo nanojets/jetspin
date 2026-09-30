@@ -9,6 +9,7 @@ from check_test21 import (
     AMOUNT_RE,
     ANCHOR_FIELD_RE,
     CAPACITY_RE,
+    check_single_pool,
     EVENT_RE,
     INITIAL_RE,
     INVARIANT_RE,
@@ -92,13 +93,12 @@ def main() -> None:
     capacities = [tuple(map(int, match)) for match in CAPACITY_RE.findall(log)]
     require(len(capacities) == EXPECTED_EVENTS,
             f"expected {EXPECTED_EVENTS} capacity increases, got {len(capacities)}")
-    for index, (old, new, retained_steps, values) in enumerate(capacities, 1):
+    for index, (old, new) in enumerate(capacities, 1):
         require(new > old, f"growth {index} did not increase capacity")
         if index > 1:
             require(old == capacities[index - 2][1],
                     f"growth {index} does not continue the previous capacity")
-        require(retained_steps > 0 and values == (new + 1) * 6 * retained_steps,
-                f"growth {index} has an inconsistent Gaussian history")
+    check_single_pool(log)
 
     rows = numerical_rows(args.statout)
     require(rows, "statout.dat contains no numerical rows")
@@ -112,7 +112,7 @@ def main() -> None:
         for step, before, after, _, _ in events
     )
     capacity_summary = ", ".join(
-        f"{old}->{new}" for old, new, _, _ in capacities
+        f"{old}->{new}" for old, new in capacities
     )
     print(
         "Test 22 passed: "

@@ -6,16 +6,15 @@ of Test Case 4. Insertion, removal, evaporation, dynamic refinement, and
 multiple-step Coulomb summation are disabled. The input is stored in
 \texttt{examples/input-12/input.dat}.
 
-Before timing begins, rank zero generates the complete Gaussian history in a
-fixed step, bead, component, and draw order. For 1,000 steps the history
-contains 6,006,000 double precision values, or 48,048,000 bytes. CPU
-integration reads this layout directly and the OpenACC build copies it to the
-accelerator once during initialization. Random values are neither generated
-nor transferred during the temporal loop.
-The stored history is limited to 100,000,000 double precision values (about
-763 MiB). If a longer fixed run exceeds this capacity, indexing wraps to the
-first stored timestep. This preserves CPU/GPU reproducibility but repeats the
-noise periodically. Test Case 12 remains below the limit and does not wrap.
+Before timing begins, rank zero generates the Gaussian pool of
+Sec.~\ref{sec:Noise-pool}, filling each step's slice in the draw order of the
+per-step block (bead, component, draw). For 1,000 steps the pool contains
+6,006,000 double precision values, or 48,048,000 bytes. CPU integration reads
+it directly and the OpenACC build copies it to the accelerator once during
+initialization. Random values are neither generated nor transferred during
+the temporal loop. A run that consumes the whole pool wraps to its beginning,
+which preserves CPU/GPU reproducibility but repeats the noise periodically;
+Test Case 12 remains below the limit and does not wrap.
 
 The persistent accelerator path performs the three Platen force evaluations,
 the positive and negative predictors, stochastic velocity update, Heun

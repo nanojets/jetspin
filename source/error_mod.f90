@@ -535,6 +535,10 @@
        "WARNING - Refining this frequently/finely can compound numerical drift"
       write(outp,'(a,/)') &
        "WARNING - across repeated events; consider a coarser threshold if unstable."
+    case (109)
+      write(outp,'(/,a,g20.10,a,/)') &
+       "WARNING - 'noise pool' must be between 1e6 and 2e9 values, got ", &
+       ddata,"."
     case default
       write(outp,'(/,a,i8,/)')"unknown WARNING! code = ",kode
   end select

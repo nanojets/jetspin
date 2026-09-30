@@ -19,8 +19,11 @@ cp examples/input-20/input.dat execute/input.dat
 For the MPI baseline, use two ranks and compare the resulting `statout.dat`
 against the serial output with the numerical comparison tool.
 
-The OpenACC path pre-generates 600,600 Gaussian doubles on the CPU and copies
-them to the device once before loop timing. Its three Platen drift evaluations,
+The OpenACC path pre-generates a pool of 600,600 Gaussian doubles on the CPU,
+each step's slice in the draw order of the per-step block, and copies it to the
+device once before loop timing; CPU and GPU outputs are bit-identical to the
+records made before this pool became the default layout
+([random numbers](../introduction/random-numbers.md)). Its three Platen drift evaluations,
 positive/negative predictors, stochastic velocity update, Heun position,
 volume and stress updates, and statistics then execute inside persistent data
 regions. No noise or stage array is transferred during an ordinary timestep.

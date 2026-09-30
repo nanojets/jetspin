@@ -19,27 +19,37 @@ checks every remesh for:
 - unchanged active-anchor fields;
 - separate conservation of reference and evaporated volume;
 - conservation of mass and charge;
-- a consistent repacked Gaussian-history stride; and
+- a single Gaussian pool allocation that capacity growth does not rebuild; and
 - finite output with a final `nref` of three.
 
 With NVFORTRAN 24.3, the validated results are:
 
 | Path | Refinement steps | First removal | Removals | Final elements |
 | --- | --- | ---: | ---: | ---: |
-| CPU | 14,301; 14,944; 15,763 | 15,648 | 10 | 526 |
-| Native A30 | 14,301; 14,944; 15,737 | 15,648 | 10 | 527 |
-| A30 complete-force oracle | 14,301; 14,944; 15,763 | 15,648 | 10 | 526 |
+| CPU | 14,268; 14,971; 15,691 | 15,656 | 9 | 526 |
+| Native A30 | 14,268; 14,971; 15,691 | 15,656 | 9 | 526 |
+| A30 complete-force oracle | 14,268; 14,971; 15,691 | 15,656 | 9 | 526 |
 
 NVFORTRAN 25.5 reproduces the CPU row and its removal schedule exactly.
 All three paths preserve 81 active anchors at each accepted event and grow
-capacity from 420 to 477, then 520. The final capacity is 556 on the CPU and
-the force oracle and 557 on the native A30. The force oracle reproduces the
-CPU removal schedule step for step. The native trajectory is not expected to
-reproduce the exact later removal schedule: direct Coulomb
-accumulation uses a different floating-point summation order on the GPU, and
-the stochastic bending trajectory amplifies that difference near the
-collector. The event-level topology and conservation contracts therefore
-validate this test rather than binary trajectory identity.
+capacity from 420 to 481, 517, and 556. The native path and the force oracle
+reproduce the CPU events and removal schedule step for step; all 81
+statistics rows agree with the CPU within `8.0e-10` (native) and `6.1e-8`
+(oracle) relatively, including the three rows written after the leading bead
+has reached the collector. The Coulomb-only oracle, which evaluates only the
+direct sum on the host, writes a statistics file byte-identical to the native
+run's.
+
+Two of the persistent-path defects fixed on 2026-09-30 (see
+[OpenACC](../introduction/openacc.md)) showed here. The device kept the full
+charge on the bead being inserted at the nozzle, so the native events moved
+(14,256; 14,976; 15,780, with ten removals); and the Platen kernels let a bead
+frozen at the collector keep moving, so the oracles, which keep those kernels
+on the device, differed from the CPU by up to 1.4 percent once the leading
+bead had reached the collector. The device kernels still evaluate in a
+different floating-point order; the event-level topology and conservation
+contracts therefore remain the acceptance criteria rather than binary
+trajectory identity.
 
 The GPU removal primitive updates the active lower bound and clears only the
 removed bead. It does not download the full jet. Full-state communication is
@@ -50,15 +60,16 @@ and anchor rules before the persistent state is rebound.
 
 An A30 transfer audit records four complete state downloads: the three
 accepted Akima events and final shutdown. It also records exactly three
-Gaussian-history uploads, topology rebinds, and evaporation-state rebinds.
+topology rebinds and three evaporation-state rebinds; the Gaussian pool is
+uploaded once at startup.
 Each timestep returns one four-byte removal flag; an accepted removal returns
 only the collected point fields and clears that one device slot.
 
 The Akima A/B build evaluates the historical host routine and the new device
 routine at every event. Across 33 field/event comparisons, the largest
-coefficient relative error is `4.23e-15`, the largest interpolated absolute
-error is `3.64e-12`, and the largest interpolated relative error is
-`2.53e-15`. Mass and charge density are identical at printed precision. An
+coefficient relative error is `1.03e-14`, the largest interpolated absolute
+error is `1.82e-12`, and the largest interpolated relative error is
+`1.89e-15`. Mass and charge density are identical at printed precision. An
 independent normal-device run and host-Akima-oracle run produce byte-identical
 `statout.dat` files and the same event/removal topology.
 

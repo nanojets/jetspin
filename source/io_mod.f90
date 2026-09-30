@@ -14,7 +14,9 @@
  use version_mod
  use parse_module
  use error_mod
- use utility_mod,           only : write_fmtnumb,pi,get_prntime
+ use utility_mod,           only : write_fmtnumb,pi,get_prntime, &
+                             maxgaussianhistory,mingaussianhistory, &
+                             maxgaussianhistorylimit
  use nanojet_mod,           only : airdragamp,doreorder,tao,aird,airv,&
                              chargescale,consistency,findex,g,h,&
                              icharge,icrossec,ilength,&
@@ -99,6 +101,7 @@
  logical, public, save :: lprintdat=.false.
  logical, public, save :: lprintstatdat=.false.
  logical, save :: lnmulstep=.false.
+ logical, save :: lnoisepool=.false.
  double precision, save :: printtime
  logical, public, save :: lprinttime=.false.
  logical, public, save :: lsprintdat=.false.
@@ -346,6 +349,10 @@
   write(iu,'(a,g20.10,a,g20.10,a)')"noise friction             = ", &
    noisefric," = ",noisefric/(tao),&
     " s^-1"
+  endif
+  if(lnoisepool)then
+  write(iu,'(a,i20,a)')"noise pool                 = ", &
+   maxgaussianhistory," pre-generated Gaussian values"
   endif
   if(lconsistency)then
   write (r_char,'(f10.2)')findex-2.d0
@@ -662,6 +669,7 @@
   logical :: safe,lredo,ltest,lprintlisterror,lprintlisterror2
   logical :: ltestread,lexists,lfoundprint
   integer :: inumchar,i,nwords,iline,itest
+  double precision :: dnoisepool
   character(len=maxlen) ,allocatable :: outwords(:),outwords2(:)
   
 ! initialize parameters  
@@ -1011,6 +1019,17 @@
         elseif(findstring('diffusivity',directive,inumchar,maxlen))then
           lnoisediff=.true.
           noisediff=dblstr(directive,maxlen,inumchar)
+        elseif(findstring('pool',directive,inumchar,maxlen))then
+! Must precede 'no', which is a prefix of the directive word 'noise'.
+          dnoisepool=dblstr(directive,maxlen,inumchar)
+          if(dnoisepool<dble(mingaussianhistory) .or. &
+           dnoisepool>dble(maxgaussianhistorylimit))then
+            call warning(109,dnoisepool)
+            ltestread=.true.
+          else
+            maxgaussianhistory=nint(dnoisepool)
+            lnoisepool=.true.
+          endif
         elseif(findstring('no',directive,inumchar,maxlen))then
           lnoise=.false.
         else
@@ -1442,6 +1461,7 @@
   call bcast_world_l(lnoisediff)
   call bcast_world_d(noisevar)
   call bcast_world_d(noisediff)
+  call bcast_world_i(maxgaussianhistory)
   call bcast_world_d(mu)
   call bcast_world_l(lmu)
   call bcast_world_d(G)

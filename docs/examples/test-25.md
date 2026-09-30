@@ -100,19 +100,39 @@ directly transferable to this configuration.
 ## Reference results
 
 NVFORTRAN 24.3 CPU build, truncated at 5,000,000 steps (5 % of the target),
-`Program closed correctly`, no NaN:
+`Program closed correctly`, no NaN (`final time 2.5d-2` and `print time 1.d-4`
+in a copy of the input):
 
-- the jet first reaches the collector at step 2,116,788;
+- the jet first reaches the collector at step 2,120,839;
 - between steps 4 and 5 million: collector velocity 2535 cm/s, off-axis
-  distance of the leading bead 2.8 cm (2.5 – 3.0), cone angle `angl` 19.7°
-  (17.5 – 21.5°), 242 – 294 active beads, path length 112 cm;
+  distance of the leading bead 2.8 cm (2.5 – 3.2), cone angle `angl` 19.7°
+  (17.4 – 22.4°), 242 – 295 active beads, path length 112 cm;
 - fibre radius at the collector (`rc`, computed from the evaporated volume)
-  2.8 µm (2.5 – 2.9 µm), against a nozzle radius of 50 µm;
+  2.8 µm (2.3 – 3.0 µm), against a nozzle radius of 50 µm;
 - the envelope cone reconstructed from `traj.xyz` over the same interval
   opens from the nozzle with a local half-angle growing from about 8° to 12°
   and reaches a radius of 2.9 cm (95th percentile) at the collector;
-- 20 accepted refinement events, 221 topology additions, 921 removals, no
+- 20 accepted refinement events, 221 topology additions, 922 removals, no
   array reallocations.
+
+The noise realization hardly matters: four more CPU seeds (318 – 321) give
+mean active counts between 267.8 and 268.4, a path length of 111.8 cm, and an
+off-axis distance of 2.78 cm over the same window.
+
+One NVIDIA A30 runs the same 5 million steps in about 2060 s on an otherwise
+idle node, against 5893 s for the CPU build. It engages the persistent path at
+step 1,446,263, reads the same Gaussian pool, and stays on the CPU trajectory:
+with seed 317 the first removal falls at the same step, and the active bead
+count first differs at step 3.26 million.
+Between steps 4 and 5 million it gives the same values as the CPU: collector
+velocity 2535 cm/s, off-axis distance 2.8 cm, cone angle 19.75° (CPU 19.74°), 242 – 295
+active beads, path length 112 cm, fibre radius 2.8 µm, and a 2.9 cm envelope
+radius at the collector, with 221 additions and 925 removals. Seeds 318 and
+319 likewise follow their CPU runs to 3.2 and 2.7 million steps and give
+267.9 and 268.2 active beads and a 111.8 cm path length. Before the
+persistent-path defects found on 2026-09-30 were fixed (see
+[OpenACC](../introduction/openacc.md)), the A30 gave 297 active beads and a
+123 cm path length on every seed.
 
 An NVFORTRAN CPU run of Test 24 over the same interval has a 3.8 cm off-axis
 distance and a 27° cone:

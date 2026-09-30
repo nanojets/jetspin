@@ -13,7 +13,7 @@ collector. Beads are removed both before and after the third remesh.
 
 The dedicated runner supplies developer-only 20-entry initial and growth
 reserves. Every accepted event therefore exceeds the current capacity and
-exercises release, host reallocation, Gaussian-history repacking, and device
+exercises release, host reallocation, and device
 rebind while collector removal changes the lower active bound. Production
 runs continue to reserve and grow by 100 entries.
 

@@ -36,9 +36,25 @@ AMOUNT_RE = re.compile(
     r"charge_relative_difference=\s*([+\-0-9.Ee]+)"
 )
 CAPACITY_RE = re.compile(
-    r"Gaussian history capacity: old=(\d+) new=(\d+) "
-    r"retained_steps=(\d+) values=(\d+)"
+    r"Dynamic refinement capacity: old=(\d+) new=(\d+)"
 )
+# The pre-generated Gaussian pool is allocated once, before the loop, and is
+# never rebuilt on capacity growth.
+POOL_RE = re.compile(
+    r"Gaussian history pool: values=(\d+) covers (\d+) steps at (\d+) beads"
+)
+
+
+def check_single_pool(log: str) -> int:
+    pools = POOL_RE.findall(log)
+    require(len(pools) == 1,
+            f"expected one Gaussian pool allocation, got {len(pools)}")
+    values, steps, beads = map(int, pools[0])
+    require(values > 0 and steps > 0 and beads > 0,
+            "the Gaussian pool is empty")
+    require("Gaussian history capacity:" not in log,
+            "the Gaussian history was rebuilt on capacity growth")
+    return values
 
 
 def require(condition: bool, message: str) -> None:
@@ -133,15 +149,12 @@ def main() -> None:
     capacity = CAPACITY_RE.search(log)
     if args.require_capacity_growth:
         require(capacity is not None, "capacity-growth diagnostic is missing")
-        old_capacity, new_capacity, retained_steps, history_values = map(
-            int, capacity.groups()
-        )
+        old_capacity, new_capacity = map(int, capacity.groups())
         require(new_capacity > old_capacity,
                 "capacity-growth run did not increase capacity")
         require(new_capacity >= active_after,
                 "new capacity is smaller than the refined topology")
-        require(retained_steps > 0 and history_values > 0,
-                "resized Gaussian history is empty")
+        check_single_pool(log)
 
     print(
         "Test 21 passed: "

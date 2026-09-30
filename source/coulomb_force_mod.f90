@@ -176,8 +176,13 @@ end subroutine reset_coulomb_accelerator
   double precision :: dtemp
 
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
-  if(accelerator_persistent_mode .and. levaporation .and. systype==3 .and. &
-   mxrank==1 .and. .not.lmultiplestep)then
+! A persistent evaporative run keeps coordinates and charges on the device,
+! where the Coulomb kernel reads them, so the smoothing must happen there.
+! Until 2026-09-30 only systype 3 was dispatched: a Maxwell (systype 4)
+! persistent run smoothed the stale host copy instead, and the device Coulomb
+! sum saw the not-yet-inserted nozzle bead with its full charge.
+  if(accelerator_persistent_mode .and. levaporation .and. &
+   (systype==3 .or. systype==4) .and. mxrank==1 .and. .not.lmultiplestep)then
     call accelerator_smooth_charge_3d(npjet,linserted,thresolution,dresolution, &
      yxx,yyy,yzz,jetch)
     return
@@ -227,8 +232,9 @@ end subroutine reset_coulomb_accelerator
   implicit none
 
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
-  if(accelerator_persistent_mode .and. levaporation .and. systype==3 .and. &
-   mxrank==1 .and. .not.lmultiplestep)then
+! Same dispatch as smooth_charge.
+  if(accelerator_persistent_mode .and. levaporation .and. &
+   (systype==3 .or. systype==4) .and. mxrank==1 .and. .not.lmultiplestep)then
     call accelerator_restore_charge(npjet,linserted,jetch)
     return
   endif
@@ -298,8 +304,10 @@ end subroutine reset_coulomb_accelerator
   if(levaporation)then
     if(.not. present(yve))call error(19)
 #if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
-    if(.not.(accelerator_persistent_mode .and. systype==3 .and. &
-     mxrank==1 .and. .not.lmultiplestep))then
+! accelerator_coulomb_evap_3d rebuilds the cross sections on the device; the
+! host arrays of a persistent run are stale.
+    if(.not.(accelerator_persistent_mode .and. (systype==3 .or. systype==4) &
+     .and. mxrank==1 .and. .not.lmultiplestep))then
 #endif
     call compute_crosssec(yxx,yyy,yzz,yve,coulcrossec)
 #if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)

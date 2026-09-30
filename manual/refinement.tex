@@ -87,7 +87,7 @@ The number of accepted refinements is available as the output key
 \texttt{nref} (see Tab \ref{tab:outputlist}).
 
 For the serial Maxwell/Platen OpenACC path exercised by Test Case 21, the
-time integrator, Gaussian history, insertion logic, and bead state remain in a
+time integrator, Gaussian pool, insertion logic, and bead state remain in a
 persistent device data region. After the configured minimum interval, a
 device reduction returns only the last segment exceeding the threshold, the
 total path length, and the nozzle correction used by the mesh-size test. No
@@ -108,10 +108,9 @@ which the completed mesh is uploaded once and device integration resumes. The
 normal Test 21 mesh reserves one allocation increment. A capacity-growth
 validation reduces that reserve and forces the accepted mesh beyond the old
 bound. In this case the topology and evaporation mappings are released before
-the host arrays are replaced; the Platen and Coulomb workspaces are resized,
-the Gaussian history is repacked for the new bead stride, and the completed
-state is bound once. Existing Gaussian values are retained and values for new
-indices are generated only during this event.
+the host arrays are replaced; the Platen and Coulomb workspaces are resized
+and the completed state is bound once. The pre-generated Gaussian pool does
+not depend on capacity and stays mapped unchanged.
 
 This allocation increment is the \uline{dynam refin capacity} $i$ input
 directive (default 100 beads if omitted; the value must be positive). It sets
@@ -134,32 +133,31 @@ interpolation and capacity replacement are checked with a rebased active
 interval. Complete intermediate state transfers remain confined to accepted
 refinement events.
 
-Its CPU/GPU statistics agree within tolerance for all but the last two rows;
-once the jet reaches the collector the two builds follow slightly different
-removal schedules and end one active element apart (526 on the CPU, 527 on
-the GPU, both after ten removals) because direct-Coulomb summation order is
-amplified by the stochastic bending trajectory near the collector. Isolating
-only the direct Coulomb sum on the host while keeping topology and the
-reconstruction kernel below on the device confirms this: the isolated build's
-third event and all ten removals then match the CPU step-for-step, and all
-statistics rows agree. Matching topology, conservation, and this tolerance -- not
-bit-for-bit trajectory identity -- remain the acceptance criteria for this
-test.
+The native GPU path reproduces the CPU events, the nine removals, and the
+final 526 active elements step for step, and its statistics agree with the
+CPU within $8.0\times10^{-10}$ relatively in all 81 rows, including the rows
+written after the jet has reached the collector.  Before the persistent-path
+fixes of 30 September 2026 the device kept the full charge on the bead being
+inserted at the nozzle and let a bead frozen at the collector keep moving,
+and the native events and removal schedule differed from the CPU ones.
+Matching topology and conservation -- not bit-for-bit trajectory identity --
+remain the acceptance criteria for this test, since the device kernels still
+evaluate in a different floating-point order.
 
 A development host-Akima target retains the historical coefficient and
 interpolation routines as an oracle. A second comparison target executes both
 paths for each field. Across the 11 fields and three Test Case 23 events, the
-largest coefficient relative difference is $4.23\times10^{-15}$; interpolated
-values differ by at most $3.64\times10^{-12}$ absolutely and
-$2.53\times10^{-15}$ relatively.
+largest coefficient relative difference is $1.03\times10^{-14}$; interpolated
+values differ by at most $1.82\times10^{-12}$ absolutely and
+$1.89\times10^{-15}$ relatively.
 
 A third development target applies the same host-then-device oracle pattern
 to the volume-reconstruction/conservation/density kernel: it backs up the
 pre-reconstruction state, evaluates the trusted host reference, restores that
 state, then runs the device kernel so it remains authoritative, and compares.
 All three Test Case 23 events agree with the host reference at or near
-roundoff (worst absolute $7.1\times10^{-15}$, worst relative
-$4.05\times10^{-16}$). Building this oracle exposed two ordering mistakes
+roundoff (worst absolute $8.9\times10^{-16}$, worst relative
+$1.4\times10^{-16}$). Building this oracle exposed two ordering mistakes
 before they reached the standard path -- the device kernel invoked twice, and
 the host reference evaluated from already-converted state -- each of which
 corrupted the event's mass/charge invariant by tens of percent, which is why

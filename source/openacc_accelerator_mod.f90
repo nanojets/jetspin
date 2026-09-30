@@ -196,12 +196,14 @@ contains
   ! The combined Maxwell kernel then replaces its Newtonian stress and adds
   ! the evaporation derivative.  This is intentionally restricted to the
   ! compatible Test-16 physics until the complete eom4_ev force model is
-  ! device-resident.
+  ! device-resident.  Once beads have been removed, eom4_ev gives the lead
+  ! bead the surface-tension and lift terms computed with the last collected
+  ! bead; collector_curvature reproduces them (missing until 2026-09-30).
   ok=accelerator_eom3_stage(firstpoint,lastpoint,npjet,yxx,yyy,yzz,yst, &
    yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
    linserted,liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
    consistency,findex,yieldstress,att,fveparam,gr,ks,li,vfield,velext, &
-   stochastic_model,noisefric,yve)
+   stochastic_model,noisefric,yve,collector_curvature=.true.)
   if(.not.ok)return
   call accelerator_maxwell_evap_stress_3d(firstpoint,lastpoint,npjet, &
    linserting=linserting,linserted=linserted,jetfr=jetfr,fev=fve,fst=fst, &
@@ -1228,9 +1230,10 @@ contains
    noisediff,evlim,jetms,jetvl,jetve,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
    jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
    y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev, &
-   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,y2ev)
+   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,y2ev,linserted,jetfr)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint
+  logical, intent(in) :: linserted,jetfr(0:)
   double precision, intent(in) :: h,airamp,noisediff,evlim
   double precision, intent(in) :: jetms(0:),jetvl(0:),jetve(0:)
   double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
@@ -1248,13 +1251,16 @@ contains
 !$acc parallel loop gang vector present(jetms,jetvl,jetve,jetxx,jetyy, &
 !$acc& jetzz,jetst,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy, &
 !$acc& f1vz,f1ev,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev,y2xx,y2yy, &
-!$acc& y2zz,y2st,y2vx,y2vy,y2vz,y2ev) private(j,stoc,cmass,ve)
+!$acc& y2zz,y2st,y2vx,y2vy,y2vz,y2ev,jetfr) private(j,stoc,cmass,ve)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
     cmass=jetve(ipoint)/jetvl(ipoint)
     stoc=dsqrt(2.d0*(airamp/(jetms(ipoint)*cmass)+noisediff))
-    if(ipoint==lastpoint)stoc=0.d0
+! eom4_ev gives no stochastic force to the nozzle, to a collected (frozen)
+! bead, or to the bead still being inserted at the nozzle.
+    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
+     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
     y1xx(ipoint)=jetxx(ipoint)+h*f1xx(j)
     y1yy(ipoint)=jetyy(ipoint)+h*f1yy(j)
     y1zz(ipoint)=jetzz(ipoint)+h*f1zz(j)
@@ -1287,7 +1293,7 @@ contains
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,mxnpjet,historysteps,k
 ! Sequential-pool slice for this timestep (see begin_gaussian_history_step
-! in utility_mod.f90). Ignored by the historical step-indexed layout.
+! in utility_mod.f90).
   integer, intent(in) :: historybase,historywindow,historyvalues
   double precision, intent(in) :: h,airamp,noisediff,jetms(0:)
   double precision, intent(in) :: gaussianhistory(0:)
@@ -1295,23 +1301,15 @@ contains
   double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
   double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
   double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
-  integer :: ipoint,j,component,nperstep,index1,index2,cycle_step
+  integer :: ipoint,j,component,index1,index2
   integer :: hbase,hstride,hvalues,hfirst
   double precision :: dsqrh,tsqh,prefactor,stoc,u1,u2,ww,zz
   dsqrh=dsqrt(dabs(h)); tsqh=dsqrh**3.d0; prefactor=0.5d0/dsqrh
-! Both layouts reduce to base + bead offset + stride*(component,draw). The
-! modulo is an identity for the step-indexed layout, where the index is
-! always below the array size, and is what lets a pool slice straddle the
+! The index is base + bead offset + stride*(component,draw) inside this
+! step's slice of the sequential pool; the modulo lets a slice straddle the
 ! end of the sequence.
-#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
   hbase=historybase; hstride=historywindow; hvalues=historyvalues
   hfirst=firstpoint
-#else
-  nperstep=(mxnpjet+1)*6
-  cycle_step=mod(k-1,historysteps)+1
-  hbase=(cycle_step-1)*nperstep; hstride=mxnpjet+1
-  hvalues=nperstep*historysteps; hfirst=0
-#endif
 #ifdef _OPENACC
 !$acc parallel loop gang vector present(jetms,gaussianhistory,jetvx,jetvy, &
 !$acc& jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz) &
@@ -1351,11 +1349,12 @@ contains
  subroutine accelerator_platen_evap_velocity(firstpoint,lastpoint,mxnpjet, &
    historysteps,k,h,airamp,noisediff,jetms,jetvl,jetve,gaussianhistory, &
    jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz, &
-   historybase,historywindow,historyvalues)
+   historybase,historywindow,historyvalues,linserted,jetfr)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,mxnpjet,historysteps,k
+  logical, intent(in) :: linserted,jetfr(0:)
 ! Sequential-pool slice for this timestep (see begin_gaussian_history_step
-! in utility_mod.f90). Ignored by the historical step-indexed layout.
+! in utility_mod.f90).
   integer, intent(in) :: historybase,historywindow,historyvalues
   double precision, intent(in) :: h,airamp,noisediff
   double precision, intent(in) :: jetms(0:),jetvl(0:),jetve(0:)
@@ -1364,30 +1363,25 @@ contains
   double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
   double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
   double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
-  integer :: ipoint,j,component,nperstep,index1,index2,cycle_step
+  integer :: ipoint,j,component,index1,index2
   integer :: hbase,hstride,hvalues,hfirst
   double precision :: dsqrh,tsqh,prefactor,stoc,cmass,u1,u2,ww,zz
   dsqrh=dsqrt(dabs(h)); tsqh=dsqrh**3.d0; prefactor=0.5d0/dsqrh
-! See accelerator_platen_velocity for why both layouts share one formula.
-#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
+! Same pool indexing as accelerator_platen_velocity.
   hbase=historybase; hstride=historywindow; hvalues=historyvalues
   hfirst=firstpoint
-#else
-  nperstep=(mxnpjet+1)*6
-  cycle_step=mod(k-1,historysteps)+1
-  hbase=(cycle_step-1)*nperstep; hstride=mxnpjet+1
-  hvalues=nperstep*historysteps; hfirst=0
-#endif
 #ifdef _OPENACC
 !$acc parallel loop gang vector present(jetms,jetvl,jetve,gaussianhistory, &
-!$acc& jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz) &
-!$acc& private(j,component,index1,index2,stoc,cmass,u1,u2,ww,zz)
+!$acc& jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz, &
+!$acc& jetfr) private(j,component,index1,index2,stoc,cmass,u1,u2,ww,zz)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
     cmass=jetve(ipoint)/jetvl(ipoint)
     stoc=dsqrt(2.d0*(airamp/(jetms(ipoint)*cmass)+noisediff))
-    if(ipoint==lastpoint)stoc=0.d0
+! Same exclusions as accelerator_platen_evap_predict.
+    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
+     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
     component=1
     index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
     index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
@@ -1453,10 +1447,10 @@ contains
 
  subroutine accelerator_platen_evap_positions(firstpoint,lastpoint,npjet,h, &
    pfreq,liniperturb,evlim,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetvl, &
-   jetve,f1xx,f1yy,f1zz,f1ev,f2ev)
+   jetve,f1xx,f1yy,f1zz,f1ev,f2ev,linserted,jetfr)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: liniperturb
+  logical, intent(in) :: liniperturb,linserted,jetfr(0:)
   double precision, intent(in) :: h,pfreq,evlim
   double precision, intent(in) :: jetvx(0:),jetvy(0:),jetvz(0:),jetvl(0:)
   double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetve(0:)
@@ -1466,12 +1460,17 @@ contains
   double precision :: f2x,f2y,f2z,y1y,y1z,ve
 #ifdef _OPENACC
 !$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
-!$acc& jetvz,jetvl,jetve,f1xx,f1yy,f1zz,f1ev,f2ev) &
+!$acc& jetvz,jetvl,jetve,f1xx,f1yy,f1zz,f1ev,f2ev,jetfr) &
 !$acc& private(j,f2x,f2y,f2z,y1y,y1z,ve)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
     f2x=jetvx(ipoint); f2y=jetvy(ipoint); f2z=jetvz(ipoint)
+! eom4_pos_ev: a collected bead stays where the collector stopped it, and
+! the bead being inserted is placed by compute_posnoinserted.
+    if(jetfr(ipoint) .or. (ipoint==npjet-1 .and. .not.linserted))then
+      f2x=0.d0; f2y=0.d0; f2z=0.d0
+    endif
     if(ipoint==npjet)then
       f2x=0.d0
       if(liniperturb)then
@@ -1527,8 +1526,11 @@ contains
 #ifdef _OPENACC
 !$acc end parallel loop
 #endif
-  call accelerator_store_statistics(firstpoint,lastpoint,jetxx,jetyy, &
-   jetzz,jetst,counterlpath,ncounterlpath,maxstress,maxstressposx)
+! The sample count and the maximum stress are updated once per timestep by
+! statistic_driver (accelerator_store_statistics), as for the Euler and RK
+! paths.  Calling it here as well counted every Platen step twice while the
+! path length was added once, so the printed mean path length (lp) of a
+! persistent Platen run was half the host value (fixed 2026-09-30).
  end subroutine accelerator_platen_stress_statistics
 
  subroutine accelerator_euler_final_statistics(firstpoint,lastpoint,h, &

@@ -82,9 +82,9 @@ which splits the decision in two: `dynamic_platen_accelerator_configured` tests
 only size-independent model configuration and is what the one-shot history
 allocation consults, while `dynamic_platen_accelerator_eligible` adds the
 `npjet >= 100` and `mxnpjet > npjet` thresholds and gates the per-step
-activation. The history itself uses the sequential pool described in
-[random numbers](random-numbers.md), which removes the remap that capacity
-growth would otherwise force.
+activation. The history is the sequential pool described in
+[random numbers](random-numbers.md), the default layout for every build since
+2026-09-30, which removes the remap that capacity growth used to force.
 
 With the macro on, a step in the persistent branch runs entirely on the
 device: charge smoothing and the Coulomb/electric driver four times, four EOM
@@ -100,15 +100,21 @@ those cycles are exactly where earlier builds failed, before the Coulomb
 mapping reset above was corrected. The jet bridges the collector distance and
 finishes with its bead count oscillating around 570 rather than drifting, so
 the balanced insertion/removal regime is reached on the device from a
-single-bead start.
+single-bead start. The fork still lacks the device-side nozzle charge
+smoothing described below for the evaporative path, so its physics is not a
+reference: an NVFORTRAN CPU run of the same input has about 512 active beads
+between steps 4 and 5 million.
 
-The same allocation defect affects `platen_ev`, and this was measured rather
-than inferred: with the shipped target and an identical evaporative
-configuration, a 400-bead start engages at step 1 while a single-bead start
-never engages, its history still unallocated once the jet has grown to 262
-beads. Fixing it would switch a production path from host fallback to device
-execution, so it is deliberately left outside this fork and wants its own
-validation pass. `rk4sys_ev` has not been examined for the same defect.
+The same allocation defect affected `platen_ev`: a 400-bead start engaged at
+step 1 while a single-bead start never engaged, its history still unallocated
+once the jet had grown to 262 beads. Since 2026-09-30 the one-shot decision
+uses the size-independent `dynamic_evaporative_platen_configured`, and the
+per-step gate keeps `dynamic_evaporative_platen_eligible` with its size
+thresholds: a single-bead Test 25 engages the persistent path when it first
+exceeds 100 beads (step 1,446,263, 121 beads, in the reference run). The
+decision does not depend on `JETSPIN_OPENACC_DISABLE_PERSISTENT`, so CPU,
+persistent and non-persistent runs read the same noise. `rk4sys_ev` has not
+been examined for the same defect.
 
 ## Persistent Coulomb mapping reset
 
@@ -191,16 +197,16 @@ arrays are mapped once and remain resident across all timesteps.
 Each Coulomb stage computes its cross sections on the device; EOM consumes the
 device Coulomb force directly, and all integrator updates execute on the device.
 
-For the fixed stochastic Platen Tests 12 and 20, the complete Gaussian history
-is generated on the CPU before loop timing in a fixed
-step/bead/component/draw order. Test 12 requires 6,006,000 doubles
-(48,048,000 bytes); the 100-step Test 20 requires 600,600 doubles. The OpenACC
-build transfers this history once during initialization and indexes it on the
-device; the CPU path indexes the same layout. No random generation or noise
-transfer occurs inside the measured loop.
-The history is capped at 100,000,000 doubles (about 763 MiB). Longer fixed
-runs wrap to its beginning, preserving CPU/GPU reproducibility while making
-the noise periodic after the stored interval.
+For the fixed stochastic Platen Tests 12 and 20, the Gaussian pool is
+generated on the CPU before loop timing, each step's slice in the draw order
+of the per-step block. Test 12 requires 6,006,000 doubles (48,048,000 bytes);
+the 100-step Test 20 requires 600,600 doubles. The OpenACC build transfers the
+pool once during initialization and indexes it on the device; the CPU path
+reads the same values. No random generation or noise transfer occurs inside
+the measured loop. The pool holds at most `noise pool` values (default
+100,000,000, about 763 MiB); a run that consumes it wraps to its beginning,
+preserving CPU/GPU reproducibility while making the noise periodic (see
+[random numbers](random-numbers.md#the-noise-repeats-after-the-pool-is-consumed)).
 The host no longer receives stage intermediates or Coulomb forces.
 
 The fixed-topology Maxwell Platen evaporation path used by Test 20 also keeps
@@ -209,8 +215,8 @@ volume and stress updates, and statistics on the device. Its state and
 Gaussian history therefore follow the same persistent-data policy as Test 12.
 
 Test 21 extends Maxwell Platen evaporation to insertion and dynamic refinement.
-Its standard 24,048,000-double Gaussian history covers the reserved 500-bead
-capacity and is uploaded once. Eligible refinement checks return only three
+Its Gaussian pool (100,000,000 doubles by default) is uploaded once and is
+not affected by capacity growth. Eligible refinement checks return only three
 reduction scalars. At an accepted event, the complete active state is
 downloaded once for host target-mesh preparation. Akima slopes, tangents,
 cubic coefficients, and the 11 field interpolations then run on the GPU. The
@@ -221,27 +227,26 @@ per-bead quantities. Host code retains the data-dependent, rare (a few events
 per run) bookkeeping instead: normalized target-mesh/anchor-mesh construction,
 anchor state save/restore, and the final mesh assembly.
 If the resulting mesh exceeds capacity, the old
-topology, evaporation state, Platen scratch arrays, Coulomb workspace, and
-Gaussian history mappings are released before their host allocations change.
-Existing indexed Gaussian values are preserved during stride repacking; only
-new capacity slots are generated. The resized state and history are rebound
-once. An A30 transfer audit found no complete state transfer on an ordinary
+topology, evaporation state, Platen scratch arrays, and Coulomb workspace
+mappings are released before their host allocations change, and the resized
+state is rebound once. The Gaussian pool stays mapped unchanged. An A30 transfer audit found no complete state transfer on an ordinary
 timestep. The one full-state download at final shutdown is independent of
 refinement.
 
-Test 22 repeats this lifecycle three times in 15,800 steps. The native A30 and
-NVFORTRAN CPU runs retain the same active counts across all events and finish
-with 536 elements. The first two event steps are identical; the third occurs
-at step 15,738 on the A30 and 15,765 on the CPU because of the target-centric
-Coulomb accumulation order. The first 79 of their 80 statistics rows agree
-within `4e-4` relatively; the final row, after both third events, differs by
-up to 3.3 percent. The complete-force oracle reproduces all CPU event steps
-and compares within `6e-7` relatively.
+Test 22 repeats this lifecycle three times in 15,800 steps. The native A30
+run and the complete-force oracle reproduce all CPU event steps, topologies,
+and capacities, and all 80 statistics rows agree with the NVFORTRAN CPU run
+within `8.0e-10` and `3.2e-8` relatively. CPU and GPU read the same sequential
+Gaussian pool; what remains is the different floating-point evaluation order
+of the device kernels. Before the persistent-path fixes described in the
+Test 25 section below, the native build moved its fourth nozzle insertion one
+step earlier, which offset the pool position, and every later event
+differed.
 
 An A30 transfer audit records four complete state downloads: one for each of
 the three accepted refinement events and one at final shutdown. It also records
-exactly three Gaussian-history uploads, three topology rebinds, and three
-evaporation-state rebinds. No complete state is downloaded during an ordinary
+three topology rebinds and three evaporation-state rebinds; the Gaussian pool
+is uploaded once at startup and never transferred again. No complete state is downloaded during an ordinary
 timestep or an unsuccessful threshold scan. Across the three Akima events,
 coordinates are uploaded six times (source and target once per event), source
 fields 33 times, and interpolated results are downloaded 33 times. These
@@ -254,24 +259,21 @@ collected bead. Removal itself transfers only point/event data, while accepted
 Akima events retain the event-only target-mesh/anchor-bookkeeping boundary
 described above.
 The A30 audit again finds four complete state downloads (three refinement
-events plus shutdown) and three history/topology/evaporation rebinds. The
+events plus shutdown), three topology/evaporation rebinds, and a single
+Gaussian-pool upload at startup. The
 ordinary removal check returns one four-byte control scalar; each accepted
 removal downloads and clears only one bead.
 
-The standard build's CPU/GPU `statout.dat` agreement (`rtol=3e-2`) holds for
-79 of 81 rows; in the last two, once the jet reaches the `x=12 cm` collector,
-the two builds fork onto slightly different removal schedules and differ by
-one active bead (both make ten removals; the CPU ends with 526 active beads,
-the GPU with 527). Rebuilding Test 23 with the
-existing narrow `nvfortran-openacc-coulomb-oracle` target -- direct Coulomb
-sum on the host, everything else including topology and the reconstruction
-kernel above still on the device -- confirms direct-Coulomb summation order
-as the dominant source: its third event lands at the CPU's own step (15763),
-all ten removals match the CPU step-for-step, and its final active count
-(526) matches the CPU and the complete-force oracle exactly. Agreement then
-holds for all 81 rows. This is a diagnostic
-confirmation of an already-documented sensitivity, not a change to the
-standard build's accepted topology.
+The standard build reproduces the CPU events (14,268, 14,971, 15,691), the
+nine removals, and the 526 final active beads step for step, and all 81
+statistics rows agree with the CPU within `8.0e-10` relatively, including
+the rows written after the leading bead has reached the collector. The
+complete-force oracle agrees within `6.1e-8`. Rebuilding Test 23 with the
+narrow `nvfortran-openacc-coulomb-oracle` target -- direct Coulomb sum on the
+host, everything else including topology and the reconstruction kernel above
+still on the device -- gives a statistics file byte-identical to the native
+run's: at the printed precision the device Coulomb kernel adds nothing to the
+remaining roundoff-level difference.
 
 The Yarin evaporation rate, the evaporation-specific direct Coulomb force, and
 the concentration-dependent constitutive updates are now available in the
@@ -390,17 +392,16 @@ semantics.
 Test 21 validates the hybrid dynamic-refinement path. The native A30 event is
 accepted through anchor preservation, ordered path coordinates, topology, and
 separate reference/evaporated-volume conservation rather than binary
-trajectory identity. With NVFORTRAN 24.3, the CPU and complete-force-oracle
-runs accept the same step and final topology; their final written statistics
-agree within `3.6e-6` relatively. The native target-centric Coulomb path shifts
-the accepted event by four steps, as expected for a bending-sensitive
-trajectory.
+trajectory identity. With NVFORTRAN 24.3, the CPU, complete-force-oracle, and
+native A30 runs accept the same step (7,131) and final topology; the written
+statistics of the oracle and of the native run agree with the CPU within
+`1.4e-7` and `2.4e-10` relatively.
 
 Test 23 validates the Akima device kernels directly. A comparison build runs
 the historical host spline and the accelerator spline for 11 fields at each
 of three remeshes. The maximum coefficient relative difference is
-`4.23e-15`; interpolated values differ by at most `3.64e-12` absolutely and
-`2.53e-15` relatively. The calculation has no reduction: source slopes,
+`1.03e-14`; interpolated values differ by at most `1.82e-12` absolutely and
+`1.89e-15` relatively. The calculation has no reduction: source slopes,
 interior tangents, cubic coefficients, and target interpolations are
 independent, with
 only the constant-size endpoint extrapolation executed serially.
@@ -411,7 +412,7 @@ follow the Akima interpolation. It backs up the pre-reconstruction state,
 evaluates the host reference, restores that state, then runs the device
 kernel so it remains authoritative, and reports the maximum difference
 against the host reference at each event. All three Test 23 events agree at
-or near roundoff (worst absolute `7.1e-15`, worst relative `4.05e-16`), and
+or near roundoff (worst absolute `8.9e-16`, worst relative `1.4e-16`), and
 the standard build reproduces the same event/removal/final-active topology as
 before this kernel existed. Building this oracle exposed two real ordering
 bugs — the device kernel invoked twice, and the host reference evaluated from
@@ -435,12 +436,14 @@ median per bead-count band, from the `cpu` statistics key):
 | 250-300 | 1899 us | 1155 us | 784 us | 447 us |
 | Whole run | 1522 s | 1557 s | 1188 s | 931 s |
 
-The persistent column needs a fix that is not yet in the code: the Gaussian
-history of `platen_ev` is allocated only if the jet already has 100 beads
-when `prepare_integrator_random_history` runs, which is never true for a
-single-bead start, so the persistent path never engages and only the Coulomb
-kernel runs on the device. With a size-independent test for that one-shot
-decision the path engages at step 1,446,263 (121 beads).
+The persistent column was measured with a scratch version of the fix that is
+now in the code (see the dynamic-topology Platen fork above). Before it, the
+Gaussian history of `platen_ev` was allocated only if the jet already had 100
+beads when `prepare_integrator_random_history` ran, which is never true for a
+single-bead start, so the persistent path never engaged and only the Coulomb
+kernel ran on the device. The path now engages at step 1,446,263 (121 beads).
+Over the 5 million steps of the Test 25 reference the A30 takes about 2060 s
+and the NVFORTRAN CPU build 5893 s.
 
 Nsight Systems profiles explain the remaining cost:
 
@@ -456,27 +459,78 @@ Nsight Systems profiles explain the remaining cost:
 
 The CPU remains faster below about 110 beads.
 
+### Persistent-path defects found by a seed ensemble (2026-09-30)
+
+Once the size-independent history decision let the persistent path engage,
+a seed ensemble of Test 25 (five NVFORTRAN CPU seeds, three A30 seeds, all
+with the sequential Gaussian pool) showed a systematic difference. Up to the
+engagement step all runs agree; afterwards the A30 jet grows longer and
+denser: between 4 and 5 million steps the mean active count was 297 on every
+A30 seed and 268 on the CPU, and the path length 123 cm against 112 cm, with
+a seed-to-seed spread below 0.5 percent on both builds. Three defects of the
+persistent evaporative Platen path were responsible:
+
+- **Nozzle charge smoothing.** While a newly inserted bead is still being
+  released at the nozzle, its charge is scaled by a smooth cut-off before
+  every Coulomb evaluation and restored afterwards. `smooth_charge` and
+  `restore_charge` dispatched to their device versions only for
+  `systype 3`; a `systype 4` (stochastic Maxwell) persistent run smoothed
+  the stale host copy, and the device Coulomb sum saw the bead with its full
+  charge. This caused the difference before the jet reaches the collector.
+  With the dispatch extended to `systype 4`, the A30 run of seed 317 follows
+  the CPU trajectory through 2 million steps: the same bead count at every
+  sample and a path-length difference of at most `3e-8` relatively, the same
+  as before engagement, against `5e-4` without the fix at 1.54 million
+  steps.
+- **Lead-bead curvature after removal.** Once beads have been collected,
+  `eom3_ev` and `eom4_ev` give the lead bead the surface-tension and lift
+  terms computed with the last collected bead. The Maxwell evaporative device
+  stage did not request them (`collector_curvature`), unlike the
+  Kelvin--Voigt stage.
+- **Frozen and inserting beads in the Platen kernels.** The predictor and
+  velocity kernels gave the stochastic force to beads frozen at the
+  collector and to the bead still being inserted, and the position kernel
+  moved frozen beads with their velocity; `eom4_ev` and `eom4_pos_ev` keep
+  them fixed. This is why the Test 23 complete-force oracle, which keeps these
+  kernels on the device, differed from the CPU by 1.4 percent once the lead
+  bead had reached the collector; with the fix all 81 rows agree within
+  `6.1e-8`.
+
+The first defect was invisible to the oracles, which smooth the charge on
+the host, and to Tests 16 and 17, which use `systype 3`. Tests 21--23 run
+with a reduced charge density and were accepted on event contracts, so the
+native difference was attributed to the Coulomb summation order. With the
+fixes their native runs reproduce the CPU events, capacities, and removals,
+and every statistics row agrees within `8.0e-10`. Over the full 5 million
+steps of Test 25 the fixed A30 run gives the CPU stationary values (268 active
+beads, 112 cm path length) in about 2060 s. The same
+smoothing and collector-curvature omissions remain in the non-evaporative
+dynamic device paths (the `systype 3` dynamic RK4 path and the
+`nvfortran-openacc-dynamic-platen` fork); they are not fixed yet.
+
 ## Next porting stages
 
-1. For the dynamic evaporative Platen path: make the one-shot history
-   decision size-independent (above), then run the persistent step on one
+1. Extend the nozzle charge-smoothing dispatch and the lead-bead collector
+   curvature to the non-evaporative dynamic device paths (the `systype 3`
+   dynamic RK4 path and the dynamic Platen fork), with their own CPU/GPU seed
+   comparison.
+2. For the dynamic evaporative Platen path: run the persistent step on one
    asynchronous queue with a single synchronization per step and
    non-blocking reads of the removal and refinement scalars; fuse each force
    stage into fewer kernels afterwards if needed.
-
-2. Investigate packing the maximum stress and bead index into one deterministic
+3. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
-3. Extend the refinement-capacity lifecycle beyond the currently validated
+4. Extend the refinement-capacity lifecycle beyond the currently validated
    serial Maxwell/Platen combination when additional GPU model combinations
    are enabled; current transfers occur only on resize events.
-4. The remaining host-side work at an accepted event is the data-dependent
+5. The remaining host-side work at an accepted event is the data-dependent
    mass-boundary walk, target-mesh/anchor-mesh construction, and anchor
    save/restore/final-assembly bookkeeping. It is a small, rare (a few events
    per run), inherently sequential scan rather than a per-bead parallel
    operation, so it is not a priority target; the next candidate is instead
    determining whether the accepted-event full-state round trip can be
    removed without duplicating that bookkeeping's model logic.
-5. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
+6. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 
 The intended steady state is a persistent device-resident simulation with

@@ -40,6 +40,7 @@ point for a new simulation.
 | Perturbation | `perturbation yes`, `perturbation frequency`, `perturbation amplitude` |
 | Electric field | `external potential`, `external potential type`, `external potential vector` |
 | Aerodynamics | `airdrag yes`, `airdrag airdensity`, `airdrag airviscosity`, `airdrag airvelocity` |
+| Stochastic noise | `noise yes`, `noise variance`, `noise diffusivity`, `noise pool` |
 | Rheology | `hbfluid yes`, `kvfluid yes`, `yield stress` |
 | Refinement | `dynamic refinement yes`, `dynamic refinement every`, `dynamic refinement threshold` |
 | Evaporation | `evaporation yes`, `evaporation polymer frac`, `evaporation temperature`, `evaporation umidity` |
@@ -48,6 +49,16 @@ point for a new simulation.
 
 Some historical keywords use spellings retained for compatibility, such as
 `evaporation umidity`. Copy them exactly as documented.
+
+`noise pool n` sets the number of pre-generated Gaussian values read by the
+stochastic Platen integrator when it uses the pre-generated pool (fixed
+1,000-bead benchmarks and the dynamic evaporative Platen path), between
+1,000,000 and 2,000,000,000; the default is 100,000,000. The pool is read
+cyclically, so the noise repeats after `n / (6 * active beads)` timesteps:
+about 62,000 steps for 270 beads with the default. Raising `n` lengthens the
+period at 8 bytes per value on the host and again on the GPU. Whether the
+period is long enough is the user's choice; see
+[random numbers](../introduction/random-numbers.md#the-noise-repeats-after-the-pool-is-consumed).
 
 ## How records are read
 

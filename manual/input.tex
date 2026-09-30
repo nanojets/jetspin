@@ -190,6 +190,10 @@ noise yes & active the inclusion of a random noise in the model (default: no)\ta
  & (note that if yes the directive ``integrator 4'' is mandatory)\tabularnewline
 noise variance $f$ & variance of random noise in velocity space (default: 1 $\text{cm}^{2}/\text{s}^{2}$)\tabularnewline
 noise diffusivity $f$ & diffusivity of random noise in velocity space (default: 0 $\text{cm}^{2}/\text{s}^{3}$)\tabularnewline
+noise pool $f$ & number of pre-generated Gaussian values read cyclically by the\tabularnewline
+ & stochastic Platen integrator when it uses the pre-generated pool, between\tabularnewline
+ & $10^{6}$ and $2\times10^{9}$ (default: $10^{8}$); the noise repeats after\tabularnewline
+ & $f/(6\,n_{\mathrm{active}})$ timesteps (see Sec.~\ref{sec:Noise-pool})\tabularnewline
 \uline{nozzle cross} $f$  & cross section radius of the nanofiber at the nozzle\tabularnewline
 nozzle stress $f$  & viscoelastic stress of the nanofiber at the nozzle\tabularnewline
 nozzle velocity $f$  & bulk fluid velocity of the nanofiber at the nozzle\tabularnewline

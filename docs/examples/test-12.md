@@ -6,13 +6,16 @@ of Test 9 with the Platen integrator and stochastic air-drag parameters of Test
 Coulomb summation remain disabled. It executes 1,000 steps and writes six
 statistical samples.
 
-Before loop timing, rank 0 generates the complete Gaussian history in a fixed
-`step, bead, component, draw` order. The history contains 6,006,000 double
-precision values (48,048,000 bytes). CPU integration reads this same layout;
-the OpenACC build copies it to the device once during initialization. No noise
-generation or noise transfer occurs inside the temporal loop.
-The implementation caps a pre-generated history at 100,000,000 values; longer
-fixed runs reuse it cyclically. Test 12 is below this limit and never wraps.
+Before loop timing, rank 0 generates the Gaussian pool, each step's slice in
+the draw order of the per-step block (bead, component, draw). The pool
+contains 6,006,000 double precision values (48,048,000 bytes). CPU
+integration reads the same values; the OpenACC build copies them to the device
+once during initialization. No noise generation or noise transfer occurs
+inside the temporal loop. A run that consumes the whole pool (`noise pool`,
+default 100,000,000 values) reuses it cyclically; Test 12 is below this limit
+and never wraps. The outputs are bit-identical to the records made before the
+pool became the default layout
+([random numbers](../introduction/random-numbers.md)).
 
 The persistent GPU path performs the three Platen force evaluations,
 positive/negative predictors, stochastic velocity update, Heun position and

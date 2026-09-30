@@ -132,7 +132,14 @@ contains
   if(integrator/=4 .or. systype/=4)return
   fixed_history=npjet==1000 .and. (fixed_accelerator_geometry() .or. &
    fixed_evaporative_platen_eligible())
-  dynamic_history=dynamic_evaporative_platen_eligible()
+! Decided once, before the timestep loop, while a single-bead start still
+! has npjet=1: use the size-independent configuration test.  The per-step
+! gate in platen_ev keeps the full eligibility (npjet>=100), so the
+! persistent path engages once the jet has grown.  Until 2026-09-30 this
+! used dynamic_evaporative_platen_eligible(), which is never true for a
+! single-bead start, so the history was never built and platen_ev always
+! fell back to the non-persistent path.
+  dynamic_history=dynamic_evaporative_platen_configured()
 #if defined(_OPENACC) && defined(JETSPIN_GPU_DYNAMIC_PLATEN)
 ! The non-evaporative dynamic Platen fork needs the same indexed noise
 ! history as its evaporative sibling, otherwise it silently falls back to
@@ -146,20 +153,17 @@ contains
   if(.not.(fixed_history .or. dynamic_history))return
   nsteps=nint((endtime-initime)/h)
   history_last=npjet
-! Generate noise for the full reserved capacity in a dynamic run.  Beads
-! inserted after initialization then consume the same indexed history on CPU
-! and GPU without drawing random numbers inside the timestep loop.
+! A dynamic run takes the whole pool, since its bead count can grow beyond
+! the initial capacity.  Beads inserted after initialization then consume
+! the same sequential pool on CPU and GPU without drawing random numbers
+! inside the timestep loop.
   if(dynamic_history)history_last=mxnpjet
-  call prepare_gaussian_history(inpjet,history_last,mxnpjet,3,nsteps)
+  call prepare_gaussian_history(inpjet,history_last,mxnpjet,3,nsteps, &
+   full_pool=dynamic_history)
 #ifdef _OPENACC
-#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
-! The pool is a flat sequence whose size is decided once, above; it is not
-! (mxnpjet+1)*6 per step, and it never changes afterwards.
+! The pool is a flat sequence whose size is decided once, above, and never
+! changes afterwards.
 !$acc enter data copyin(gaussianhistory(0:gaussianhistoryvalues-1))
-#else
-!$acc enter data copyin(gaussianhistory(0:(mxnpjet+1)*6* &
-!$acc& gaussianhistorysteps-1))
-#endif
   call mark_gaussianhistory_device_mapped(.true.)
 #endif
  end subroutine prepare_integrator_random_history
@@ -206,6 +210,23 @@ contains
    typemass.eq.0 .and. .not.ltrackbeads .and. ltagbeads .and. &
    .not.lbreakup .and. lrefinement
  end function dynamic_evaporative_platen_eligible
+
+ logical function dynamic_evaporative_platen_configured()
+! Size-independent part of dynamic_evaporative_platen_eligible: every
+! condition except npjet>=100 and mxnpjet>npjet.  Used only for the one-shot
+! Gaussian-history decision in prepare_integrator_random_history.  It does
+! not honour JETSPIN_OPENACC_DISABLE_PERSISTENT: that switch only keeps the
+! per-step gate closed, so CPU, persistent and non-persistent runs consume
+! the same noise sequence.
+  implicit none
+  dynamic_evaporative_platen_configured=systype.eq.4 .and. levaporation .and. &
+   .not.lKVfluid .and. integrator.eq.4 .and. mxrank.eq.1 .and. &
+   mystart.eq.inpjet .and. myend.eq.npjet .and. linserting .and. &
+   .not.lmultiplestep .and. lairdrag .and. .not.lflorentz .and. &
+   .not.luppot .and. nfieldtype.eq.0 .and. .not.ldragvel .and. &
+   typemass.eq.0 .and. .not.ltrackbeads .and. ltagbeads .and. &
+   .not.lbreakup .and. lrefinement
+ end function dynamic_evaporative_platen_configured
 
  logical function dynamic_rk4_accelerator_eligible()
   implicit none
@@ -5713,7 +5734,7 @@ contains
          noisediff,evlim,jetms,jetvl,jetve,jetxx,jetyy,jetzz,jetst,jetvx, &
          jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,y1xx,y1yy, &
          y1zz,y1st,y1vx,y1vy,y1vz,y1ev,y2xx,y2yy,y2zz,y2st,y2vx,y2vy, &
-         y2vz,y2ev)
+         y2vz,y2ev,linserted,jetfr)
 
         call maxwell_evap_device_stage(timesub,k,y1xx,y1yy,y1zz,y1st, &
          y1vx,y1vy,y1vz,y1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
@@ -5738,7 +5759,8 @@ contains
          gaussianhistorysteps,k,h,airdragamp(1),noisediff,jetms,jetvl, &
          jetve,gaussianhistory,jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx, &
          f2vy,f2vz,d3vx,d3vy,d3vz, &
-         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues)
+         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
+         linserted,jetfr)
 
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         call maxwell_evap_device_stage(timesub+h,k,y1xx,y1yy,y1zz,y1st, &
@@ -5756,7 +5778,7 @@ contains
 #endif
         call accelerator_platen_evap_positions(mystart,myend,npjet,h,pfreq, &
          liniperturb,evlim,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetvl,jetve, &
-         f1xx,f1yy,f1zz,f1ev,f2ev)
+         f1xx,f1yy,f1zz,f1ev,f2ev,linserted,jetfr)
 
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         call maxwell_evap_device_stage(timesub+h,k,jetxx,jetyy,jetzz,y1st, &

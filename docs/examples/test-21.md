@@ -41,18 +41,18 @@ single refinement therefore changes active bounds without reallocating a
 mapped array. A separate `capacity-growth` mode reduces only this developer
 reserve to 50 entries. The accepted mesh then exceeds the original capacity:
 JETSPIN releases the old persistent mappings before host reallocation,
-resizes the Platen and Coulomb workspaces, repacks the Gaussian-history stride,
-and binds the new arrays once. The Akima GPU kernels are unchanged in both
+resizes the Platen and Coulomb workspaces, and binds the new arrays once; the
+Gaussian pool stays mapped unchanged. The Akima GPU kernels are unchanged in both
 modes.
 
 Current event-level results are:
 
 | Build | Event step | Active elements across event | Final elements |
 | --- | ---: | ---: | ---: |
-| GFortran CPU | 7,134 | 413 to 454 | 455 |
-| NVFORTRAN 24.3 CPU | 7,118 | 412 to 460 | 462 |
-| NVFORTRAN 24.3 native A30 | 7,122 | 412 to 459 | 461 |
-| NVFORTRAN 24.3 A30 with complete-force oracle | 7,118 | 412 to 460 | 462 |
+| GFortran CPU | 7,136 | 413 to 452 | 453 |
+| NVFORTRAN 24.3 CPU | 7,131 | 412 to 453 | 455 |
+| NVFORTRAN 24.3 native A30 | 7,131 | 412 to 453 | 455 |
+| NVFORTRAN 24.3 A30 with complete-force oracle | 7,131 | 412 to 453 | 455 |
 
 All paths start with 79 interior anchors and end with `nref=1`. Existing anchor
 position, velocity, stress, reference radius, and evaporation radius are
@@ -64,36 +64,31 @@ The capacity-growth results are:
 
 | Build | Event step | Active elements across event | Final elements | Capacity |
 | --- | ---: | ---: | ---: | ---: |
-| NVFORTRAN 24.3 CPU | 7,156 | 413 to 455 | 456 | 450 to 557 |
-| NVFORTRAN 24.3 native A30 | 7,155 | 413 to 455 | 456 | 450 to 557 |
-| NVFORTRAN 24.3 A30 with complete-force oracle | 7,156 | 413 to 455 | 456 | 450 to 557 |
+| NVFORTRAN 24.3 CPU | 7,131 | 412 to 453 | 455 | 450 to 555 |
+| NVFORTRAN 24.3 native A30 | 7,131 | 412 to 453 | 455 | 450 to 555 |
+| NVFORTRAN 24.3 A30 with complete-force oracle | 7,131 | 412 to 453 | 455 | 450 to 555 |
 
-CPU and force oracle have identical topology; their printed values agree
-within `3e-7` relatively. The native GPU also has identical event and final
-topology and differs from the CPU statistics by at most `0.8%`. This tighter
-agreement than the standard case is incidental to the changed Gaussian
-storage stride and must not be interpreted as a new global tolerance.
+The capacity-growth `statout.dat` is byte-identical to the standard-mode one,
+on the CPU and on the A30: the Gaussian pool does not depend on capacity, so
+the reserve size no longer changes the noise.
 
-The aerodynamic Gaussian history is generated for all 500 reserved indices
-before loop timing and copied to the device once. It contains 24,048,000
-doubles (192,384,000 bytes) for this 8,000-step run. No random values or noise
-arrays cross the host/device boundary inside the timestep loop. The independent
-Langevin `noise yes` term is intentionally not enabled.
+The aerodynamic noise comes from the 100,000,000-value Gaussian pool
+(800,000,000 bytes), generated once before the loop and copied to the device
+once, in both modes. No random values or noise arrays cross the host/device
+boundary inside the timestep loop, and no Gaussian draw is performed there.
+The independent Langevin `noise yes` term is intentionally not enabled.
 
-In capacity-growth mode the history grows from 450 to 557 indexed entries.
-All values for existing indices are retained and new indices are generated
-once, producing 26,784,000 doubles (214,272,000 bytes). No Gaussian draw is
-performed in the timestep loop.
+The native A30 run and the complete-force oracle both reproduce the
+NVFORTRAN CPU event and topology exactly; their written statistics differ
+from the CPU by at most `2.4e-10` and `1.4e-7` relatively. CPU and GPU read
+the same Gaussian pool; what remains is the different floating-point
+evaluation order of the device kernels. Before the persistent-path fixes of
+2026-09-30 (see [OpenACC](../introduction/openacc.md)) the A30 kept the full
+charge on the bead being inserted at the nozzle; its fourth insertion then
+fell one step earlier, which offset the pool position, and the event moved
+to step 7,125.
 
-The native GPU and CPU trajectories are not binary-identical because the
-target-centric direct-Coulomb kernel changes the accumulation order and the
-bending instability amplifies the resulting floating-point perturbation. The
-complete-force oracle reproduces the NVFORTRAN CPU event and topology exactly;
-their final written statistics differ by at most `3.6e-6` relatively. The
-native A30 path is therefore accepted through event topology, conservation,
-anchor invariants, finite output, and transfer behaviour.
-
-An `NVCOMPILER_ACC_NOTIFY=2` audit of the native A30 run observed 6,123
+An `NVCOMPILER_ACC_NOTIFY=2` audit of the native A30 run observed 6,132
 eligible threshold scans, each exchanging only the three reduction scalars.
 The full active state was downloaded at the accepted refinement event and at
 final shutdown, and the remeshed state was uploaded once. Within that rare
@@ -101,8 +96,9 @@ event, source and target coordinates are uploaded once, each of the 11 source
 fields is uploaded once, and each interpolated field is downloaded once. There
 is no full-state transfer on an ordinary timestep. Repeating the audit in
 capacity-growth mode again found exactly those two full downloads, one
-topology/evaporation rebind, one resized-history upload, and one Platen/Coulomb
-workspace recreation at the accepted event.
+topology/evaporation rebind, and one Platen/Coulomb workspace recreation at
+the accepted event; the Gaussian pool is uploaded once at startup and never
+transferred again.
 
 Run the case and its event-level checker with:
 

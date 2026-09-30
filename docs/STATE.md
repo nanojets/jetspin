@@ -1,5 +1,111 @@
 # JETSPIN development state and handoff log
 
+## Sequential Gaussian pool by default; persistent `platen_ev` fixed and corrected (2026-09-30)
+
+### Changes
+
+- **Sequential Gaussian pool for every build.** The pre-generated noise is
+  one flat sequence (`gaussianhistory(0:values-1)`), allocated and uploaded
+  once before the loop; each step reads the next `6 * active beads` values
+  from a cursor advanced by `begin_gaussian_history_step`, and host and
+  device read `mod(base + (ipoint - first) + window*((c-1) + 3*(d-1)),
+  values)`. Fixed-topology pools hold `nsteps * window * 6` values filled in
+  the per-step buffer's draw order (Tests 12 and 20 bit-identical to their
+  records and to MPI); dynamic runs take the whole pool (default `1e8`
+  values). `resize_gaussian_history` is a no-op: capacity growth no longer
+  repacks or remaps anything, and capacity-growth runs are byte-identical to
+  the standard mode (Test 21, CPU and A30). The noise repeats after
+  `values / (6 * active beads)` steps; `noise pool` (1e6 to 2e9 values) is
+  the user's lever, documented with its memory cost in `random-numbers.md`,
+  `input.md`, and the manual. The log line is
+  `Gaussian history pool: values=V covers S steps at N beads` (N is the
+  initial capacity for a dynamic run).
+- **Bug 1 of 2026-08-26 fixed for `platen_ev`.** The one-shot history
+  decision uses `dynamic_evaporative_platen_configured()` (size-independent,
+  and independent of `JETSPIN_OPENACC_DISABLE_PERSISTENT`), so a single-bead
+  Test 25 engages the persistent path at step 1,446,263 (121 beads).
+- **`lp` halved in persistent Platen runs.** `accelerator_platen_stress_statistics`
+  also called `accelerator_store_statistics`, which `statistic_driver` calls
+  once per step: the sample count doubled. Removed.
+- **Persistent-path physics defects** (found with a Test 25 seed ensemble,
+  see below):
+  1. `smooth_charge`/`restore_charge` dispatched to the device only for
+     `systype 3`; a `systype 4` persistent run smoothed the stale host copy
+     and the device Coulomb sum saw the inserting nozzle bead with its full
+     charge. Dispatch extended to `systype 4` (evaporative); the host
+     `compute_crosssec` on stale arrays is skipped as for `systype 3`.
+  2. `accelerator_maxwell_evap_stage` did not pass
+     `collector_curvature=.true.`: after removal the lead bead lacked the
+     surface-tension and lift terms that `eom3_ev`/`eom4_ev` compute with the
+     last collected bead.
+  3. The evaporative Platen predictor/velocity kernels gave the stochastic
+     force to frozen beads and to the inserting bead, and the position kernel
+     moved frozen beads with their velocity (`eom4_ev`/`eom4_pos_ev` keep
+     them fixed). They now take `linserted` and `jetfr`.
+
+### Evidence
+
+- Test 25, 5 million steps, stationary window 4-5 million, from `traj.xyz`
+  frames: five CPU seeds n 267.8-268.4, lp 111.8 cm, yz 2.78 cm; three A30
+  seeds before the fixes n 297.3-297.6, lp 122.8-123.0 cm. Before
+  engagement all runs agree.
+- With defect 1 fixed, seed 317 on the A30 follows the CPU trajectory
+  through 2 million steps (identical bead count at every frame, lp within
+  `3e-8` relatively, against `5e-4` at 1.54 million steps before the fix).
+  With all three fixed, through 2.4 million steps within `6e-8`; later the
+  post-collector trajectory drifts at roundoff-amplified level
+  (lp `1.3e-4` at 2.8 million) with no bead-count difference in 142 frames.
+  Seed 317, 5 million steps, all fixes: 2296 s on the A30 with nine builds
+  running on the node (seed 319 on an idle node 2064 s; unfixed 2094 s; CPU
+  5893 s); first removal at the CPU step (2,120,839), first bead-count
+  difference at 3.26 million; 4-5 million window n 268.4, lp 111.9 cm,
+  yz 2.79 cm, vc 2535 cm/s, angl 19.75 (CPU 19.74), 221 additions,
+  925 removals (CPU 922).
+  Seeds 318 and 319 with the fixes follow their CPU runs to 3.2 and 2.66
+  million steps and give n 267.9 / 268.2, lp 111.8 cm, yz 2.785 / 2.784 cm
+  (CPU 267.8 / 268.2, 111.8, 2.782 / 2.784).
+- Test 23 complete-force oracle: all 81 rows within `6.1e-8` of the CPU
+  (rows 79-81 differed by 1.4 % before fix 3; rows 1-78 byte-identical).
+- Tests 21-23 on the A30 with the fixes: native events, capacities, and
+  removals identical to the CPU; statistics within `2.4e-10` (Test 21) and
+  `8.0e-10` (Tests 22 and 23, all rows, including those after the collector).
+  Previously the native fourth insertion fell one step earlier (the
+  smoothing defect), which offset the pool and moved every later event.
+  Test 21/22 force oracles byte-identical to their pre-fix runs; host-Akima
+  byte-identical to the device run; Akima A/B `1.03e-14` / `1.82e-12` /
+  `1.89e-15`; reconstruction A/B `8.9e-16` / `1.4e-16`. Audits: Test 21
+  capacity growth two full downloads, one rebind, one pool upload; Tests
+  22/23 four full downloads, three topology and three evaporation rebinds,
+  one pool upload, one four-byte removal flag per step (Test 23).
+  NVHPC 25.5 CPU reproduces the 24.3 rows of Tests 21-23 exactly.
+  `tests/regression/run.sh openacc` passes cases 1-8 (1-7 difference 0,
+  case 8 `1.13e-7` of the tolerance, unchanged); the Test 16/17 dynamic
+  evaporation validation passes for integrators 1-3 (unchanged topology
+  totals, byte-identical pre-event geometry); the Test 23 Coulomb-only oracle
+  writes a `statout.dat` byte-identical to the native run's.
+
+### Not fixed
+
+- The same smoothing and collector-curvature omissions are in the
+  non-evaporative dynamic device paths (`systype 3` dynamic RK4,
+  `JETSPIN_GPU_DYNAMIC_PLATEN` fork); the Test 24 A30 run (571 beads) is
+  therefore not a reference (CPU about 512).
+- `JETSPIN_DEV_HOST_COULOMB_ACTIVE` builds abort in the non-persistent phase
+  (`update device(jetch)` without `if_present` in `compute_coulomelec_ev`),
+  so the oracles cannot run a single-bead start.
+- Restart with evaporation (see the 2026-09-30 kernel section below).
+- The pool generation costs rank 0 time proportional to `noise pool` before
+  the loop (about 5 s for the default `1e8` values, NVFORTRAN CPU build).
+
+### Next
+
+1. Port the smoothing dispatch and `collector_curvature` to the
+   non-evaporative dynamic device paths, validated with a CPU/GPU seed
+   comparison (Test 24 physics).
+2. One asynchronous queue in the persistent step, a single synchronization
+   per step, non-blocking reads of the removal and refinement scalars.
+3. Restart with evaporation.
+
 ## Evaporative Coulomb kernel rewrite and Test 25 GPU profile (2026-09-30)
 
 Why the GPU build was slower than the CPU for Test 25 (evaporative Platen,

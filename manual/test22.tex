@@ -11,19 +11,16 @@ The dedicated validation runner sets developer-only initial and growth
 reserves of 20 entries. This forces every accepted remesh beyond the current
 capacity, whereas production runs retain the normal 100-entry
 \texttt{incnpjet} policy. Each event must release the old topology,
-evaporation, Platen, Coulomb, and Gaussian-history mappings before the host
-allocations change. The new state and repacked Gaussian history are then bound
-once. The host constructs the target mesh and applies conservation, while
+evaporation, Platen, and Coulomb mappings before the host allocations change.
+The new state is then bound once; the Gaussian pool stays mapped unchanged. The host constructs the target mesh and applies conservation, while
 Akima coefficient construction and spline interpolation execute on the GPU.
 
-With NVFORTRAN 24.3, the CPU events occur at steps 14,301, 14,944, and 15,765;
+With NVFORTRAN 24.3, the CPU events occur at steps 14,268, 14,971, and 15,698;
 NVFORTRAN 25.5 gives the same steps.
-The active element counts change from 413 to 455, from 455 to 498, and from
-499 to 536. Capacity grows successively from 420 to 477, then to 520, and
-finally to 558. The complete-force oracle reproduces these CPU event steps and
-topologies. The native NVIDIA A30 obtains the same active counts and capacity
-sequence; its third event occurs at step 15,738 because of the different
-direct-Coulomb accumulation order.
+The active element counts change from 413 to 459, from 459 to 495, and from
+496 to 535. Capacity grows successively from 420 to 481, then to 517, and
+finally to 557. The complete-force oracle and the native NVIDIA A30 path
+reproduce these CPU event steps, topologies, and capacities.
 
 The three-event contract is intentionally a same-compiler NVFORTRAN CPU/GPU
 comparison. A different compiler can perturb the stochastic bending
@@ -34,16 +31,15 @@ validation.
 All 81 active anchors retain their positions, velocities, stresses, reference
 radii, and evaporation radii at every remeshing event. Reference volume,
 evaporated volume, mass, and charge are conserved to approximately
-$10^{-16}$. In the 80-row native CPU/GPU statistical comparison the first 79
-rows agree within $4\times10^{-4}$ relatively; the final row, sampled after
-both third events, differs by up to 3.3 percent in the axial velocity. The
-complete-force oracle agrees with the CPU within $6\times10^{-7}$
-relatively.
+$10^{-16}$. In all 80 statistics rows the native A30 path agrees with the CPU
+within $8.0\times10^{-10}$ relatively and the complete-force oracle within
+$3.2\times10^{-8}$; CPU and GPU read the same Gaussian pool
+(Section~\ref{sec:Noise-pool}).
 
 An OpenACC transfer audit records four complete state downloads: three
 accepted refinement events and the final shutdown. It records exactly three
-Gaussian-history uploads, three topology rebinds, and three evaporation-state
-rebinds. Ordinary timesteps and unsuccessful threshold scans do not transfer
+topology rebinds and three evaporation-state rebinds; the Gaussian pool is
+uploaded once at startup and never transferred again. Ordinary timesteps and unsuccessful threshold scans do not transfer
 the complete bead state.
 
 The commands

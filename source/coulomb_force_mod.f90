@@ -50,6 +50,11 @@ logical, save :: lmscomputed=.false.
 #ifdef _OPENACC
  logical, save :: accelerator_coulomb_env_checked=.false.
  logical, save :: accelerator_coulomb_disabled=.false.
+! Fewest active beads for which a non-persistent run offloads a 3-D Coulomb
+! sum (see coulomb_offload_3d).  JETSPIN_OPENACC_COULOMB_MIN_BEADS overrides
+! it; 0 offloads every call, as all builds did before 2026-10-05.
+ integer, save :: accelerator_coulomb_min_beads=128
+ logical, save :: accelerator_coulomb_min_checked=.false.
 #endif
  
  integer, save :: ncoulforce=0
@@ -89,6 +94,38 @@ contains
   logical, intent(in) :: enabled
   accelerator_persistent_mode=enabled
  end subroutine set_coulomb_accelerator_persistent
+
+#ifdef _OPENACC
+ logical function coulomb_offload_3d()
+! Whether a 3-D Coulomb sum runs on the device.  A persistent run keeps the
+! jet there and always does.  A non-persistent call uploads the jet and
+! downloads the forces every time, a nearly fixed cost, while the host direct
+! sum grows with the square of the active beads: below
+! accelerator_coulomb_min_beads the host sum is faster.
+  implicit none
+  character(len=16) :: env
+  integer :: value,status
+  if(accelerator_persistent_mode)then
+    coulomb_offload_3d=.true.
+    return
+  endif
+  if(.not.accelerator_coulomb_min_checked)then
+    env=''
+    call get_environment_variable('JETSPIN_OPENACC_COULOMB_MIN_BEADS',env)
+    if(len_trim(env)>0)then
+      read(env,*,iostat=status)value
+      if(status==0 .and. value>=0)then
+        accelerator_coulomb_min_beads=value
+      elseif(idrank==0)then
+        write(6,'(3a)')'WARNING - JETSPIN_OPENACC_COULOMB_MIN_BEADS=', &
+         trim(env),' ignored: not a non-negative integer'
+      endif
+    endif
+    accelerator_coulomb_min_checked=.true.
+  endif
+  coulomb_offload_3d=(npjet-inpjet+1)>=accelerator_coulomb_min_beads
+ end function coulomb_offload_3d
+#endif
 
  subroutine reset_coulomb_accelerator(ycf)
   implicit none
@@ -491,7 +528,7 @@ end subroutine reset_coulomb_accelerator
       ycf(0:ncoulforce,1:3)=0.d0
 
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
-      if(accelerator_enabled .and. mxrank==1)then
+      if(accelerator_enabled .and. mxrank==1 .and. coulomb_offload_3d())then
         if(accelerator_persistent_mode .and. &
          .not.accelerator_coulomb_mapped)then
           coulcrossec(:)=0.d0
@@ -559,7 +596,9 @@ end subroutine reset_coulomb_accelerator
 #ifdef _OPENACC
       ! Charge smoothing updates jetch on the host before every RK stage.
       ! Refresh the persistent device copy used by the Maxwell EOM kernel.
-!$acc update device(jetch(0:ncoulforce))
+      ! A non-persistent run that sums on the host (short jets, see
+      ! coulomb_offload_3d) has no device copy to refresh.
+!$acc update device(jetch(0:ncoulforce)) if_present
 #endif
 #ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
 #ifdef _OPENACC
@@ -1926,7 +1965,8 @@ end subroutine reset_coulomb_accelerator
       ycf(0:ncoulforce,1:3)=0.d0
 
 #if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
-      if(accelerator_enabled .and. mxrank==1 .and. .not.lmultiplestep)then
+      if(accelerator_enabled .and. mxrank==1 .and. .not.lmultiplestep .and. &
+       coulomb_offload_3d())then
         if(accelerator_persistent_mode .and. &
          .not.accelerator_coulomb_mapped)then
 !$acc enter data create(ycf(0:ncoulforce,1:3), &
@@ -2012,7 +2052,7 @@ end subroutine reset_coulomb_accelerator
       call sum_world_darr(ycf,imiomax)
 #ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
 #ifdef _OPENACC
-!$acc update device(jetch(0:ncoulforce))
+!$acc update device(jetch(0:ncoulforce)) if_present
       ! The developing host-Coulomb path must refresh the persistent device
       ! buffer before the Maxwell force kernel consumes it.  The old update
       ! existed only in the non-evaporative routine, leaving stale GPU forces.

@@ -119,18 +119,19 @@ The noise realization hardly matters: four more CPU seeds (318 – 321) give
 mean active counts between 267.8 and 268.4, a path length of 111.8 cm, and an
 off-axis distance of 2.78 cm over the same window.
 
-One NVIDIA A30 runs the same 5 million steps in about 1850 s, against
+One NVIDIA A30 runs the same 5 million steps in about 1570 s, against
 5893 s for the CPU build (see [where the time goes](#where-the-a30-run-spends-its-time)).
-It engages the persistent path at
-step 1,446,413, reads the same Gaussian pool, and stays on the CPU trajectory:
-with seed 317 the first removal falls at the same step, and the active bead
-count first differs at step 3.26 million.
+It reads the same Gaussian pool and reproduces the CPU run byte for byte up
+to step 1,446,413, where it engages the persistent path; afterwards it stays
+on the CPU trajectory, and with seed 317 the active bead count first differs
+at step 4.64 million.
 Between steps 4 and 5 million it gives the same values as the CPU: collector
-velocity 2535 cm/s, off-axis distance 2.8 cm, cone angle 19.75° (CPU 19.74°), 242 – 295
+velocity 2535 cm/s, off-axis distance 2.8 cm, cone angle 19.71° (CPU 19.74°), 242 – 295
 active beads, path length 112 cm, fibre radius 2.8 µm, and a 2.9 cm envelope
-radius at the collector, with 221 additions and 925 removals. Seeds 318 and
-319 likewise follow their CPU runs to 3.2 and 2.7 million steps and give
-267.9 and 268.2 active beads and a 111.8 cm path length. Before the
+radius at the collector, with 221 additions and 922 removals, as on the CPU.
+With the build of 2026-09-30, seeds 318 and 319 likewise followed their CPU
+runs to 3.2 and 2.7 million steps and gave 267.9 and 268.2 active beads and a
+111.8 cm path length. Before the
 persistent-path defects found on 2026-09-30 were fixed (see
 [OpenACC](../introduction/openacc.md)), the A30 gave 297 active beads and a
 123 cm path length on every seed.
@@ -156,7 +157,7 @@ engages again in the same step.
 | --- | --- | --- |
 | Platen predictor, velocity, position, and stress updates | CPU | GPU |
 | Forces other than Coulomb (viscoelastic, surface tension, evaporation, air drag, external field) and the noise read from the Gaussian pool | CPU | GPU |
-| Coulomb sum, three per step | GPU; each call uploads 13 arrays, runs a cross-section and a Coulomb kernel, and downloads 2 arrays | GPU, on the device-resident state |
+| Coulomb sum, three per step | CPU, below 128 active beads (until 2026-10-05 the GPU: each call uploaded 13 arrays, ran a cross-section and a Coulomb kernel, and downloaded 2 arrays) | GPU, on the device-resident state |
 | Nozzle charge smoothing and restoring, placement of the inserting bead | CPU | GPU |
 | Insertion, removal, and collector-freezing decisions | CPU | GPU; one 20-byte record returns to the CPU |
 | Removal bookkeeping (counters, collected-bead statistics) | CPU | CPU; the removed bead is downloaded and its entries uploaded again |
@@ -167,19 +168,22 @@ engages again in the same step.
 
 The CPU generates the Gaussian pool before the loop and copies it to the GPU
 once. In this run every refinement scan of phase 2 was accepted at its first
-step, so an ordinary phase-2 step moves only the 20-byte record.
+step, so an ordinary phase-2 step moves only the 20-byte record. Phase 1 now
+runs entirely on the CPU and gives the same `statout.dat`, byte for byte, as
+the CPU build.
 
 ### Measured times
 
-Two A30 runs of each build, each process bound to the CPU cores and memory of
-its GPU's NUMA node (`numactl --cpunodebind --membind`), seed 317, 5 million
-steps, `print time 1.d-4` (NVHPC 24.3); phase times come from the wall-clock
-time of the printed lines. The CPU runs are one bound run stopped at the end
-of phase 1 and one unbound full run:
+A30 runs with each process bound to the CPU cores and memory of its GPU's
+NUMA node (`numactl --cpunodebind --membind`), seed 317, 5 million steps,
+`print time 1.d-4` (NVHPC 24.3); phase times come from the wall-clock time
+of the printed lines. The CPU runs are one bound run stopped at the end of
+phase 1 and one unbound full run:
 
 | Build | Phase 1 | Phase 2 | Time-integration loop |
 | --- | ---: | ---: | ---: |
-| A30, current | 429 s, 430 s (298 µs/step) | 1410 s, 1425 s (399 µs/step) | 1840 s, 1856 s |
+| A30, current | 156 s (108 µs/step) | 1418 s (399 µs/step) | 1574 s |
+| A30, 2026-10-01 | 429 s, 430 s (298 µs/step) | 1410 s, 1425 s (399 µs/step) | 1840 s, 1856 s |
 | A30, before the 2026-10-01 transfer reduction | 431 s, 433 s (299 µs/step) | 1585 s, 1581 s (445 µs/step) | 2016 s, 2014 s |
 | CPU | 166 s bound, 156 s unbound (114 and 108 µs/step) | 5708 s (1606 µs/step) | 5863 s |
 
@@ -187,34 +191,64 @@ The CPU loop time comes from the timestamps: with NVFORTRAN the code's own
 `Time-integration loop wall time` wrapped after 2147 s until the 64-bit fix of
 2026-10-05 and reported 1568 s for that run.
 
-The two builds run the same code in phase 1 and give byte-identical
-`traj.xyz`. On this path they differ only in the topology check, which now
-returns one 20-byte record instead of two uploads and five downloads per
-step, and in the refinement scan: the current build saves 46 µs per phase-2
-step and 8.3 % of the whole run.
+The builds of 2026-09-30 and 2026-10-01 run the same code in phase 1 and give
+byte-identical `traj.xyz`. On this path they differ only in the topology
+check, which now returns one 20-byte record instead of two uploads and five
+downloads per step, and in the refinement scan: the 2026-10-01 build saves
+46 µs per phase-2 step and 8.3 % of the whole run.
 
 Median time per step over the 20,000-step print intervals, by active-bead
 count:
 
-| Active beads | CPU | A30, current | A30, before 2026-10-01 |
-| --- | ---: | ---: | ---: |
-| 1 – 30 | 31 µs | 247 µs | 249 µs |
-| 30 – 60 | 91 µs | 293 µs | 294 µs |
-| 60 – 100 | 258 µs | 388 µs | 389 µs |
-| 100 – 150 | 502 µs | 401 µs | 459 µs |
-| 150 – 200 | 787 µs | 401 µs | 455 µs |
-| 200 – 250 | 1513 µs | 399 µs | 448 µs |
-| 250 – 300 | 1833 µs | 402 µs | 447 µs |
+| Active beads | CPU | A30, current | A30, 2026-10-01 | A30, before 2026-10-01 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 – 30 | 31 µs | 30 µs | 247 µs | 249 µs |
+| 30 – 60 | 91 µs | 92 µs | 293 µs | 294 µs |
+| 60 – 100 | 258 µs | 258 µs | 388 µs | 389 µs |
+| 100 – 150 | 502 µs | 398 µs | 401 µs | 459 µs |
+| 150 – 200 | 787 µs | 396 µs | 401 µs | 455 µs |
+| 200 – 250 | 1513 µs | 400 µs | 399 µs | 448 µs |
+| 250 – 300 | 1833 µs | 403 µs | 402 µs | 447 µs |
 
-In phase 1 the A30 run is 2.6 – 2.8 times slower than the CPU build. The
-`JETSPIN_PROFILE=1` timers of a run stopped at step 1,446,411 show why: the
-4,339,233 Coulomb calls take 340 s, 78 µs each, 79 % of the loop, while the
-rest of the step costs 62 µs on the host. The CPU build spends 79 s on the
-same calls (18 µs each) and 59 µs per step on the rest. Nsight Systems at
-about 94 beads shows what a call costs: the two kernels run for 3.4 and
-9.2 µs and the 15 copies for 23 µs, so the device is busy for less than half
-of the call; the rest is the launch, copy-enqueue, and six stream
-synchronizations of each call.
+### Phase 1: the Coulomb sum on the host
+
+Until 2026-10-05 phase 1 offloaded the three Coulomb sums of each step and
+was 2.6 – 2.8 times slower than the CPU build. The `JETSPIN_PROFILE=1`
+timers of a run stopped at step 1,446,411 showed why: the 4,339,233 Coulomb
+calls took 340 s, 78 µs each, 79 % of the loop, while the rest of the step
+cost 62 µs on the host. The CPU build spends 79 s on the same calls (18 µs
+each) and 59 µs per step on the rest. Nsight Systems at about 94 beads
+showed what a call cost: the two kernels ran for 3.4 and 9.2 µs and the 15
+copies for 23 µs, so the device was busy for less than half of the call; the
+rest was the launch, copy-enqueue, and six stream synchronizations of each
+call.
+
+A run that has not engaged a persistent path now computes a 3-D Coulomb sum
+on the host while the jet has fewer than 128 active beads
+(`JETSPIN_OPENACC_COULOMB_MIN_BEADS`; 0 offloads every call, as before). A
+persistent run always sums on the device. The threshold comes from runs of
+the first 2.1 million steps of Tests 25 and 24 with the persistent path kept
+closed (`JETSPIN_OPENACC_DISABLE_PERSISTENT=1`), the Coulomb sum either always
+offloaded or always on the host. One step makes three Coulomb calls, so a
+third of the difference of the median step times is the extra cost of one
+offloaded call:
+
+| Active beads | Test 25, evaporative | Test 24, non-evaporative |
+| --- | ---: | ---: |
+| 1 – 20 | +72 µs | +66 µs |
+| 40 – 60 | +64 µs | +66 µs |
+| 80 – 100 | +33 µs | +45 µs |
+| 120 – 140 | −20 µs | +12 µs |
+| 160 – 200 | −95 µs | −41 µs |
+| 250 – 300 | −381 µs | −286 µs |
+
+Offloading pays above about 110 beads with evaporation and 150 without; 128
+lies between the two crossovers. With it, phase 1 of Test 25 takes 156 s
+instead of 430 s, the time of the CPU build, and the first 2.1 million steps
+of Test 24, which never engages a persistent path, take 586 s instead of
+854 s.
+
+### Phase 2
 
 In phase 2 the step time stays at about 400 µs from 120 to 300 beads, while
 the CPU build grows from 0.5 to 1.8 ms. Nsight Systems at about 215 beads
@@ -225,22 +259,18 @@ stages and the stress updates. At about 273 beads, with collector removal
 active, the counts are 34 launches and 65 synchronizations, and the kernels
 take 236 µs (73 µs Coulomb). The device is therefore busy for 55 – 60 % of
 the step, and the remainder is the launch and synchronization latency of
-the small kernels issued one after the other.
+the small kernels issued one after the other. Issuing them on one
+asynchronous queue with a single synchronization per step targets that
+idle time.
+
+### Process placement
 
 Process placement matters at this scale. Without binding, the operating
 system may run the host process on the other socket: an unbound phase-1 run,
 seen on a core of the other socket, took 464 s instead of 431 s, and an
-unbound comparison of the two builds gave 1932 and 1935 s against 2001 and
-2002 s (3.4 %) instead of 8.3 %. Timing comparisons must therefore bind each
-run to its GPU's NUMA node.
-
-Two changes would shorten the run. In phase 1, computing the Coulomb sum on
-the host instead of offloading it would bring the phase from 430 s to about
-170 s (an estimate: 89 s for the rest of the step in the A30 build plus the
-79 s of the CPU build's Coulomb calls); the persistent path becomes faster
-than the CPU build only above about 100 beads. In phase 2, issuing the
-kernels on one asynchronous queue with a single synchronization per step
-targets the 165 – 180 µs per step in which the device is idle.
+unbound comparison of the 2026-09-30 and 2026-10-01 builds gave 1932 and
+1935 s against 2001 and 2002 s (3.4 %) instead of 8.3 %. Timing comparisons
+must therefore bind each run to its GPU's NUMA node.
 
 ## Use
 

@@ -84,6 +84,14 @@ make -C source -f ../build/Makefile nvfortran-openacc \
 Use `nvaccelinfo` and `nvidia-smi` to check that the compiler runtime can see
 the selected GPU before running the resulting executable.
 
+`JETSPIN_OPENACC_COULOMB_MIN_BEADS=<n>` sets the fewest active beads for which
+a three-dimensional run that has not engaged a persistent device path
+offloads the Coulomb sum (default 128; 0 offloads every call). When timing a
+GPU run, bind it to the NUMA node of its GPU (`nvidia-smi topo -m` lists the
+affinity), for example `numactl --cpunodebind=3 --membind=3 ./main.x`:
+placement of the host process alone changes latency-bound runs by up to
+8 %.
+
 For compiler and numerical validation without an accessible NVIDIA device:
 
 ```sh

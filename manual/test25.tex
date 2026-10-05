@@ -55,7 +55,7 @@ and 295, the path length 112 cm, and the fibre radius at the collector
 the nozzle with a local half-angle growing from about 8 to 12 degrees.  Four
 more CPU seeds give mean active counts between 267.8 and 268.4 and the same
 path length, so the stationary regime does not depend on the noise
-realization.  One NVIDIA A30 runs the same 5 million steps in about 1850 s
+realization.  One NVIDIA A30 runs the same 5 million steps in about 1570 s
 against 5893 s for the CPU build; it reads the same Gaussian pool, stays on the CPU
 trajectory until about 3 million steps, and gives the same stationary
 values.
@@ -66,18 +66,20 @@ reported in Ref.~\cite{yarin2001bending}.  A full-length reference does not
 yet exist.
 
 The A30 run has two phases.  Until the jet holds 100 beads (step 1,446,413
-with seed 317, right after an accepted refinement event) the host integrates
-the equations of motion and only the three Coulomb sums of each Platen step
-run on the GPU; each call copies 13 arrays to the device and 2 back.
-Afterwards the whole step runs on the device-resident state, and an ordinary
-step returns only a 20-byte record of topology decisions to the host.  With
-each process bound to the NUMA node of its GPU, the first phase takes 430 s
-(298~$\mu$s per step, 79\% of it in the offloaded Coulomb calls), while the
-CPU build needs 156 to 166 s for the same steps.  The second phase takes 1418 s, at
-about 400~$\mu$s per step from 120 to 300 beads against 0.5 to 1.8 ms for the
-CPU build; the device computes for about 55\% of each step, and the rest is
-the launch and synchronization latency of 31 small kernels.  Without binding,
-placement of the host process alone changes the timings by up to 8\%.
+with seed 317, right after an accepted refinement event) the whole step runs
+on the host, which also computes the Coulomb sums while the jet has fewer
+than 128 active beads, and the run reproduces the CPU build byte for byte.
+Afterwards the step runs on the device-resident state, and an ordinary step
+returns only a 20-byte record of topology decisions to the host.  With each
+process bound to the NUMA node of its GPU, the first phase takes 156 s, the
+time of the CPU build; until 2026-10-05 the three Coulomb sums of each step
+were offloaded, each call copying 13 arrays to the device and 2 back, and the
+phase took 430 s, 79\% of it in those calls.  The second phase takes 1418 s,
+at about 400~$\mu$s per step from 120 to 300 beads against 0.5 to 1.8 ms for
+the CPU build; the device computes for about 55\% of each step, and the rest
+is the launch and synchronization latency of 31 small kernels.  Without
+binding, placement of the host process alone changes the timings by up to
+8\%.
 
 The case is excluded from the short smoke and regression matrices because of
 its length.  The input is stored in \texttt{examples/input-25/input.dat}, and

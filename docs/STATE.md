@@ -1,5 +1,65 @@
 # JETSPIN development state and handoff log
 
+## Coulomb sum on the host for short non-persistent jets (2026-10-05)
+
+### Change
+
+- `coulomb_offload_3d()` (`coulomb_force_mod.f90`): a 3-D run that has not
+  engaged a persistent path offloads the Coulomb sum, with or without
+  evaporation, only while the jet has at least
+  `accelerator_coulomb_min_beads` = 128 active beads
+  (`JETSPIN_OPENACC_COULOMB_MIN_BEADS`; 0 offloads every call as before, an
+  invalid value prints a warning and is ignored). A persistent run always
+  offloads; the 1-D offload is unchanged.
+- The host non-evaporative Coulomb path refreshes the device charges with
+  `update device(jetch) if_present`: without `if_present` it aborted when the
+  jet was not mapped, which the threshold makes reachable in standard
+  builds. The evaporative host path of the Coulomb oracle
+  (`JETSPIN_DEV_HOST_COULOMB_ACTIVE`) gets the same clause. This removes the
+  abort of the oracle builds in the non-persistent phase (open since
+  2026-10-01): the force and Coulomb oracles run Test 25 through the
+  engagement to 1.5 million steps.
+
+### Crossover
+
+First 2.1 million steps of Tests 25 and 24 on bound A30s, persistent path
+closed (`JETSPIN_OPENACC_DISABLE_PERSISTENT=1`), the Coulomb sum always
+offloaded or always on the host; a third of the difference of the median
+step times is the extra cost of one offloaded call:
+
+| Active beads | Test 25 | Test 24 |
+| --- | ---: | ---: |
+| 1 – 20 | +72 us | +66 us |
+| 80 – 100 | +33 us | +45 us |
+| 120 – 140 | -20 us | +12 us |
+| 160 – 200 | -95 us | -41 us |
+| 250 – 300 | -381 us | -286 us |
+
+The crossovers are about 110 beads with evaporation and 150 without; 128
+lies between them.
+
+### Evidence
+
+- Test 25 (seed 317, 5 million steps, bound): phase 1 156 s instead of
+  430 s, loop 1574 s instead of 1840/1856 s. `statout.dat` and the printed
+  observables are identical to the CPU build up to step 1,440,000, the last
+  print before the engagement; afterwards the bead count first differs from
+  the CPU at step 4.64 million (3.26 million before). Between 4 and 5
+  million steps: 267.6 beads, 111.84 cm, off-axis 2.780 cm, 19.71 degrees
+  (CPU 267.4, 111.85, 2.784, 19.74); 221 additions and 922 removals, as on
+  the CPU.
+- Test 24 (non-persistent throughout): the printed observables equal the
+  CPU build's up to step 1,700,000 although the offload starts at 1,540,000
+  (128 beads), and differ by at most `9.9e-10` relatively at 2 million.
+  Its first 2.1 million steps take 586 s, against 854 s with every call
+  offloaded and 801 s with every call on the host (bound A30s). The full 5
+  million steps take 4546 s and give 512.1 active beads, a 3.79 cm off-axis
+  distance and a 26.6 degree cone between 4 and 5 million steps, as the CPU
+  build (512, 3.8 cm, 27 degrees).
+- Unchanged: Tests 21-23 `statout.dat` byte-identical to 2026-10-01 (their
+  jets start above 400 beads); Tests 12-15 and 20 byte-identical on GPU and
+  CPU; regression openacc cases 1-8 and Tests 16/17 pass.
+
 ## 64-bit wall-clock counts (2026-10-05)
 
 `wall_time_world` (`serial_version_mod.f90`) and `profiling_mod` pass

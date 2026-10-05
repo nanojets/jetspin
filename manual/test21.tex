@@ -22,8 +22,8 @@ remeshes is $5\times10^{-5}$ s, leaving a post-refinement trajectory before
 the run ends.
 
 The OpenACC path keeps the Platen stages, pre-generated Gaussian pool,
-insertion, and state on the device. Repeated refinement checks transfer only
-three reduction scalars. At an accepted event the active state is downloaded,
+insertion, and state on the device. Repeated refinement checks return only
+three reduction results, in one transfer. At an accepted event the active state is downloaded,
 the host constructs normalized source and target knots, and Akima coefficient
 construction and all 11 spline interpolations execute on the GPU. Conservation
 and anchor restoration remain on the host, after which the remeshed state is
@@ -52,8 +52,8 @@ All paths start with 79 interior anchors, finish with \texttt{nref=1}, and
 preserve anchor positions and fields within the $10^{-12}$ checker tolerance.
 Reference and evaporation-volume conservation errors are of order
 $10^{-16}$, with no capacity reallocation. The run pre-generates the
-$10^{8}$-value Gaussian pool once and uploads it once. A transfer audit observed only the three reduction scalars during
-ordinary threshold checks, one full-state download and upload at the Akima
+$10^{8}$-value Gaussian pool once and uploads it once. A transfer audit observed only the three reduction results, returned in one
+transfer, during ordinary threshold checks, one full-state download and upload at the Akima
 event, and the independent final-shutdown download.
 
 In the capacity-growth mode capacity grows from 450 to 555 entries on all

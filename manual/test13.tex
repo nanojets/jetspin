@@ -16,37 +16,28 @@ removal occurs.
 The current dynamic milestone reserves capacity for 1,280 beads and keeps the
 RK4 state, Coulomb data, derivatives, and scratch arrays persistently mapped
 while the active lower and upper bead indices change. Collector detection and
-clamping run on the device and return one decision scalar. Nozzle distance
-checks, blocked-bead release, new-record initialization, and the
-\texttt{npjet} update also execute on the device. The host receives topology
-scalars each step and the two new tail records only when insertion occurs.
-Removed records are synchronized
-individually for output and cleared on both host and device. Reallocation
-beyond the reserved capacity and general compaction remain future work. An
-initial call-scoped NVFORTRAN 24.3 and NVIDIA A30 measurement required
-40.659696 s on CPU and 3.834931 s with OpenACC. The bounded persistent path
-with host insertion required 2.829376 s. Device-side insertion reduces this
-to 2.623558 s, or 381.162 steps/s. Moving RK4 intermediate updates from
-host to device changes floating-point rounding. The insertion threshold
-amplifies this into progressively earlier additions, while addition and
-removal counts, active bounds, and final bead count remain unchanged.
+clamping run on the device. Nozzle distance checks, blocked-bead release,
+new-record initialization, the \texttt{npjet} update, and the placement and
+charge smoothing of the blocked bead before every force evaluation also
+execute on the device. One serial kernel decides release, insertion,
+capacity exhaustion, and removal, and the host receives the outcome as one
+20-byte record per step, plus the two new tail records only when insertion
+occurs. Removed records are synchronized individually for output and cleared
+on both host and device. Reallocation beyond the reserved capacity and
+general compaction remain future work. An initial call-scoped NVFORTRAN 24.3
+and NVIDIA A30 measurement required 40.659696 s on CPU and 3.834931 s with
+OpenACC. The bounded persistent path with host insertion required
+2.829376 s, and device-side insertion reduced this to 2.623558 s, or
+381.162 steps/s, before the changes of 1 October 2026.
 
-With the environment variable
-\texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT=1}, JETSPIN writes the complete active
-state at every topology event. This diagnostic showed identical bead indices,
-frozen flags, masses, charges, volumes, and event metadata. The first device
-difference appears in a transverse quantity close to zero at step 40. Running
-the same OpenACC equation-of-motion kernel on the CPU agreed with the original
-CPU implementation near machine precision. The observed growth therefore
-originates primarily from device floating-point evaluation of curvature and
-is not evidence of an insertion or removal indexing error. The persistent
-dynamic control path retains all 26 events but has a separate versioned A30
-event stream. Setting
+The persistent A30 run reproduces the 26 CPU topology events step for step,
+and its statistics agree with the CPU within the paired tolerance
+$3\times10^{-4}$.  Until 1 October 2026 its insertions fell progressively
+earlier (step 593 instead of 600 for the seventh): the persistent path placed
+the blocked nozzle bead only when it was created and smoothed its charge on
+the stale host copy, so the device Coulomb sum saw a full charge at the
+nozzle.  That drift had been attributed to GPU RK4 rounding.  With the
+environment variable \texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT=1}, JETSPIN writes
+the complete active state at every topology event for such comparisons, and
 \texttt{JETSPIN\_OPENACC\_DISABLE\_PERSISTENT=1} restores the call-scoped
-path and exactly restores the previous event timesteps on the same A30. A
-separate diagnostic using the historical host cross-section computation did
-not change the persistent stream, isolating the timing shift to GPU RK4
-arithmetic rather than insertion, removal, or Coulomb indexing.
-Moving the insertion distance test to the GPU shifts one later threshold
-crossing from step 910 to step 909, without changing event counts, active
-bounds, or final topology.
+path.

@@ -1,5 +1,85 @@
 # JETSPIN development state and handoff log
 
+## Nozzle insertion on the device for every persistent path; one transfer per topology check (2026-10-01)
+
+### Changes
+
+- **Charge smoothing.** `smooth_charge`/`restore_charge` dispatch to the
+  device for every persistent 3-D run (`systype 3` or `4`), with or without
+  evaporation. Before, non-evaporative persistent runs smoothed the stale
+  host copy and the device Coulomb sum saw the inserting nozzle bead with its
+  full charge (the 2026-09-30 fix covered only the evaporative paths).
+- **Placing the inserting bead.** The dynamic RK4 path (`systype 3`) called
+  the host `compute_posnoinserted` on stale host arrays at every stage and
+  at the end of the step, so on the device the blocked bead was never
+  re-placed. `place_inserting_bead(xs,ys,zs,on_device)` calls
+  `accelerator_compute_posnoinserted_3d` on the device copy in persistent
+  runs and the host routine otherwise.
+- **Persistent non-evaporative Platen branch** (fixed geometry and the
+  `JETSPIN_GPU_DYNAMIC_PLATEN` fork): smoothing, placement and restoring now
+  bracket each of the three force evaluations as in the host branch (the
+  charge used to be smoothed once on the host copy and the bead placed only
+  at the end of the step); the predictor/velocity/position kernels skip the
+  stochastic force for frozen and inserting beads and keep frozen beads
+  fixed, as `eom4`/`eom4_pos` do.
+- **Lead-bead curvature after removal** (`collector_curvature=.true.`) for
+  the non-evaporative dynamic RK4 and Platen force stages, as in
+  `eom3`/`eom4`.
+- **Fewer host/device transfers.** `accelerator_topology_check` replaces
+  `accelerator_add_bead` and the decision part of `accelerator_remove_bead`:
+  one serial kernel decides release, insertion, capacity exhaustion and
+  removal, one parallel kernel freezes beads at the collector, and the
+  outcome (`accelerator_topology_flags`, five integers) returns in a single
+  `update self`; `npjet` and `linserted` enter as kernel arguments. Before:
+  two uploads and five downloads per step. `accelerator_finish_remove_bead`
+  completes an accepted removal where `accelerator_remove_bead` did. The
+  refinement threshold scan reduces in one gang and returns its three
+  results in one transfer (`accelerator_refinement_scan`) instead of three
+  uploads and three downloads; only the order of the path-length sum changes,
+  and that sum only decides whether to download the state.
+
+### Evidence
+
+- Evaporative paths unchanged: Tests 21-23 native `statout.dat`
+  byte-identical to the 2026-09-30 runs (events, capacities, removals
+  unchanged), Test 16/17 validation passes (integrators 1-3), regression
+  openacc cases 1-8 pass, Tests 12 and 20 byte-identical to the previous
+  build. Test 25 (seed 317, 5 million steps): `traj.xyz` and `statout.dat`
+  byte-identical to the 2026-09-30 build; with one run per A30 on the same
+  node, two runs of each build, the new build takes 1939 and 1941 s (2586
+  steps/s) against 2007 and 2009 s (2498 steps/s), 3.4% less wall time.
+- Transfers (NVCOMPILER_ACC_NOTIFY=2): per ordinary step Test 23 moves one
+  topology record and one scan record, against 13 transfers before (2+5
+  topology scalars, 3+3 scan scalars); Tests 21/22 likewise 2 against 12.
+- Test 13 (persistent RK4, 1,000 steps): A30 event stream equals the CPU
+  one (26 events); before, insertions drifted earlier by about one step per
+  insertion (593 instead of 600 for the seventh). Statistics pass
+  `compare.sh` (`rtol=3e-4`, worst 0.94 of the tolerance).
+- Test 14: A30 events equal the CPU's (37 events, 18 additions, 19 removals,
+  1,499 beads; before 19 additions, 1,500 beads); 9 of 11 rows within
+  `3e-4`, worst `4.8e-3` in `vz`.
+- Test 15: 111 additions and two reallocations on both builds, all rows
+  within `5.1e-5` (before up to 0.14 in `vz`); two insertions one step
+  later on the A30 at the reallocation steps (5/906 against 4/905), because
+  the device path grows the capacity first and inserts at the next step.
+- CPU builds unchanged: Tests 12-15 and 20 `statout.dat` byte-identical
+  between the new and the previous NVFORTRAN CPU binaries.
+- Dynamic Platen fork, Test 24 input, single bead, 2 million steps, seed 317:
+  reference is the same build with `JETSPIN_OPENACC_DISABLE_PERSISTENT=1`
+  (host integration, same pool; the NVFORTRAN CPU build does not use the
+  pool for this case, so its noise differs from step 1). Fixed fork: lp
+  within `1.2e-8` through 1.8 million steps and `7e-7` at 2 million, same bead
+  count in all 100 frames, 86 of 88 insertion steps identical (last two one
+  step apart). Unfixed fork (HEAD `7e3a64f`): `1.3e-6` at 1.4 million,
+  `5e-4` at 1.48 million, first bead-count difference at 1.42 million; 92
+  insertions and 282 beads at 2 million against 88 and 276.
+
+### Not fixed
+
+- Oracle builds still abort in the non-persistent phase (`update
+  device(jetch)` without `if_present`); restart with evaporation; async
+  queue.
+
 ## Sequential Gaussian pool by default; persistent `platen_ev` fixed and corrected (2026-09-30)
 
 ### Changes

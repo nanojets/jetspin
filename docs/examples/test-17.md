@@ -10,7 +10,8 @@ On the GPU, Euler executes one force/stress stage, RK2 executes two, and RK4
 executes four. Their intermediate and final updates, charge
 smoothing/restoration, direct Coulomb force, evaporation, and final statistics
 reductions execute without transferring jet or derivative arrays between
-stages. Per-step host/device traffic is limited to topology decision scalars.
+stages. Per-step host/device traffic is limited to one 20-byte topology
+record.
 Actual insertions, removals, scheduled output, capacity growth, and the final
 checkpoint transfer only their required data; the two reallocations
 necessarily synchronize and rebind the active state.

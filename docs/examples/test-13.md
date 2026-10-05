@@ -14,36 +14,32 @@ The second dynamic milestone reserves capacity for 1,280 beads before the
 OpenACC mapping and keeps RK4, Coulomb, and EOM arrays resident while
 `inpjet` and `npjet` change. Collector detection and clamping execute on the
 device. Nozzle distance checks, release of the blocked bead, initialization
-of the new record, and the `npjet` update also execute on the device. The host
-receives only topology scalars each step and the two new tail records when an
-insertion actually occurs. Removed records are synchronized individually for
-removal output and then cleared on both host and device. Capacity growth and
-general compaction remain future work.
+of the new record, the `npjet` update, and the placement and charge
+smoothing of the blocked bead before every force evaluation also execute on
+the device. The host receives one 20-byte topology record each step and the
+two new tail records when an insertion actually occurs. Removed records are
+synchronized individually for removal output and then cleared on both host
+and device. Capacity growth and general compaction remain future work.
 
 The original call-scoped NVFORTRAN 24.3/A30 comparison measured `40.659696 s`
 on CPU and `3.834931 s` with OpenACC and reproduced the CPU topology stream.
 With host-side insertion the bounded persistent A30 path took `2.829376 s`.
 The final fully device-side insertion path takes `2.623558 s`
-(`381.162 steps/s`).
-Moving the RK4 intermediate updates from host to GPU changes floating-point
-rounding; the insertion threshold amplifies this into progressively earlier
-insertion events, although event counts, removals, active bounds, and final
-bead count remain unchanged. The old and new streams are stored separately.
+(`381.162 steps/s`); those timings predate the 2026-10-01 changes below.
 
-A full-state event-by-event diagnosis confirmed exact bead indices, frozen
-flags, masses, charges, volumes, and event metadata. The first CPU/device
-difference occurs in a transverse quantity close to zero at step 40. The same
-OpenACC EOM executed on the CPU agrees with the original CPU implementation to
-about machine precision, identifying device floating-point evaluation of the
-EOM/curvature kernel—not insertion or removal—as the source subsequently
-amplified by the dynamic trajectory.
+The persistent A30 run reproduces the CPU topology stream (26 events) step
+for step, and its statistics pass the paired `rtol=3e-4` comparison with the
+NVFORTRAN CPU run (worst normalized difference 0.94). Until 2026-10-01 its
+insertions fell progressively earlier (step 593 instead of 600 for the
+seventh). The persistent path placed the blocked nozzle bead only when it was
+created and smoothed its charge on the stale host copy, so the device Coulomb
+sum saw a full charge at the nozzle. That drift had been attributed to GPU
+RK4 rounding; the diagnosis that the EOM itself agrees with the CPU to about
+machine precision was correct, the attribution of the remaining difference
+was not.
 
 `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` restores the call-scoped diagnostic
-path. On the same A30 it exactly restores the previous 26 event timesteps,
-which isolates the changed topology timing to GPU RK4 arithmetic rather than
-to removal or Coulomb indexing. Moving the insertion distance test itself to
-the GPU shifts one later threshold crossing from step 910 to step 909; counts,
-bounds, and final topology remain unchanged.
+path.
 
 - [Input file](../../examples/input-13/input.dat)
 - [Comparison record](../../tests/performance/dynamic/README.md)

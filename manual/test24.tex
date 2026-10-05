@@ -53,10 +53,12 @@ NVIDIA A30, closing correctly with no NaN and no device errors, and ending
 with 571 active beads, an off-axis distance of 4.09 cm, and a bending angle
 of 28.7 degrees.  That run used the development dynamic-Platen build.  Its
 printed path length, 111.4 cm, was halved by a defect of the persistent
-Platen statistics, since fixed, that counted each timestep twice, and the
-build still lacks the device-side charge smoothing of the bead being inserted
-at the nozzle, which in Test Case~25 made the GPU jet about ten percent longer
-and denser; it is therefore not a reference.  An NVFORTRAN CPU run gives
+Platen statistics, since fixed, that counted each timestep twice, and until
+1 October 2026 the build lacked the device-side charge smoothing and placement
+of the bead being inserted at the nozzle, which in Test Case~25 made the GPU
+jet about ten percent longer and denser; it is therefore not a reference.
+With the fix the fork follows its own non-persistent run, which reads the same
+Gaussian pool, within $7\times10^{-7}$ in path length over 2 million steps.  An NVFORTRAN CPU run gives
 212 cm and about 512 active beads between steps 4 and 5 million.  The
 bead count oscillates around
 570 over the last two million steps rather than drifting, so the balanced

@@ -176,13 +176,14 @@ end subroutine reset_coulomb_accelerator
   double precision :: dtemp
 
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
-! A persistent evaporative run keeps coordinates and charges on the device,
-! where the Coulomb kernel reads them, so the smoothing must happen there.
-! Until 2026-09-30 only systype 3 was dispatched: a Maxwell (systype 4)
-! persistent run smoothed the stale host copy instead, and the device Coulomb
-! sum saw the not-yet-inserted nozzle bead with its full charge.
-  if(accelerator_persistent_mode .and. levaporation .and. &
-   (systype==3 .or. systype==4) .and. mxrank==1 .and. .not.lmultiplestep)then
+! A persistent run keeps coordinates and charges on the device, where the
+! Coulomb kernel reads them, so the smoothing must happen there.  Only
+! evaporative systype 3 runs were dispatched until 2026-09-30, evaporative
+! systype 4 runs from then and every persistent 3-D run since 2026-10-01;
+! the others smoothed the stale host copy, and the device Coulomb sum saw
+! the not-yet-inserted nozzle bead with its full charge.
+  if(accelerator_persistent_mode .and. (systype==3 .or. systype==4) .and. &
+   mxrank==1 .and. .not.lmultiplestep)then
     call accelerator_smooth_charge_3d(npjet,linserted,thresolution,dresolution, &
      yxx,yyy,yzz,jetch)
     return
@@ -233,8 +234,8 @@ end subroutine reset_coulomb_accelerator
 
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
 ! Same dispatch as smooth_charge.
-  if(accelerator_persistent_mode .and. levaporation .and. &
-   (systype==3 .or. systype==4) .and. mxrank==1 .and. .not.lmultiplestep)then
+  if(accelerator_persistent_mode .and. (systype==3 .or. systype==4) .and. &
+   mxrank==1 .and. .not.lmultiplestep)then
     call accelerator_restore_charge(npjet,linserted,jetch)
     return
   endif

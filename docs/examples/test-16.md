@@ -25,7 +25,8 @@ accumulation order creates roundoff-level changes that are amplified by the
 physical bending instability and later topology crossings.
 
 A transfer audit with all development macros disabled shows only topology
-decision scalars on ordinary timesteps. Bead records are transferred on actual
+decision scalars on ordinary timesteps; since 2026-10-01 they return as one
+20-byte record per step. Bead records are transferred on actual
 insertion/removal and output events; complete active arrays are synchronized
 only for the two capacity reallocations and the final checkpoint. The
 rheology-independent `nvfortran-openacc-force-oracle` target isolates complete

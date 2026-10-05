@@ -7,35 +7,32 @@ and 13 removals, ends with 1,024 active beads, and never falls below 1,023.
 
 The current milestone reserves 1,280 bead slots and keeps the RK4, Coulomb,
 EOM, state, and scratch arrays persistently mapped while the active bounds
-change. Removal detection and collector clamping run on the device and return
-one decision scalar. Nozzle distance checks, blocked-bead release, record
-initialization, and the `npjet` update also run on the device. Only topology
-scalars return every step; the two new tail records are downloaded when an
+change. Removal detection and collector clamping run on the device. Nozzle
+distance checks, blocked-bead release, record initialization, the `npjet`
+update, and the placement and charge smoothing of the blocked bead before
+every force evaluation also run on the device. One 20-byte topology record
+returns every step; the two new tail records are downloaded when an
 insertion actually occurs. Removed records are downloaded individually for
 removal output and cleared on both sides.
 Reallocation beyond the reserved capacity and general compaction are not yet
 device-resident.
 
-The device-insertion persistent A30 path completes in `2.623558 s`
-(`381.162 steps/s`), compared with `2.829376 s` for persistent RK4 with
-host-side insertion. It
-retains 13 additions, 13 removals, and 1,024 final active beads. Its insertion
-events occur progressively earlier than in the call-scoped baseline because
-the threshold is sensitive to GPU RK4 rounding. The two acceptance streams
-are therefore stored separately:
+The persistent A30 path reproduces the CPU event stream step for step
+(13 additions, 13 removals, 1,024 final active beads). Until 2026-10-01 its
+insertions occurred progressively earlier, because the blocked bead was
+placed only when created and its charge was smoothed on the stale host copy;
+that drift had been attributed to GPU RK4 rounding. The acceptance streams
+are:
 
-- `topology-events.txt`: previous call-scoped/CPU topology baseline;
-- `topology-events-persistent-host-insertion-a30.txt`: intermediate
-  persistent RK4 baseline with host-side insertion;
-- `topology-events-persistent-a30.txt`: current device-insertion A30 baseline.
+- `topology-events.txt`: CPU, call-scoped, and persistent A30 stream;
+- `topology-events-persistent-a30.txt`: persistent A30 stream, identical to
+  the CPU one since 2026-10-01;
+- `topology-events-persistent-host-insertion-a30.txt`: historical
+  intermediate stream of persistent RK4 with host-side insertion.
 
-Setting `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` restores the call-scoped path
-and exactly reproduces the previous event stream on the same A30. Replacing
-only the device cross-section calculation with the historical host routine
-does not change the persistent stream. Together these controls isolate the
-timing change to GPU RK4 arithmetic, not topology or Coulomb indexing.
-The insertion distance test on the GPU moves only the later step-910 crossing
-to step 909 relative to the intermediate host-insertion baseline.
+Setting `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` restores the call-scoped path.
+The device-insertion persistent path took `2.623558 s` (`381.162 steps/s`)
+before the 2026-10-01 changes, against `2.829376 s` with host-side insertion.
 
 A paired NVFORTRAN 24.3/A30 run measured `40.659696 s` on CPU and `3.834931 s`
 with OpenACC. The topology event streams were identical. Dynamic curvature
@@ -86,7 +83,7 @@ and 89 active beads.
 
 With `NVCOMPILER_ACC_NOTIFY=2`, the normal build shows no jet-state, Coulomb,
 force, stress, or derivative-array transfer between stages for Euler, RK2, or
-RK4. Ordinary steps exchange only topology decision scalars. New/removed
+RK4. Ordinary steps return only one 20-byte topology record. New/removed
 records, selected statistical samples, capacity rebinds, and the final
 checkpoint account for the remaining data traffic. The complete-force and
 Coulomb-only oracle targets are diagnostic exceptions and deliberately copy

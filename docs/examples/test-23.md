@@ -62,8 +62,11 @@ An A30 transfer audit records four complete state downloads: the three
 accepted Akima events and final shutdown. It also records exactly three
 topology rebinds and three evaporation-state rebinds; the Gaussian pool is
 uploaded once at startup.
-Each timestep returns one four-byte removal flag; an accepted removal returns
-only the collected point fields and clears that one device slot.
+Each timestep returns one 20-byte topology record carrying the insertion and
+removal decisions (until 2026-10-01, seven separate scalar transfers); an
+accepted removal returns only the collected point fields and clears that one
+device slot. With the scan result, an ordinary step moves two small records
+in total, against thirteen transfers before.
 
 The Akima A/B build evaluates the historical host routine and the new device
 routine at every event. Across 33 field/event comparisons, the largest

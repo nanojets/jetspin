@@ -58,11 +58,11 @@
                          accelerator_update_device_topology_state, &
                          accelerator_update_device_evaporation_state, &
                          accelerator_device_state_is_current, &
-                         accelerator_remove_bead, &
+                         accelerator_finish_remove_bead, &
                          accelerator_update_host_removed_evaporation, &
                          accelerator_update_device_removed, &
                          accelerator_update_device_removed_evaporation, &
-                         accelerator_add_bead, &
+                         accelerator_topology_check, &
                          accelerator_update_device_added_evaporation
 #endif
   use profiling_mod, only : profiling_initialize,profiling_reset, &
@@ -119,6 +119,7 @@
   double precision :: loop_start_time,loop_end_time,loop_elapsed_time
   
   logical :: ladd,lresize,lrem,lremdat,ldorefinment,lrecycle
+  logical :: ldevicetopology
   logical :: lfullhostoutput
   logical :: ltopologysnapshot
   character(len=32) :: topology_snapshot_env
@@ -259,13 +260,18 @@
 !   check if a new bead should be added and/or removed
     call profiling_start(prof_add_bead)
     lresize=.false.
+    ldevicetopology=.false.
 #ifdef _OPENACC
-    if((accelerator_is_persistent() .or. accelerator_is_topology_enabled()) .and. linserting)then
+    ldevicetopology=(accelerator_is_persistent() .or. &
+     accelerator_is_topology_enabled()) .and. linserting
+    if(ldevicetopology)then
       timedeposition=timedeposition+tstep
-       call accelerator_add_bead(npjet,mxnpjet,linserted,ladd,lresize,resolution, &
-       dresolution,thresolution,ivelocity,istress,imassa,icharge,ivolume, &
-       jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-       jetms,jetch,jetvl,jetfr)
+! Insertion and the removal test run on the device and report back in one
+! transfer; the removal itself is completed below, where it always was.
+      call accelerator_topology_check(npjet,mxnpjet,inpjet,linserted, &
+       lremove,h,resolution,dresolution,thresolution,ivelocity,istress, &
+       imassa,icharge,ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+       jetms,jetch,jetvl,jetfr,ladd,lresize,lrem)
       if(ladd .and. levaporation) &
        call accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
       if(ladd)call tag_accelerator_added_bead()
@@ -298,10 +304,10 @@
     call profiling_stop(prof_add_bead)
     call profiling_start(prof_remove_bead)
 #ifdef _OPENACC
-    if((accelerator_is_persistent() .or. accelerator_is_topology_enabled()) .and. &
-       .not.lresize .and. linserting .and. lremove)then
-      call accelerator_remove_bead(inpjet,npjet,h,jetxx,jetyy,jetzz,jetst, &
-       jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nremoved,lrem)
+    if(ldevicetopology .and. .not.lresize .and. lremove)then
+      nremoved=merge(1,0,lrem)
+      call accelerator_finish_remove_bead(inpjet,lrem,jetxx,jetyy,jetzz,jetst, &
+       jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
       if(lrem .and. levaporation) &
        call accelerator_update_host_removed_evaporation(inpjet-1,jetve,jetce)
       lremdat=lrem

@@ -1549,7 +1549,7 @@
 
   if(.not.ltagbeads)return
 
-! accelerator_add_bead has already incremented npjet.  Preserve the old
+! accelerator_topology_check has already incremented npjet.  Preserve the old
 ! nozzle flag at its copied endpoint before tagging the newly inserted bead.
   jetbd(npjet)=jetbd(npjet-1)
   call tag_beads()

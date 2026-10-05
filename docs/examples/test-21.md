@@ -27,9 +27,9 @@ validation.
 
 The port keeps Maxwell/Platen integration, Gaussian-history access, insertion,
 and the repeated refinement-threshold scan on the GPU. Each eligible scan
-reduces only three values to the host: the last over-threshold segment index,
-total path length, and the nozzle correction used to estimate the target mesh
-size. When the complete historical acceptance criterion can be satisfied, the
+reduces only three values and returns them to the host in one transfer: the
+last over-threshold segment index, total path length, and the nozzle
+correction used to estimate the target mesh size. When the complete historical acceptance criterion can be satisfied, the
 active state is downloaded once. The host prepares normalized source and
 target coordinates; Akima slopes, tangents, cubic coefficients, and all 11
 field interpolations then execute on the GPU. Conservation, anchor checks, and
@@ -89,7 +89,10 @@ fell one step earlier, which offset the pool position, and the event moved
 to step 7,125.
 
 An `NVCOMPILER_ACC_NOTIFY=2` audit of the native A30 run observed 6,132
-eligible threshold scans, each exchanging only the three reduction scalars.
+eligible threshold scans, each returning its three results in one transfer
+(until 2026-10-01, three uploads and three downloads). The insertion and
+removal decisions return as one 20-byte record per step (before, two uploads
+and four downloads).
 The full active state was downloaded at the accepted refinement event and at
 final shutdown, and the remeshed state was uploaded once. Within that rare
 event, source and target coordinates are uploaded once, each of the 11 source

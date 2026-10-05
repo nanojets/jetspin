@@ -77,20 +77,15 @@ contains
  end function dynamic_platen_configured_common
 
 ! Used ONLY to decide, once, before the timestep loop starts, whether to
-! pre-generate the indexed Gaussian noise history at all (see
+! pre-generate the Gaussian pool at all (see
 ! prepare_integrator_random_history in integrator_mod.f90). At that point
 ! the jet may still be a single bead (npjet==1), so this deliberately does
-! NOT gate on npjet/mxnpjet: mxnpjet already defaults to incnpjet==100
-! (nanojet_mod.f90) even for a 1-bead jet, and prepare_gaussian_history
-! sizes the history to mxnpjet already. resize_gaussian_history (called
-! from dynamic_refinement_mod.f90 whenever mxnpjet grows further) extends
-! it from there — no separate "retroactive bootstrap" is needed.
+! NOT gate on npjet/mxnpjet; the pool does not depend on capacity. It does
+! not honour JETSPIN_OPENACC_DISABLE_PERSISTENT either (since 2026-10-01):
+! that switch only keeps the per-step gate below closed, so persistent and
+! non-persistent runs of this build read the same noise.
  logical function dynamic_platen_accelerator_configured()
   implicit none
-  if(persistent_disabled_by_env())then
-    dynamic_platen_accelerator_configured=.false.
-    return
-  endif
   dynamic_platen_accelerator_configured=dynamic_platen_configured_common()
  end function dynamic_platen_accelerator_configured
 

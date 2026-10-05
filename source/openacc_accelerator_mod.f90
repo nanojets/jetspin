@@ -16,8 +16,17 @@ module accelerator_mod
  integer, save :: statistics_step_index=-1
  integer, save :: accelerator_last_host_sync_step=-huge(0)
  double precision, save :: accelerator_smoothed_charge=0.d0
+! Outcome of one timestep's device topology checks (npjet, linserted as 0/1,
+! bead added, capacity exhausted, bead removed), read back in one transfer
+! by accelerator_topology_check.
+ integer, save :: accelerator_topology_flags(5)=0
+! Results of one refinement threshold scan (last over-threshold segment,
+! path length, nozzle correction), read back in one transfer.
+ double precision, save :: accelerator_refinement_scan(3)=0.d0
 #ifdef _OPENACC
 !$acc declare create(accelerator_smoothed_charge)
+!$acc declare create(accelerator_topology_flags)
+!$acc declare create(accelerator_refinement_scan)
 #endif
 
  public :: accelerator_prepare
@@ -59,11 +68,11 @@ module accelerator_mod
  public :: accelerator_release_evaporation_capacity
  public :: accelerator_update_host_point
  public :: accelerator_update_host_evaporation_point
- public :: accelerator_remove_bead
+ public :: accelerator_finish_remove_bead
  public :: accelerator_update_host_removed_evaporation
  public :: accelerator_update_device_removed
  public :: accelerator_update_device_removed_evaporation
- public :: accelerator_add_bead
+ public :: accelerator_topology_check
  public :: accelerator_update_device_added_evaporation
  public :: accelerator_host_state_is_current
  public :: accelerator_mark_device_state
@@ -1109,8 +1118,9 @@ contains
   logical, intent(out) :: candidate
   integer, intent(out) :: refinement_start
   double precision, intent(out) :: path_length,nozzle_correction
-  integer :: ipoint,lastsegment
+  integer :: ipoint,lastsegment,scan_start
   double precision :: dx,dy,dz,distance,tdx,tdy,tdz,tail_distance
+  double precision :: scan_length,scan_correction
 
   if(linserting)then
     if(linserted)then
@@ -1127,14 +1137,22 @@ contains
   nozzle_correction=0.d0
   if(npjet-1>=inpjet)then
 #ifdef _OPENACC
-! Only the final integer reduction crosses from device to host on an ordinary
-! refinement check, together with two scalar lengths.  The complete jet state
-! remains resident until this scan reports that the historical CPU Akima path
-! may actually produce a denser mesh.
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz) &
-!$acc& private(dx,dy,dz,distance,tdx,tdy,tdz,tail_distance) &
-!$acc& reduction(max:refinement_start,nozzle_correction) &
-!$acc& reduction(+:path_length)
+! Only the three scan results cross from device to host on an ordinary
+! refinement check, in one transfer.  The complete jet state remains resident
+! until this scan reports that the historical CPU Akima path may actually
+! produce a denser mesh.  One gang reduces the scan and stores the results
+! on the device; until 2026-10-01 the three reduction scalars were each
+! copied in and out, six transfers per scan.  Only the order of the
+! path-length sum differs, and that sum only selects whether to download.
+!$acc parallel num_gangs(1) vector_length(128) present(jetxx,jetyy,jetzz, &
+!$acc& accelerator_refinement_scan) private(scan_start,scan_length,scan_correction)
+#endif
+    scan_start=-1
+    scan_length=0.d0
+    scan_correction=0.d0
+#ifdef _OPENACC
+!$acc loop vector private(dx,dy,dz,distance,tdx,tdy,tdz,tail_distance) &
+!$acc& reduction(max:scan_start,scan_correction) reduction(+:scan_length)
 #endif
     do ipoint=inpjet,npjet-1
       dx=jetxx(ipoint)-jetxx(ipoint+1)
@@ -1145,9 +1163,9 @@ contains
         dz=jetzz(ipoint)-jetzz(ipoint+1)
         distance=dsqrt(dx*dx+dy*dy+dz*dz)
       endif
-      path_length=path_length+distance
+      scan_length=scan_length+distance
       if(ipoint<=lastsegment .and. distance>threshold) &
-       refinement_start=max(refinement_start,ipoint)
+       scan_start=max(scan_start,ipoint)
 
 ! Match the correction used by check_dynamic_refinement_akima to exclude the
 ! blocked insertion segment(s) from the requested spline size.
@@ -1166,11 +1184,18 @@ contains
           endif
         endif
       endif
-      nozzle_correction=max(nozzle_correction,tail_distance)
+      scan_correction=max(scan_correction,tail_distance)
     enddo
+    accelerator_refinement_scan(1)=dble(scan_start)
+    accelerator_refinement_scan(2)=scan_length
+    accelerator_refinement_scan(3)=scan_correction
 #ifdef _OPENACC
-!$acc end parallel loop
+!$acc end parallel
+!$acc update self(accelerator_refinement_scan)
 #endif
+    refinement_start=nint(accelerator_refinement_scan(1))
+    path_length=accelerator_refinement_scan(2)
+    nozzle_correction=accelerator_refinement_scan(3)
   endif
 
   candidate=refinement_start>=inpjet
@@ -1181,9 +1206,10 @@ contains
    jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
    f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
    y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
-   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
+   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,linserted,jetfr)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint
+  logical, intent(in) :: linserted,jetfr(0:)
   double precision, intent(in) :: h,airamp,noisediff,jetms(0:)
   double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
   double precision, intent(in) :: jetvx(0:),jetvy(0:),jetvz(0:)
@@ -1200,12 +1226,15 @@ contains
 !$acc parallel loop gang vector present(jetms,jetxx,jetyy,jetzz,jetst, &
 !$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
 !$acc& y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st, &
-!$acc& y2vx,y2vy,y2vz) private(j,stoc)
+!$acc& y2vx,y2vy,y2vz,jetfr) private(j,stoc)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
     stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
-    if(ipoint==lastpoint)stoc=0.d0
+! eom4 gives no stochastic force to the nozzle, to a collected (frozen)
+! bead, or to the bead still being inserted at the nozzle.
+    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
+     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
     y1xx(ipoint)=jetxx(ipoint)+h*f1xx(j)
     y1yy(ipoint)=jetyy(ipoint)+h*f1yy(j)
     y1zz(ipoint)=jetzz(ipoint)+h*f1zz(j)
@@ -1289,9 +1318,10 @@ contains
    historysteps,k,h, &
    airamp,noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
    f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz, &
-   historybase,historywindow,historyvalues)
+   historybase,historywindow,historyvalues,linserted,jetfr)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,mxnpjet,historysteps,k
+  logical, intent(in) :: linserted,jetfr(0:)
 ! Sequential-pool slice for this timestep (see begin_gaussian_history_step
 ! in utility_mod.f90).
   integer, intent(in) :: historybase,historywindow,historyvalues
@@ -1312,13 +1342,15 @@ contains
   hfirst=firstpoint
 #ifdef _OPENACC
 !$acc parallel loop gang vector present(jetms,gaussianhistory,jetvx,jetvy, &
-!$acc& jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz) &
+!$acc& jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz,jetfr) &
 !$acc& private(j,component,index1,index2,stoc,u1,u2,ww,zz)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
     stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
-    if(ipoint==lastpoint)stoc=0.d0
+! Same exclusions as accelerator_platen_predict.
+    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
+     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
     component=1
     index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
     index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
@@ -1410,10 +1442,11 @@ contains
  end subroutine accelerator_platen_evap_velocity
 
  subroutine accelerator_platen_positions(firstpoint,lastpoint,npjet,h,pfreq, &
-   liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz)
+   liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz, &
+   linserted,jetfr)
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: liniperturb
+  logical, intent(in) :: liniperturb,linserted,jetfr(0:)
   double precision, intent(in) :: h,pfreq,jetvx(0:),jetvy(0:),jetvz(0:)
   double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
   double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:)
@@ -1421,11 +1454,16 @@ contains
   double precision :: f2x,f2y,f2z,y1y,y1z
 #ifdef _OPENACC
 !$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
-!$acc& jetvz,f1xx,f1yy,f1zz) private(j,f2x,f2y,f2z,y1y,y1z)
+!$acc& jetvz,f1xx,f1yy,f1zz,jetfr) private(j,f2x,f2y,f2z,y1y,y1z)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
     f2x=jetvx(ipoint); f2y=jetvy(ipoint); f2z=jetvz(ipoint)
+! eom4_pos: a collected bead stays where the collector stopped it, and the
+! bead being inserted is placed by compute_posnoinserted.
+    if(jetfr(ipoint) .or. (ipoint==npjet-1 .and. .not.linserted))then
+      f2x=0.d0; f2y=0.d0; f2z=0.d0
+    endif
     if(ipoint==npjet)then
       f2x=0.d0
       if(liniperturb)then
@@ -1860,83 +1898,138 @@ contains
 #endif
  end subroutine accelerator_update_host_evaporation_state
 
- subroutine accelerator_add_bead(npjet,mxnpjet,linserted,ladd,lresize, &
-   resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
-   ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
-   jetvz,jetms,jetch,jetvl,jetfr)
+ subroutine accelerator_topology_check(npjet,mxnpjet,inpjet,linserted, &
+   lremove,h,resolution,dresolution,thresolution,ivelocity,istress,imassa, &
+   icharge,ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch, &
+   jetvl,jetfr,ladd,lresize,lrem)
+! One timestep of device topology decisions: release of the blocked nozzle
+! bead or insertion of a new one (as add_jetbead) and, with removal enabled,
+! freezing at the collector and the removal test (as remove_jetbead).  The
+! outcome is written to accelerator_topology_flags and returns to the host
+! in a single transfer; until 2026-10-01 every decision scalar was copied
+! separately (two uploads and five downloads per step).  Bead records cross
+! only when an insertion actually happens, or in
+! accelerator_finish_remove_bead when a removal does.
   implicit none
   integer, intent(inout) :: npjet
-  integer, intent(in) :: mxnpjet
-  logical, intent(inout) :: linserted,ladd,lresize
-  double precision, intent(in) :: resolution,dresolution,thresolution
+  integer, intent(in) :: mxnpjet,inpjet
+  logical, intent(inout) :: linserted
+  logical, intent(in) :: lremove
+  logical, intent(out) :: ladd,lresize,lrem
+  double precision, intent(in) :: h,resolution,dresolution,thresolution
   double precision, intent(in) :: ivelocity,istress,imassa,icharge,ivolume
   double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
   double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
   double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
   logical, intent(inout) :: jetfr(0:)
+  integer :: ipoint,lastpoint,np,newadd,newresize,newremove
+  logical :: ins
   double precision :: dx,dy,dz,distance,scale
 
 #ifdef _OPENACC
 !$acc serial present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
-!$acc& jetch,jetvl,jetfr) copy(npjet,linserted) copyout(ladd,lresize) &
-!$acc& private(dx,dy,dz,distance,scale)
+!$acc& jetch,jetvl,jetfr,accelerator_topology_flags) &
+!$acc& private(np,ins,newadd,newresize,newremove,dx,dy,dz,distance,scale)
 #endif
-  ladd=.false.
-  lresize=.false.
-  if(.not.linserted)then
-    dx=jetxx(npjet-2)-jetxx(npjet)
-    dy=jetyy(npjet-2)-jetyy(npjet)
-    dz=jetzz(npjet-2)-jetzz(npjet)
+  np=npjet
+  ins=linserted
+  newadd=0
+  newresize=0
+  newremove=0
+  if(.not.ins)then
+    dx=jetxx(np-2)-jetxx(np)
+    dy=jetyy(np-2)-jetyy(np)
+    dz=jetzz(np-2)-jetzz(np)
     distance=dsqrt(dx*dx+dy*dy+dz*dz)
     if(distance>=dresolution)then
-      linserted=.true.
-      jetst(npjet-1)=0.d0
-      jetvx(npjet-1)=ivelocity
-      jetvy(npjet-1)=0.d0
-      jetvz(npjet-1)=0.d0
+      ins=.true.
+      jetst(np-1)=0.d0
+      jetvx(np-1)=ivelocity
+      jetvy(np-1)=0.d0
+      jetvz(np-1)=0.d0
     endif
   else
-    dx=jetxx(npjet-1)-jetxx(npjet)
-    dy=jetyy(npjet-1)-jetyy(npjet)
-    dz=jetzz(npjet-1)-jetzz(npjet)
+    dx=jetxx(np-1)-jetxx(np)
+    dy=jetyy(np-1)-jetyy(np)
+    dz=jetzz(np-1)-jetzz(np)
     distance=dsqrt(dx*dx+dy*dy+dz*dz)
-    if(distance>=thresolution .and. npjet>=mxnpjet)then
-      lresize=.true.
+    if(distance>=thresolution .and. np>=mxnpjet)then
+      newresize=1
     elseif(distance>=thresolution)then
-      npjet=npjet+1
-      jetfr(npjet)=jetfr(npjet-1)
-      jetxx(npjet)=jetxx(npjet-1)
-      jetyy(npjet)=jetyy(npjet-1)
-      jetzz(npjet)=jetzz(npjet-1)
-      jetst(npjet)=jetst(npjet-1)
-      jetvx(npjet)=jetvx(npjet-1)
-      jetvy(npjet)=jetvy(npjet-1)
-      jetvz(npjet)=jetvz(npjet-1)
-      jetms(npjet)=jetms(npjet-1)
-      jetch(npjet)=jetch(npjet-1)
-      jetvl(npjet)=jetvl(npjet-1)
-      jetfr(npjet-1)=.false.
-      jetst(npjet-1)=istress
-      jetvx(npjet-1)=ivelocity
-      jetvy(npjet-1)=0.d0
-      jetvz(npjet-1)=0.d0
-      jetms(npjet-1)=imassa*ivolume
-      jetch(npjet-1)=icharge*ivolume
-      jetvl(npjet-1)=ivolume
-      dx=jetxx(npjet-2)-jetxx(npjet)
-      dy=jetyy(npjet-2)-jetyy(npjet)
-      dz=jetzz(npjet-2)-jetzz(npjet)
+      np=np+1
+      jetfr(np)=jetfr(np-1)
+      jetxx(np)=jetxx(np-1)
+      jetyy(np)=jetyy(np-1)
+      jetzz(np)=jetzz(np-1)
+      jetst(np)=jetst(np-1)
+      jetvx(np)=jetvx(np-1)
+      jetvy(np)=jetvy(np-1)
+      jetvz(np)=jetvz(np-1)
+      jetms(np)=jetms(np-1)
+      jetch(np)=jetch(np-1)
+      jetvl(np)=jetvl(np-1)
+      jetfr(np-1)=.false.
+      jetst(np-1)=istress
+      jetvx(np-1)=ivelocity
+      jetvy(np-1)=0.d0
+      jetvz(np-1)=0.d0
+      jetms(np-1)=imassa*ivolume
+      jetch(np-1)=icharge*ivolume
+      jetvl(np-1)=ivolume
+      dx=jetxx(np-2)-jetxx(np)
+      dy=jetyy(np-2)-jetyy(np)
+      dz=jetzz(np-2)-jetzz(np)
       distance=dsqrt(dx*dx+dy*dy+dz*dz)
       scale=resolution/distance
-      jetxx(npjet-1)=jetxx(npjet)+scale*dx
-      jetyy(npjet-1)=jetyy(npjet)+scale*dy
-      jetzz(npjet-1)=jetzz(npjet)+scale*dz
-      ladd=.true.
-      linserted=.false.
+      jetxx(np-1)=jetxx(np)+scale*dx
+      jetyy(np-1)=jetyy(np)+scale*dy
+      jetzz(np-1)=jetzz(np)+scale*dz
+      newadd=1
+      ins=.false.
     endif
   endif
+! A step that must first grow the capacity skips removal, as on the host.
+! Clamping a bead at the collector keeps it at x>=h, so the test can precede
+! the freezing loop below.
+  if(lremove .and. newresize==0)then
+    if(jetxx(inpjet)>=h .and. jetxx(inpjet+1)>=h)newremove=1
+  endif
+  accelerator_topology_flags(1)=np
+  accelerator_topology_flags(2)=merge(1,0,ins)
+  accelerator_topology_flags(3)=newadd
+  accelerator_topology_flags(4)=newresize
+  accelerator_topology_flags(5)=newremove
 #ifdef _OPENACC
 !$acc end serial
+#endif
+  if(lremove)then
+! The upper bound covers a bead added above; the device npjet decides.
+    lastpoint=min(npjet+1,mxnpjet)
+#ifdef _OPENACC
+!$acc parallel loop present(jetxx,jetfr,accelerator_topology_flags)
+#endif
+    do ipoint=inpjet,lastpoint
+      if(accelerator_topology_flags(4)==0 .and. &
+       ipoint<=accelerator_topology_flags(1))then
+        if(jetxx(ipoint)>=h)then
+          jetfr(ipoint)=.true.
+          jetxx(ipoint)=h
+        endif
+      endif
+    enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+  endif
+#ifdef _OPENACC
+!$acc update self(accelerator_topology_flags)
+#endif
+  npjet=accelerator_topology_flags(1)
+  linserted=accelerator_topology_flags(2)==1
+  ladd=accelerator_topology_flags(3)==1
+  lresize=accelerator_topology_flags(4)==1
+  lrem=accelerator_topology_flags(5)==1
+#ifdef _OPENACC
   if(ladd)then
 ! The host statistics need only the injected mass and charge.  The complete
 ! bead state remains device-resident until an output/checkpoint or resize.
@@ -1952,7 +2045,7 @@ contains
     endif
   endif
 #endif
- end subroutine accelerator_add_bead
+ end subroutine accelerator_topology_check
 
  subroutine accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
   implicit none
@@ -1974,50 +2067,27 @@ contains
 #endif
  end subroutine accelerator_update_device_added_evaporation
 
- subroutine accelerator_remove_bead(inpjet,npjet,h,jetxx,jetyy,jetzz,jetst, &
-   jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,nremoved,lrem)
+ subroutine accelerator_finish_remove_bead(inpjet,lrem,jetxx,jetyy,jetzz, &
+   jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+! Completes a removal decided by accelerator_topology_check: advances the
+! active lower bound and returns the records the removal output needs.
   implicit none
   integer, intent(inout) :: inpjet
-  integer, intent(in) :: npjet
-  integer, intent(out) :: nremoved
-  double precision, intent(in) :: h
+  logical, intent(in) :: lrem
   double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
   double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
   double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
   logical, intent(inout) :: jetfr(0:)
-  logical, intent(out) :: lrem
-  integer :: ipoint,remove_one
+  if(.not.lrem)return
+  inpjet=inpjet+1
 #ifdef _OPENACC
-!$acc parallel loop present(jetxx,jetfr)
-#endif
-  do ipoint=inpjet,npjet
-    if(jetxx(ipoint)>=h)then
-      jetfr(ipoint)=.true.
-      jetxx(ipoint)=h
-    endif
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-!$acc serial present(jetxx) copyout(remove_one)
-#endif
-  remove_one=0
-  if(jetxx(inpjet)>=h .and. jetxx(inpjet+1)>=h)remove_one=1
-#ifdef _OPENACC
-!$acc end serial
-#endif
-  nremoved=remove_one
-  lrem=remove_one==1
-  if(lrem)inpjet=inpjet+1
-#ifdef _OPENACC
-  if(lrem)then
 ! Removal observables need both the removed bead and its active neighbour.
 !$acc update self(jetxx(inpjet-1:inpjet),jetyy(inpjet-1:inpjet), &
 !$acc& jetzz(inpjet-1:inpjet), &
 !$acc& jetst(inpjet-1),jetvx(inpjet-1),jetvy(inpjet-1),jetvz(inpjet-1), &
 !$acc& jetms(inpjet-1),jetch(inpjet-1),jetvl(inpjet-1),jetfr(inpjet-1))
-  endif
 #endif
- end subroutine accelerator_remove_bead
+ end subroutine accelerator_finish_remove_bead
 
  subroutine accelerator_update_host_removed_evaporation(ipoint,jetve,jetce)
   implicit none

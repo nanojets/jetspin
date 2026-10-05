@@ -100,10 +100,9 @@ those cycles are exactly where earlier builds failed, before the Coulomb
 mapping reset above was corrected. The jet bridges the collector distance and
 finishes with its bead count oscillating around 570 rather than drifting, so
 the balanced insertion/removal regime is reached on the device from a
-single-bead start. The fork still lacks the device-side nozzle charge
-smoothing described below for the evaporative path, so its physics is not a
-reference: an NVFORTRAN CPU run of the same input has about 512 active beads
-between steps 4 and 5 million.
+single-bead start. That run predates the nozzle-insertion fix of 2026-10-01
+described below and is not a reference for the physics: an NVFORTRAN CPU run
+of the same input has about 512 active beads between steps 4 and 5 million.
 
 The same allocation defect affected `platen_ev`: a 400-bead start engaged at
 step 1 while a single-bead start never engaged, its history still unallocated
@@ -161,23 +160,25 @@ data regions.
 Test 13 now records the bounded persistent dynamic-topology milestone. It
 preallocates 1,280 slots, keeps RK4 and force data resident as `inpjet` and
 `npjet` change, and performs collector detection and clamping on the device.
-The host receives one removal decision and, when needed, the removed record.
 Nozzle insertion, including threshold checks, blocked-bead release, record
-initialization, and `npjet` update, also runs on the device. The host receives
-topology scalars and, on an actual insertion, downloads only the injected
-mass and charge required by the host statistics. Test 15 additionally
-exercises small-capacity teardown, host
+initialization, and `npjet` update, also runs on the device, and so do the
+placement and the charge smoothing of the blocked bead before every force
+evaluation. One serial kernel decides release, insertion, capacity
+exhaustion, and removal; the outcome returns to the host as one 20-byte
+record per step. On an actual insertion the host downloads only the injected
+mass and charge required by the host statistics, and on a removal only the
+removed record. Test 15 additionally exercises small-capacity teardown, host
 reallocation, and device remapping. General device-side compaction remains
-outside this path. The
-persistent A30 execution retains all 26 events and the same final topology,
-but GPU RK4 rounding moves insertion threshold crossings progressively
-earlier. The call-scoped and persistent A30 streams are versioned separately;
-`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` restores the former exactly.
-An optional full-state snapshot at every topology event verified exact bead
-metadata and properties. Component-isolation switches showed that the growing
-trajectory difference originates primarily in device EOM/curvature arithmetic;
-the OpenACC EOM run on the host matches the original CPU path near machine
-precision. See the [Test 13 record](../examples/test-13.md).
+outside this path.
+
+The persistent A30 run reproduces all 26 CPU topology events step for step.
+Until 2026-10-01 its insertions fell progressively earlier (step 593 instead
+of 600 for the seventh): the device placed the blocked bead only when it was
+created and never smoothed its charge, so the device Coulomb sum saw a full
+charge at the nozzle. That drift had been attributed to GPU RK4 rounding.
+`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` still restores the call-scoped path.
+An optional full-state snapshot at every topology event verifies bead
+metadata and properties. See the [Test 13 record](../examples/test-13.md).
 
 Tests 16 and 17 complete the Maxwell and Kelvin--Voigt evaporation paths for
 Euler, RK2, and RK4. Their one, two, or four force/stress evaluations,
@@ -216,8 +217,8 @@ Gaussian history therefore follow the same persistent-data policy as Test 12.
 
 Test 21 extends Maxwell Platen evaporation to insertion and dynamic refinement.
 Its Gaussian pool (100,000,000 doubles by default) is uploaded once and is
-not affected by capacity growth. Eligible refinement checks return only three
-reduction scalars. At an accepted event, the complete active state is
+not affected by capacity growth. Eligible refinement checks return only their
+three reduction results, in one transfer. At an accepted event, the complete active state is
 downloaded once for host target-mesh preparation. Akima slopes, tangents,
 cubic coefficients, and the 11 field interpolations then run on the GPU. The
 resulting cross-section radius is then used, still on the GPU, to reconstruct
@@ -260,8 +261,10 @@ Akima events retain the event-only target-mesh/anchor-bookkeeping boundary
 described above.
 The A30 audit again finds four complete state downloads (three refinement
 events plus shutdown), three topology/evaporation rebinds, and a single
-Gaussian-pool upload at startup. The
-ordinary removal check returns one four-byte control scalar; each accepted
+Gaussian-pool upload at startup. Each
+ordinary step returns one 20-byte topology record, which carries the insertion
+and removal decisions together (until 2026-10-01, two uploads and five
+downloads of separate scalars); each accepted
 removal downloads and clears only one bead.
 
 The standard build reproduces the CPU events (14,268, 14,971, 15,691), the
@@ -373,7 +376,7 @@ All three A30 runs reproduce the CPU event totals (111 insertions, 122 removals,
 two reallocations, 89 active beads). Runtime transfer audits of the standard
 build (no diagnostic macros) confirm that no state, force, stress, or
 derivative array crosses the PCIe boundary between stages. Each timestep
-exchanges only topology decision scalars. Insertion, removal, statistical
+returns only one 20-byte topology record. Insertion, removal, statistical
 output, capacity growth, and the final checkpoint transfer only the records
 required by those events. Full active-state transfers occur at the two
 reallocations and at the final checkpoint. CPU/GPU trajectories are not
@@ -442,7 +445,7 @@ Gaussian history of `platen_ev` was allocated only if the jet already had 100
 beads when `prepare_integrator_random_history` ran, which is never true for a
 single-bead start, so the persistent path never engaged and only the Coulomb
 kernel ran on the device. The path now engages at step 1,446,263 (121 beads).
-Over the 5 million steps of the Test 25 reference the A30 takes about 2060 s
+Over the 5 million steps of the Test 25 reference the A30 takes about 1940 s
 and the NVFORTRAN CPU build 5893 s.
 
 Nsight Systems profiles explain the remaining cost:
@@ -503,34 +506,49 @@ native difference was attributed to the Coulomb summation order. With the
 fixes their native runs reproduce the CPU events, capacities, and removals,
 and every statistics row agrees within `8.0e-10`. Over the full 5 million
 steps of Test 25 the fixed A30 run gives the CPU stationary values (268 active
-beads, 112 cm path length) in about 2060 s. The same
-smoothing and collector-curvature omissions remain in the non-evaporative
-dynamic device paths (the `systype 3` dynamic RK4 path and the
-`nvfortran-openacc-dynamic-platen` fork); they are not fixed yet.
+beads, 112 cm path length) in about 1940 s.
+
+The non-evaporative dynamic device paths had the same omissions, fixed on
+2026-10-01. The `systype 3` dynamic RK4 path (Tests 13--15) also placed the
+blocked nozzle bead only on the stale host arrays, so on the device it stayed
+where it had been created; the persistent non-evaporative Platen branch
+smoothed the charge once per step on the host copy and placed the bead only
+at the end of the step. Placement (`place_inserting_bead`), smoothing, and
+restoring now bracket every force evaluation on the device, the
+collector-curvature terms are requested, and the non-evaporative Platen
+kernels treat frozen and inserting beads as `eom4` does. Tests 13 and 14
+now reproduce the CPU topology stream step for step (Test 13 used to insert
+progressively earlier, step 593 instead of 600 for the seventh insertion).
+For the dynamic Platen fork the reference is the same build with
+`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` (host integration, same Gaussian
+pool): on Test 24 physics from a single bead, 2 million steps, the fixed fork
+follows it within `1.2e-8` in path length through 1.8 million steps and
+`7e-7` at 2 million, with the same bead count in all 100 frames and 86 of 88
+insertion steps identical (the last two one step apart). The unfixed fork
+left it immediately after engaging at step 1,379,105 (`5e-4` at 1.48 million
+steps, first bead-count difference at 1.42 million) and ended with 92
+insertions and 282 active beads against 88 and 276.
 
 ## Next porting stages
 
-1. Extend the nozzle charge-smoothing dispatch and the lead-bead collector
-   curvature to the non-evaporative dynamic device paths (the `systype 3`
-   dynamic RK4 path and the dynamic Platen fork), with their own CPU/GPU seed
-   comparison.
-2. For the dynamic evaporative Platen path: run the persistent step on one
-   asynchronous queue with a single synchronization per step and
-   non-blocking reads of the removal and refinement scalars; fuse each force
-   stage into fewer kernels afterwards if needed.
-3. Investigate packing the maximum stress and bead index into one deterministic
+1. For the dynamic evaporative Platen path: run the persistent step on one
+   asynchronous queue with a single synchronization per step. An ordinary
+   step now returns only two small records (topology decisions, and the
+   refinement scan when it runs); fuse each force stage into fewer kernels
+   afterwards if needed.
+2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
-4. Extend the refinement-capacity lifecycle beyond the currently validated
+3. Extend the refinement-capacity lifecycle beyond the currently validated
    serial Maxwell/Platen combination when additional GPU model combinations
    are enabled; current transfers occur only on resize events.
-5. The remaining host-side work at an accepted event is the data-dependent
+4. The remaining host-side work at an accepted event is the data-dependent
    mass-boundary walk, target-mesh/anchor-mesh construction, and anchor
    save/restore/final-assembly bookkeeping. It is a small, rare (a few events
    per run), inherently sequential scan rather than a per-bead parallel
    operation, so it is not a priority target; the next candidate is instead
    determining whether the accepted-event full-state round trip can be
    removed without duplicating that bookkeeping's model logic.
-6. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
+5. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 
 The intended steady state is a persistent device-resident simulation with

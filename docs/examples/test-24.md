@@ -74,11 +74,13 @@ designed to reach — at 6% of the target duration, not over the full run.
 That run used the `nvfortran-openacc-dynamic-platen` development build. It
 printed a path length of 111.4 cm, but the persistent Platen path then counted
 every timestep twice in the path-length average, halving `lp` (fixed on
-2026-09-30). The same build still lacks the device-side charge smoothing of
-the bead being inserted at the nozzle, a defect found and fixed for the
-evaporative path on 2026-09-30 (see [OpenACC](../introduction/openacc.md));
-in Test 25 it made the A30 jet about 10 percent longer and denser than the
-CPU one. The A30 run is therefore not a reference. An NVFORTRAN CPU run of
+2026-09-30). The build also lacked, until 2026-10-01, the device-side charge
+smoothing and placement of the bead being inserted at the nozzle (see
+[OpenACC](../introduction/openacc.md)); in Test 25 the same defect made the
+A30 jet about 10 percent longer and denser than the CPU one. That A30 run is
+therefore not a reference. With the fix, the fork follows its own
+non-persistent run (same Gaussian pool) within `7e-7` in path length over
+2 million steps. An NVFORTRAN CPU run of
 5,000,000 steps gives, between steps 4 and 5 million, a path length of
 212 cm, collector velocity 1962 cm/s, `yz` = 3.8 cm, 26.8 degrees, and about
 512 active beads.

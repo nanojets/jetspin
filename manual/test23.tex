@@ -43,8 +43,10 @@ interpolations execute on the GPU.
 An NVIDIA A30 transfer audit records four complete state downloads, namely
 the three accepted Akima events and final shutdown, together with exactly
 three topology rebinds and three evaporation-state rebinds; the Gaussian pool
-is uploaded once at startup. The ordinary collector check returns one four-byte control value;
-an accepted removal transfers and clears only the collected point.
+is uploaded once at startup.  Each ordinary step returns one 20-byte topology
+record with the insertion and removal decisions, against seven separate
+scalar transfers before 1 October 2026; an accepted removal transfers and
+clears only the collected point.
 
 A dedicated A/B build evaluates the historical host Akima routines and the
 device implementation at all three events. Across 33 field/event comparisons,

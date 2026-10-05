@@ -28,4 +28,13 @@ digits, so this test is in fact a regression guard for that defect and its
 acceptance criterion could be tightened. See
 [OpenACC](../introduction/openacc.md).
 
+On an NVIDIA A30 (NVFORTRAN 24.3) both builds make 111 additions and two
+reallocations and finish with 211 beads; all eleven statistics rows agree
+within `5.1e-5` relatively (up to 14 percent in the transverse velocity
+before the 2026-10-01 nozzle-insertion fix). Two insertions fall one step
+later on the A30, the first one (step 5 against 4) and the one at the second
+reallocation (906 against 905): when the capacity is exhausted, the device
+path grows it first and inserts at the next step, whereas the CPU reallocates
+and inserts in the same step.
+
 - [Input file](../../examples/input-15/input.dat)

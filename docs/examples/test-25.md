@@ -119,8 +119,8 @@ The noise realization hardly matters: four more CPU seeds (318 – 321) give
 mean active counts between 267.8 and 268.4, a path length of 111.8 cm, and an
 off-axis distance of 2.78 cm over the same window.
 
-One NVIDIA A30 runs the same 5 million steps in about 2060 s on an otherwise
-idle node, against 5893 s for the CPU build. It engages the persistent path at
+One NVIDIA A30 runs the same 5 million steps in about 1940 s, against
+5893 s for the CPU build. It engages the persistent path at
 step 1,446,263, reads the same Gaussian pool, and stays on the CPU trajectory:
 with seed 317 the first removal falls at the same step, and the active bead
 count first differs at step 3.26 million.

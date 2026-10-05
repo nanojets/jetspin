@@ -12,7 +12,7 @@ evaluation, RK2 executes two, and RK4 executes four.  Their intermediate and
 final updates, direct Coulomb summation, evaporation, charge smoothing and
 restoration, nozzle geometry, and final statistics reductions execute on the
 GPU.  No state, force, stress, or derivative array is transferred between
-stages.  Ordinary timesteps return only topology decision scalars.  Bead
+stages.  Ordinary timesteps return only one 20-byte topology record.  Bead
 records are moved for actual topology or output events, while the complete
 active state is synchronized for capacity reallocation and the final
 checkpoint.

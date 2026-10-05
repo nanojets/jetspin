@@ -24,4 +24,9 @@ GPU run produced NaN from its first printed line with the bead count frozen at
 103, against 211 beads and a final abscissa of 35.99 cm on the CPU. Once the
 mapping is released correctly, the two agree to eight significant digits. This
 test is consequently a genuine regression guard for that defect, and a future
-tightening of its acceptance criterion is justified.
+tightening of its acceptance criterion is justified.  On an NVIDIA A30 both
+builds make 111 additions and two reallocations, and all statistics rows
+agree within $5.1\times10^{-5}$ relatively.  Two insertions fall one step
+later on the GPU, because the device path first grows the capacity and
+inserts at the next step, whereas the CPU reallocates and inserts in the
+same step.

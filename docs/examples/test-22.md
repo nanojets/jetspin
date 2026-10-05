@@ -47,8 +47,9 @@ on the GPU. An A30 transfer audit found four complete state downloads: the
 three accepted refinement events and final shutdown. The event path performs
 exactly three topology rebinds and three evaporation-state rebinds; the
 Gaussian pool is uploaded once at startup and never transferred again.
-Unsuccessful threshold scans return only three reduction scalars, so ordinary
-timesteps do not download the complete jet state.
+Unsuccessful threshold scans return only their three reduction results, in
+one transfer, and the topology decisions return as one 20-byte record per
+step, so ordinary timesteps do not download the complete jet state.
 
 Run:
 

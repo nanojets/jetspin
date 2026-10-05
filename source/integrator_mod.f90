@@ -1389,7 +1389,8 @@ contains
   case default
 !     1°step
       call smooth_charge(jetxx,jetyy,jetzz)
-      call compute_posnoinserted(jetxx,jetyy,jetzz)
+! The device copy is the one the force evaluation reads in a persistent run.
+      call place_inserting_bead(jetxx,jetyy,jetzz,persistent_acc)
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl, &
        jetxx,jetyy,jetzz)
       j=0
@@ -1411,7 +1412,8 @@ contains
        jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms, &
        jetch,jetfr,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted, &
        liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
-       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0)
+       consistency,findex,yieldstress,att,fve,gr,ks,li,v,velext,.false.,0.d0, &
+       collector_curvature=.true.)
 #endif
 #endif
       if(.not.used_acc_eom)then
@@ -1467,7 +1469,7 @@ contains
       endif
 !     2°step
       call smooth_charge(yxx,yyy,yzz)
-      call compute_posnoinserted(yxx,yyy,yzz)
+      call place_inserting_bead(yxx,yyy,yzz,persistent_acc)
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz)
       j=0
@@ -1482,7 +1484,8 @@ contains
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f2xx, &
        f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-       att,fve,gr,ks,li,v,velext,.false.,0.d0)
+       att,fve,gr,ks,li,v,velext,.false.,0.d0, &
+       collector_curvature=.true.)
 #endif
 #endif
       if(.not.used_acc_eom)then
@@ -1545,7 +1548,7 @@ contains
       endif
 !     3°step
       call smooth_charge(yxx,yyy,yzz)
-      call compute_posnoinserted(yxx,yyy,yzz)
+      call place_inserting_bead(yxx,yyy,yzz,persistent_acc)
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz)
       j=0
@@ -1560,7 +1563,8 @@ contains
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f3xx, &
        f3yy,f3zz,f3st,f3vx,f3vy,f3vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-       att,fve,gr,ks,li,v,velext,.false.,0.d0)
+       att,fve,gr,ks,li,v,velext,.false.,0.d0, &
+       collector_curvature=.true.)
 #endif
 #endif
       if(.not.used_acc_eom)then
@@ -1623,7 +1627,7 @@ contains
       endif
 !     4°step
       call smooth_charge(yxx,yyy,yzz)
-      call compute_posnoinserted(yxx,yyy,yzz)
+      call place_inserting_bead(yxx,yyy,yzz,persistent_acc)
       call compute_coulomelec_driver(k,timesub,coulforce,jetvl,yxx, &
        yyy,yzz)
       j=0
@@ -1638,7 +1642,8 @@ contains
        yzz,yst,yvx,yvy,yvz,jetvl,coulforce,jetms,jetch,jetfr,f4xx, &
        f4yy,f4zz,f4st,f4vx,f4vy,f4vz,linserted,liniperturb,lairdrag, &
        lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
-       att,fve,gr,ks,li,v,velext,.false.,0.d0)
+       att,fve,gr,ks,li,v,velext,.false.,0.d0, &
+       collector_curvature=.true.)
 #endif
 #endif
       if(.not.used_acc_eom)then
@@ -1700,7 +1705,7 @@ contains
         call sum_world_darr(yvz,npjet+1,jetvz)
       endif
       timesub=timesub+h
-      call compute_posnoinserted(jetxx,jetyy,jetzz)
+      call place_inserting_bead(jetxx,jetyy,jetzz,persistent_acc)
   end select
   
   return
@@ -2110,7 +2115,13 @@ contains
     case default
 #ifdef _OPENACC
       if(persistent_acc)then
+! Same sequence as the host branch below: before each of the three force
+! evaluations the inserting nozzle bead is placed and its charge smoothed on
+! the device copy, and the charge is restored afterwards (until 2026-10-01
+! the charge was smoothed once, on the stale host copy, and the bead was
+! placed only at the end of the step).
         call smooth_charge(jetxx,jetyy,jetzz)
+        call place_inserting_bead(jetxx,jetyy,jetzz,.true.)
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx,jetyy,jetzz)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         used_acc_eom=non_evap_host_force_oracle(timesub,k,jetxx,jetyy,jetzz, &
@@ -2123,12 +2134,16 @@ contains
          jetzz,jetst,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch,jetfr, &
          f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
-         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
+         collector_curvature=.true.)
 #endif
+        call restore_charge()
         call accelerator_platen_predict(mystart,myend,h,airdragamp(1), &
          noisediff,jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
          f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,y1xx,y1yy,y1zz,y1st, &
-         y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
+         y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,linserted,jetfr)
+        call smooth_charge(y1xx,y1yy,y1zz)
+        call place_inserting_bead(y1xx,y1yy,y1zz,.true.)
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y1xx,y1yy,y1zz)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         used_acc_eom=non_evap_host_force_oracle(timesub,k,y1xx,y1yy,y1zz, &
@@ -2141,8 +2156,12 @@ contains
          y1zz,y1st,y1vx,y1vy,y1vz,jetvl,coulforce,jetms,jetch,jetfr, &
          f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
-         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
+         collector_curvature=.true.)
 #endif
+        call restore_charge()
+        call smooth_charge(y2xx,y2yy,y2zz)
+        call place_inserting_bead(y2xx,y2yy,y2zz,.true.)
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y2xx,y2yy,y2zz)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         used_acc_eom=non_evap_host_force_oracle(timesub,k,y2xx,y2yy,y2zz, &
@@ -2155,15 +2174,20 @@ contains
          y2zz,y2st,y2vx,y2vy,y2vz,jetvl,coulforce,jetms,jetch,jetfr, &
          d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
-         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
+         collector_curvature=.true.)
 #endif
+        call restore_charge()
         call accelerator_platen_velocity(mystart,myend,mxnpjet, &
          gaussianhistorysteps,k,h, &
          airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
          f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz, &
-         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues)
+         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
+         linserted,jetfr)
         call accelerator_platen_positions(mystart,myend,npjet,h,pfreq, &
-         liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz)
+         liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz, &
+         linserted,jetfr)
+        call place_inserting_bead(jetxx,jetyy,jetzz,.true.)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         used_acc_eom=non_evap_host_force_oracle(timesub+h,k,jetxx,jetyy,jetzz, &
          y1st,jetvx,jetvy,jetvz,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz)
@@ -2175,22 +2199,15 @@ contains
          jetzz,y1st,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch,jetfr, &
          f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
          lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
-         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric)
+         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
+         collector_curvature=.true.)
 #endif
         call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
          jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
          maxstressposx)
 #ifdef JETSPIN_GPU_DYNAMIC_PLATEN
-! The fixed-geometry benchmark path never runs with ongoing insertion
-! (fixed_accelerator_geometry requires .not.linserting), so it never needed
-! this correction. The dynamic path can, so mirror platen_ev's device-side
-! equivalent here instead of the host-side compute_posnoinserted used by
-! the non-persistent branch below.
-        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
-         jetxx,jetyy,jetzz)
         call accelerator_mark_device_state(.true.)
 #endif
-        call restore_charge()
         timesub=timesub+h
         return
       endif
@@ -3447,6 +3464,23 @@ contains
   return
   
  end subroutine rk4sys_KV
+
+ subroutine place_inserting_bead(xs,ys,zs,on_device)
+! compute_posnoinserted on the copy that the next force evaluation reads:
+! the device copy in a persistent run, whose host arrays are stale, the
+! host copy otherwise.  A no-op once the nozzle bead has been released.
+  implicit none
+  double precision, allocatable, dimension(:), intent(inout) :: xs,ys,zs
+  logical, intent(in) :: on_device
+#ifdef _OPENACC
+  if(on_device)then
+    call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+     xs,ys,zs)
+    return
+  endif
+#endif
+  call compute_posnoinserted(xs,ys,zs)
+ end subroutine place_inserting_bead
 
 #ifdef _OPENACC
  subroutine ensure_maxwell_evap_device_workspace()

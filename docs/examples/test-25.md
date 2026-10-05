@@ -119,9 +119,10 @@ The noise realization hardly matters: four more CPU seeds (318 – 321) give
 mean active counts between 267.8 and 268.4, a path length of 111.8 cm, and an
 off-axis distance of 2.78 cm over the same window.
 
-One NVIDIA A30 runs the same 5 million steps in about 1940 s, against
-5893 s for the CPU build. It engages the persistent path at
-step 1,446,263, reads the same Gaussian pool, and stays on the CPU trajectory:
+One NVIDIA A30 runs the same 5 million steps in about 1850 s, against
+5893 s for the CPU build (see [where the time goes](#where-the-a30-run-spends-its-time)).
+It engages the persistent path at
+step 1,446,413, reads the same Gaussian pool, and stays on the CPU trajectory:
 with seed 317 the first removal falls at the same step, and the active bead
 count first differs at step 3.26 million.
 Between steps 4 and 5 million it gives the same values as the CPU: collector
@@ -140,6 +141,106 @@ evaporation and the stiffening it causes make the bending loops smaller, as
 reported by Yarin et al.
 
 A full-length reference does not yet exist.
+
+## Where the A30 run spends its time
+
+An A30 run of Test 25 has two phases. The persistent device path of
+`platen_ev` needs at least 100 beads (`npjet>=100`), so it stays closed while
+the jet grows from the single nozzle bead. With seed 317 it opens at step
+1,446,413, when an accepted refinement event takes the jet from 95 to 120
+active beads. The next refinement event that grows the capacity (step
+2,046,413, from 222 to 375 beads) resets the device state, and the path
+engages again in the same step.
+
+| Work in each timestep | Phase 1: steps 1 – 1,446,412, 1 – 95 active beads | Phase 2: steps 1,446,413 – 5,000,000, 120 – 300 active beads |
+| --- | --- | --- |
+| Platen predictor, velocity, position, and stress updates | CPU | GPU |
+| Forces other than Coulomb (viscoelastic, surface tension, evaporation, air drag, external field) and the noise read from the Gaussian pool | CPU | GPU |
+| Coulomb sum, three per step | GPU; each call uploads 13 arrays, runs a cross-section and a Coulomb kernel, and downloads 2 arrays | GPU, on the device-resident state |
+| Nozzle charge smoothing and restoring, placement of the inserting bead | CPU | GPU |
+| Insertion, removal, and collector-freezing decisions | CPU | GPU; one 20-byte record returns to the CPU |
+| Removal bookkeeping (counters, collected-bead statistics) | CPU | CPU; the removed bead is downloaded and its entries uploaded again |
+| Path-length and maximum-stress statistics | CPU | accumulated on the GPU, downloaded at print steps |
+| Refinement threshold scan, from `1.d-3` s after the last accepted event until the next one | CPU | GPU; three values return to the CPU |
+| Accepted refinement event (3 in phase 1, 17 in phase 2) | CPU | Akima interpolation and reconstruction on the GPU; mass-boundary walk, target mesh, and conservation on the CPU, then one upload |
+| `statout.dat`, `traj.xyz`, and `save.dat` every 20,000 steps | CPU | CPU, after one download of the full state |
+
+The CPU generates the Gaussian pool before the loop and copies it to the GPU
+once. In this run every refinement scan of phase 2 was accepted at its first
+step, so an ordinary phase-2 step moves only the 20-byte record.
+
+### Measured times
+
+Two A30 runs of each build, each process bound to the CPU cores and memory of
+its GPU's NUMA node (`numactl --cpunodebind --membind`), seed 317, 5 million
+steps, `print time 1.d-4` (NVHPC 24.3); phase times come from the wall-clock
+time of the printed lines. The CPU runs are one bound run stopped at the end
+of phase 1 and one unbound full run:
+
+| Build | Phase 1 | Phase 2 | Time-integration loop |
+| --- | ---: | ---: | ---: |
+| A30, current | 429 s, 430 s (298 µs/step) | 1410 s, 1425 s (399 µs/step) | 1840 s, 1856 s |
+| A30, before the 2026-10-01 transfer reduction | 431 s, 433 s (299 µs/step) | 1585 s, 1581 s (445 µs/step) | 2016 s, 2014 s |
+| CPU | 166 s bound, 156 s unbound (114 and 108 µs/step) | 5708 s (1606 µs/step) | 5863 s |
+
+The CPU loop time comes from the timestamps: with NVFORTRAN the code's own
+`Time-integration loop wall time` wraps after 2147 s and reported 1568 s for
+that run.
+
+The two builds run the same code in phase 1 and give byte-identical
+`traj.xyz`. On this path they differ only in the topology check, which now
+returns one 20-byte record instead of two uploads and five downloads per
+step, and in the refinement scan: the current build saves 46 µs per phase-2
+step and 8.3 % of the whole run.
+
+Median time per step over the 20,000-step print intervals, by active-bead
+count:
+
+| Active beads | CPU | A30, current | A30, before 2026-10-01 |
+| --- | ---: | ---: | ---: |
+| 1 – 30 | 31 µs | 247 µs | 249 µs |
+| 30 – 60 | 91 µs | 293 µs | 294 µs |
+| 60 – 100 | 258 µs | 388 µs | 389 µs |
+| 100 – 150 | 502 µs | 401 µs | 459 µs |
+| 150 – 200 | 787 µs | 401 µs | 455 µs |
+| 200 – 250 | 1513 µs | 399 µs | 448 µs |
+| 250 – 300 | 1833 µs | 402 µs | 447 µs |
+
+In phase 1 the A30 run is 2.6 – 2.8 times slower than the CPU build. The
+`JETSPIN_PROFILE=1` timers of a run stopped at step 1,446,411 show why: the
+4,339,233 Coulomb calls take 340 s, 78 µs each, 79 % of the loop, while the
+rest of the step costs 62 µs on the host. The CPU build spends 79 s on the
+same calls (18 µs each) and 59 µs per step on the rest. Nsight Systems at
+about 94 beads shows what a call costs: the two kernels run for 3.4 and
+9.2 µs and the 15 copies for 23 µs, so the device is busy for less than half
+of the call; the rest is the launch, copy-enqueue, and six stream
+synchronizations of each call.
+
+In phase 2 the step time stays at about 400 µs from 120 to 300 beads, while
+the CPU build grows from 0.5 to 1.8 ms. Nsight Systems at about 215 beads
+counts per step 31 kernel launches, 59 stream synchronizations, one 20-byte
+download, and no upload; the kernels take 220 µs, of which 66 µs are the
+three Coulomb sums with their cross sections and 89 µs the three force
+stages and the stress updates. At about 273 beads, with collector removal
+active, the counts are 34 launches and 65 synchronizations, and the kernels
+take 236 µs (73 µs Coulomb). The device is therefore busy for 55 – 60 % of
+the step, and the remainder is the launch and synchronization latency of
+the small kernels issued one after the other.
+
+Process placement matters at this scale. Without binding, the operating
+system may run the host process on the other socket: an unbound phase-1 run,
+seen on a core of the other socket, took 464 s instead of 431 s, and an
+unbound comparison of the two builds gave 1932 and 1935 s against 2001 and
+2002 s (3.4 %) instead of 8.3 %. Timing comparisons must therefore bind each
+run to its GPU's NUMA node.
+
+Two changes would shorten the run. In phase 1, computing the Coulomb sum on
+the host instead of offloading it would bring the phase from 430 s to about
+170 s (an estimate: 89 s for the rest of the step in the A30 build plus the
+79 s of the CPU build's Coulomb calls); the persistent path becomes faster
+than the CPU build only above about 100 beads. In phase 2, issuing the
+kernels on one asynchronous queue with a single synchronization per step
+targets the 165 – 180 µs per step in which the device is idle.
 
 ## Use
 

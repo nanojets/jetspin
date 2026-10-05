@@ -110,7 +110,7 @@ once the jet had grown to 262 beads. Since 2026-09-30 the one-shot decision
 uses the size-independent `dynamic_evaporative_platen_configured`, and the
 per-step gate keeps `dynamic_evaporative_platen_eligible` with its size
 thresholds: a single-bead Test 25 engages the persistent path when it first
-exceeds 100 beads (step 1,446,263, 121 beads, in the reference run). The
+exceeds 100 beads (step 1,446,413, 120 beads, in the reference run). The
 decision does not depend on `JETSPIN_OPENACC_DISABLE_PERSISTENT`, so CPU,
 persistent and non-persistent runs read the same noise. `rk4sys_ev` has not
 been examined for the same defect.
@@ -439,28 +439,39 @@ median per bead-count band, from the `cpu` statistics key):
 | 250-300 | 1899 us | 1155 us | 784 us | 447 us |
 | Whole run | 1522 s | 1557 s | 1188 s | 931 s |
 
+These columns predate the fixes of 2026-09-30 and 2026-10-01. Current
+numbers, measured with each process bound to its GPU's NUMA node, are in the
+[Test 25 time budget](../examples/test-25.md#where-the-a30-run-spends-its-time),
+which also lists what runs on the CPU and on the GPU before and after the
+persistent path engages.
+
 The persistent column was measured with a scratch version of the fix that is
 now in the code (see the dynamic-topology Platen fork above). Before it, the
 Gaussian history of `platen_ev` was allocated only if the jet already had 100
 beads when `prepare_integrator_random_history` ran, which is never true for a
 single-bead start, so the persistent path never engaged and only the Coulomb
-kernel ran on the device. The path now engages at step 1,446,263 (121 beads).
-Over the 5 million steps of the Test 25 reference the A30 takes about 1940 s
-and the NVFORTRAN CPU build 5893 s.
+kernel ran on the device. The path now engages at step 1,446,413 (120 beads),
+right after an accepted refinement event. Over the 5 million steps of the
+Test 25 reference the A30 takes about 1850 s and the NVFORTRAN CPU build
+5893 s.
 
-Nsight Systems profiles explain the remaining cost:
+Nsight Systems profiles of the current build explain the remaining cost:
 
-- non-persistent path: three Coulomb calls per Platen step, each with 13
-  host-to-device copies, 2 device-to-host copies, 6 stream synchronizations,
-  and 2 kernels, about 120 us of fixed cost per call;
-- persistent path (about 170 beads): 29 kernel launches, 54 stream
-  synchronizations and 5 small device-to-host copies per step. With the old
-  kernel the three Coulomb calls took 88 us each, 72 % of the device time,
-  and the device was busy 41 % of the wall time. With the current kernel the
-  step time is flat at about 450 us from 120 to 300 beads, that is, almost
-  entirely launch and synchronization overhead.
+- non-persistent path (up to 95 beads in Test 25): three Coulomb calls per
+  Platen step, each with 13 host-to-device copies, 2 device-to-host copies,
+  6 stream synchronizations, and 2 kernels. A call costs 78 us of wall time
+  (`JETSPIN_PROFILE=1`), against 18 us for the same sum on the host, and the
+  device is busy for about 35 us of it;
+- persistent path (about 215 beads): 31 kernel launches, 59 stream
+  synchronizations, one 20-byte device-to-host copy and no upload per step.
+  The kernels take 220 us of the 399 us step, 66 us of them in the three
+  Coulomb sums (at about 273 beads, with collector removal: 34 launches,
+  65 synchronizations, 236 us of kernels in a 402 us step). The step time is flat at about 400 us from 120 to 300 beads,
+  so it is set by launch and synchronization overhead rather than by the
+  bead count. Before the Coulomb kernel rewrite of 2026-09-30 the three
+  Coulomb calls took 88 us each at about 170 beads, 72 % of the device time.
 
-The CPU remains faster below about 110 beads.
+The CPU build remains faster below about 100 beads.
 
 ### Persistent-path defects found by a seed ensemble (2026-09-30)
 
@@ -506,7 +517,7 @@ native difference was attributed to the Coulomb summation order. With the
 fixes their native runs reproduce the CPU events, capacities, and removals,
 and every statistics row agrees within `8.0e-10`. Over the full 5 million
 steps of Test 25 the fixed A30 run gives the CPU stationary values (268 active
-beads, 112 cm path length) in about 1940 s.
+beads, 112 cm path length) in about 1850 s.
 
 The non-evaporative dynamic device paths had the same omissions, fixed on
 2026-10-01. The `systype 3` dynamic RK4 path (Tests 13--15) also placed the
@@ -531,24 +542,28 @@ insertions and 282 active beads against 88 and 276.
 
 ## Next porting stages
 
-1. For the dynamic evaporative Platen path: run the persistent step on one
+1. For the dynamic evaporative Platen path below the GPU crossover (about
+   100 beads, phase 1 of Test 25): keep the Coulomb sum on the host. Its
+   offloaded calls take 340 of the 430 s of that phase, against 79 s on the
+   host.
+2. For the dynamic evaporative Platen path: run the persistent step on one
    asynchronous queue with a single synchronization per step. An ordinary
    step now returns only two small records (topology decisions, and the
    refinement scan when it runs); fuse each force stage into fewer kernels
    afterwards if needed.
-2. Investigate packing the maximum stress and bead index into one deterministic
+3. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
-3. Extend the refinement-capacity lifecycle beyond the currently validated
+4. Extend the refinement-capacity lifecycle beyond the currently validated
    serial Maxwell/Platen combination when additional GPU model combinations
    are enabled; current transfers occur only on resize events.
-4. The remaining host-side work at an accepted event is the data-dependent
+5. The remaining host-side work at an accepted event is the data-dependent
    mass-boundary walk, target-mesh/anchor-mesh construction, and anchor
    save/restore/final-assembly bookkeeping. It is a small, rare (a few events
    per run), inherently sequential scan rather than a per-bead parallel
    operation, so it is not a priority target; the next candidate is instead
    determining whether the accepted-event full-state round trip can be
    removed without duplicating that bookkeeping's model logic.
-5. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
+6. Evaluate one-GPU-per-rank MPI execution only after the single-GPU numerical
    path is stable.
 
 The intended steady state is a persistent device-resident simulation with

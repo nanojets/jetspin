@@ -1,5 +1,83 @@
 # JETSPIN development state and handoff log
 
+## Test 25 time budget on the A30: two phases (2026-10-05)
+
+Measurement and documentation only; no source change. The breakdown, with a
+table of what runs on the CPU and on the GPU in each phase, is in
+`docs/examples/test-25.md` ("Where the A30 run spends its time").
+
+### Phases
+
+- **Phase 1, steps 1 – 1,446,412 (1 – 95 active beads).** The persistent
+  gate of `platen_ev` needs `npjet>=100`. The host integrates; only the three
+  Coulomb sums per Platen step run on the GPU (`accelerator_coulomb_evap_3d`,
+  13 uploads, 2 kernels, 2 downloads, 6 stream synchronizations per call).
+  Topology, refinement, smoothing and statistics run on the host.
+- **Phase 2, from step 1,446,413 (120 – 300 active beads).** The gate opens
+  right after the accepted refinement event of that step (95 to 120 beads);
+  with the sequential pool the step is 1,446,413, not the 1,446,263 (121
+  beads) quoted on 2026-09-30. The capacity growth of the event at step
+  2,046,413 (222 to 375) resets the device state and the path engages again
+  in the same step (both seen with a scratch build that prints the gate).
+  An ordinary step moves one 20-byte topology record; all 17 refinement
+  scans of this phase were accepted at their first step.
+
+### Measurements (seed 317, 5 million steps, `print time 1.d-4`)
+
+Each process bound to its GPU's NUMA node (`numactl --cpunodebind
+--membind`); phase times from wall-clock timestamps of the printed lines.
+
+| Build | Phase 1 | Phase 2 | Loop |
+| --- | ---: | ---: | ---: |
+| A30, `e6c8b81` | 429, 430 s (298 us/step) | 1410, 1425 s (399 us/step) | 1840, 1856 s |
+| A30, `7e3a64f` | 431, 433 s (299 us/step) | 1585, 1581 s (445 us/step) | 2016, 2014 s |
+| CPU | 156 s unbound, 166 s bound (108 – 114 us/step) | 5708 s (1606 us/step) | 5863 s |
+
+- `traj.xyz` byte-identical across the four A30 runs and to the unbound runs.
+- Phase 1, `JETSPIN_PROFILE=1` run stopped at step 1,446,411: A30 build
+  431 s, of which 340 s in 4,339,233 Coulomb calls (78 us each, 79 %), 62 us
+  per step for the rest; CPU build 165 s, of which 79 s Coulomb (18 us per
+  call), 59 us per step for the rest.
+- Nsight Systems, phase 1 at about 94 beads: per call kernels 3.4 + 9.2 us,
+  15 copies 23 us of device time, 6 synchronizations.
+- Nsight Systems, phase 2 at about 215 beads: per step 31 kernel launches,
+  59 stream synchronizations, one 20-byte download, no upload; kernels
+  220 us (Coulomb with cross sections 66 us, force stages and stress updates
+  89 us) of the 399 us step, so the device idles about 45 % of the step.
+  At about 273 beads, with collector removal active: 34 launches, 65
+  synchronizations, one 20-byte download, kernels 236 us (73 us Coulomb) of
+  the 402 us step.
+- Phase-2 step time is flat (about 400 us from 120 to 300 beads); the CPU
+  build grows from 0.5 to 1.8 ms.
+
+### Defect found, not fixed: loop timer wraps after 2147 s with NVFORTRAN
+
+`wall_time_world` (`serial_version_mod.f90`) and `profiling_mod` call
+`system_clock` with default integers. With NVFORTRAN the count starts at 0
+at program start, its rate is 1e6 per second and its maximum 2^31-1, so it
+wraps every 2147.48 s: the full CPU run (5863 s) printed `Time-integration
+loop wall time: 1568.43 s` (5863.4 - 2 x 2147.5) and a throughput of 3188
+instead of 853 steps/s, and its `JETSPIN_PROFILE` table is corrupted (an
+interval spanning a wrap loses 2147 s; `Integrator total` overflows its
+`f10.6` field). Runs shorter than 2147 s, such as every A30 run above, are
+unaffected. Fix: `integer(kind=8)` arguments (rate 1e7, no practical wrap).
+
+### Correction
+
+The 2026-10-01 entry compared unbound processes (1932/1935 s against
+2001/2002 s of loop time, 3.4 %). Placement of the host process relative
+to the GPU's NUMA node moves these latency-bound runs by up to 8 % (an
+unbound phase-1 run seen on the other socket took 464 s instead of 431 s).
+Bound, `e6c8b81`, which on this path changes only the topology check and the
+refinement scan, saves 46 us per phase-2 step and 8.3 % of the run. The commit message of `e6c8b81` keeps the unbound figure.
+
+### Next
+
+1. Phase 1: keep the Coulomb sum on the host below about 100 beads; the
+   estimate (89 s rest of step plus 79 s host Coulomb) is about 170 s
+   instead of 430 s for the phase.
+2. Phase 2: one asynchronous queue and a single synchronization per step.
+
 ## Nozzle insertion on the device for every persistent path; one transfer per topology check (2026-10-01)
 
 ### Changes
@@ -48,6 +126,8 @@
   byte-identical to the 2026-09-30 build; with one run per A30 on the same
   node, two runs of each build, the new build takes 1939 and 1941 s (2586
   steps/s) against 2007 and 2009 s (2498 steps/s), 3.4% less wall time.
+  These runs were not bound to their GPU's NUMA node; bound, the difference
+  is 8.3% (see the 2026-10-05 section).
 - Transfers (NVCOMPILER_ACC_NOTIFY=2): per ordinary step Test 23 moves one
   topology record and one scan record, against 13 transfers before (2+5
   topology scalars, 3+3 scan scalars); Tests 21/22 likewise 2 against 12.

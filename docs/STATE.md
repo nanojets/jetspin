@@ -1,5 +1,67 @@
 # JETSPIN development state and handoff log
 
+## Fused small kernels in the persistent evaporative Platen step (2026-10-05)
+
+### Change
+
+Only for the dynamic step (`platen_ev` with `linserting`) of non-oracle
+builds; the oracles, the fixed-geometry path and every other caller keep the
+separate kernels.
+
+- `accelerator_platen_stage_prep`: before each force evaluation one serial
+  kernel restores the charge smoothed for the previous evaluation, smooths it
+  and places the inserting bead (`maxwell_evap_device_stage` with
+  `fused_stage` 1 or 2). Three kernels before. The kernels in between do not
+  read `jetch`.
+- `accelerator_eom3_stage` with `fev_evap` computes the evaporation rate and
+  the Maxwell stress in its own loop (`device_maxwell_evap_stress_point`),
+  replacing the second kernel `accelerator_maxwell_evap_stress_3d` of
+  `accelerator_maxwell_evap_stage` (every caller of that stage). Beads the
+  force loop skips before setting the stress have a zero Maxwell stress.
+- `accelerator_platen_evap_end_step`: one single-gang kernel
+  (`num_gangs(1) vector_length(256)`) restores the smoothed charge, updates
+  the stress with the path-length and maximum statistics, places the
+  inserting bead, takes the topology decisions, freezes beads at the
+  collector, and stores the step's statistics over the range the topology
+  leaves. `accelerator_topology_check` then only reads the record back
+  (`accelerator_topology_decided`) and `accelerator_store_statistics`
+  returns (`accelerator_statistics_stored`); both flags are cleared when the
+  persistent path stops. Eight or nine kernels before.
+- `device_place_inserting_bead`, `device_smooth_charge`,
+  `device_topology_decide`, `device_maxwell_evap_stress_point`:
+  `!$acc routine seq` bodies shared by the fused and the separate kernels.
+
+### Evidence
+
+- Test 25 (seed 317, 5 million steps, bound A30s): loop 685 and 699 s
+  instead of 766 and 768 s; phase 2 530 and 544 s (137-154 us per step from
+  120 to 300 beads, 161-175 before). `traj.xyz`, `statout.dat`, the printed
+  observables (path length included) and the events are byte-identical to
+  the unfused asynchronous build.
+- Nsight Systems at about 237 beads: 16.4 launches per step (15 plus the
+  preparation kernels while the nozzle bead is blocked; 31 before), one
+  stream synchronization, one 20-byte download; kernels 125 us.
+- `JETSPIN_OPENACC_SYNC=1`: byte-identical to the synchronous build, 302 us
+  per phase-2 step instead of about 400.
+- Tests 21-23 `statout.dat`, Tests 12-15 and 20 byte-identical; regression
+  openacc 1-8 and Tests 16/17 pass; every OpenACC variant and both CPU
+  builds compile; force and Coulomb oracles (Test 25 to 1.5 million steps)
+  and the dynamic-Platen fork (Test 24 to 1.5 million) byte-identical to the
+  previous build.
+
+### Tried, not kept
+
+Folding the remaining per-bead updates (velocity, final evaporative stress,
+positions, Maxwell stress; four kernels, about 10 us per step) into the
+single-gang kernel failed with NVHPC 24.3. With assumed-shape dummies the
+kernel's arguments (about 45 array descriptors) produced invalid NVVM IR.
+With explicit-shape dummies passed to the assumed-shape device routines the
+compiler built 30 descriptor temporaries on the host stack and copied them
+on the asynchronous queue; the copies back landed after the routine had
+returned and corrupted the stack (segmentation fault at the engagement
+step). A version of these routines with explicit-shape dummies throughout,
+or a synchronous launch of that kernel, would avoid both.
+
 ## Persistent evaporative Platen step on one asynchronous queue (2026-10-05)
 
 ### Change

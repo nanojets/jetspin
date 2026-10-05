@@ -55,7 +55,7 @@ and 295, the path length 112 cm, and the fibre radius at the collector
 the nozzle with a local half-angle growing from about 8 to 12 degrees.  Four
 more CPU seeds give mean active counts between 267.8 and 268.4 and the same
 path length, so the stationary regime does not depend on the noise
-realization.  One NVIDIA A30 runs the same 5 million steps in about 770 s
+realization.  One NVIDIA A30 runs the same 5 million steps in about 690 s
 against 5893 s for the CPU build; it reads the same Gaussian pool, stays on the CPU
 trajectory until about 3 million steps, and gives the same stationary
 values.
@@ -74,10 +74,11 @@ returns only a 20-byte record of topology decisions to the host.  With each
 process bound to the NUMA node of its GPU, the first phase takes 156 s, the
 time of the CPU build; until 2026-10-05 the three Coulomb sums of each step
 were offloaded, each call copying 13 arrays to the device and 2 back, and the
-phase took 430 s, 79\% of it in those calls.  The second phase takes 612 s,
-about 170~$\mu$s per step from 120 to 300 beads against 0.5 to 1.8 ms for
-the CPU build: its 31 kernels run on one asynchronous queue and the host
-waits once per step, for the topology record.  With a synchronization after
+phase took 430 s, 79\% of it in those calls.  The second phase takes about
+540 s, about 150~$\mu$s per step from 120 to 300 beads against 0.5 to 1.8 ms
+for the CPU build: its kernels, 15 to 18 per step after fusing the small
+ones, run on one asynchronous queue and the host waits once per step, for
+the topology record.  With a synchronization after
 every kernel, as until 2026-10-05, the phase took 1418 s and the device was
 idle for 40 to 45\% of each step.  Without
 binding, placement of the host process alone changes the timings by up to

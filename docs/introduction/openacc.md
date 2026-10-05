@@ -460,7 +460,7 @@ beads when `prepare_integrator_random_history` ran, which is never true for a
 single-bead start, so the persistent path never engaged and only the Coulomb
 kernel ran on the device. The path now engages at step 1,446,413 (120 beads),
 right after an accepted refinement event. Over the 5 million steps of the
-Test 25 reference the A30 takes about 770 s and the NVFORTRAN CPU build
+Test 25 reference the A30 takes about 690 s and the NVFORTRAN CPU build
 5893 s.
 
 Nsight Systems profiles of the current build explain the remaining cost:
@@ -481,9 +481,10 @@ Nsight Systems profiles of the current build explain the remaining cost:
   bead count. Before the Coulomb kernel rewrite of 2026-09-30 the three
   Coulomb calls took 88 us each at about 170 beads, 72 % of the device time.
   Since 2026-10-05 the dynamic evaporative step runs on one asynchronous
-  queue (below): at about 219 beads it makes 31 launches, one stream
-  synchronization, and one 20-byte download per step, takes about 172 us,
-  and keeps the device busy for about 84 % of it.
+  queue (below): at about 219 beads it made 31 launches, one stream
+  synchronization, and one 20-byte download per step, took about 172 us,
+  and kept the device busy for about 84 % of it. With its small kernels
+  fused (below) it makes 15 to 18 launches and takes about 150 us.
 
 The queue (`accelerator_queue`) carries the charge smoothing and restoring,
 the placement of the inserting bead, the Coulomb, EOM, and stress kernels,
@@ -495,6 +496,18 @@ refinement events, and capacity resets see the completed device state. Other
 paths, the oracle builds, and `JETSPIN_OPENACC_SYNC=1` stay synchronous. The
 5-million-step Test 25 run and Tests 21--23 are byte-identical with and
 without the queue.
+
+The same step fuses its small kernels. Before each force evaluation one
+serial kernel (`accelerator_platen_stage_prep`) restores the charge smoothed
+for the previous evaluation, smooths it again, and places the inserting
+bead; `accelerator_eom3_stage` with `fev_evap` computes the evaporation rate
+and the Maxwell stress in its own loop instead of a second kernel; and one
+single-gang kernel (`accelerator_platen_evap_end_step`) does the stress
+update with its statistics, the placement, the topology decisions, the
+freezing, and the step's statistics, after which `accelerator_topology_check`
+only reads the record back. The serial and per-bead pieces are
+`!$acc routine seq` routines shared with the separate kernels, which the
+oracle builds and the other paths keep. The results do not change.
 
 Below about 100 beads the CPU build is also faster than the persistent path;
 there the A30 run now does the same work on the host.
@@ -568,11 +581,12 @@ insertions and 282 active beads against 88 and 276.
 
 ## Next porting stages
 
-1. For the dynamic evaporative Platen path: fewer kernels per step. On one
-   asynchronous queue the device is busy for about 84 % of a step, and the
-   31 launches are the remaining host cost; the serial smoothing, placement,
-   and restoring kernels and the statistics kernels are the first candidates
-   for fusion.
+1. For the dynamic evaporative Platen path: the four per-bead updates after
+   the last force evaluation (velocity, final evaporative stress, positions,
+   Maxwell stress) could join the single-gang end-of-step kernel, about
+   10 us per step; NVHPC 24.3 did not compile that kernel correctly
+   (`docs/STATE.md`). Beyond that the step time is in the Coulomb and force
+   kernels themselves.
 2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
 3. Extend the refinement-capacity lifecycle beyond the currently validated

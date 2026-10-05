@@ -29,7 +29,8 @@ module integrator_mod
                          jetpt,lKVfluid,levaporation,jetve,jetce,evlim,jetfr, &
                          cp0,Bev,mev,tev, &
                          evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity, &
-                         resolution, &
+                         resolution,dresolution,thresolution,ivelocity, &
+                         istress,imassa,icharge,ivolume,collector_h=>h, &
                          linserted,liniperturb,lairdrag,lflorentz,luppot, &
                          pfreq,consistency,findex,yieldstress,att,fve,gr, &
                          ks,li,v,velext,linserting,lremove,lmultiplestep, &
@@ -65,7 +66,9 @@ module integrator_mod
                          accelerator_platen_evap_velocity, &
                          accelerator_platen_positions, &
                          accelerator_platen_evap_positions, &
-                         accelerator_platen_stress_statistics
+                         accelerator_platen_stress_statistics, &
+                         accelerator_platen_stage_prep, &
+                         accelerator_platen_evap_end_step
  use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
                          maxstressposx
 #ifdef JETSPIN_GPU_DYNAMIC_PLATEN
@@ -3541,7 +3544,12 @@ contains
  end subroutine ensure_maxwell_evap_device_workspace
 
  subroutine maxwell_evap_device_stage(tstage,k,xs,ys,zs,ss,vxs,vys,vzs,ves, &
-   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,stochastic_model)
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,stochastic_model,fused_stage)
+! fused_stage (fused persistent Platen step): 1 for the first force
+! evaluation of the step, 2 for the later ones, whose preparation kernel
+! first restores the charge smoothed for the previous one; the end of the
+! step restores the last.  Absent or 0: smoothing, placement and restoring
+! as separate kernels.
   implicit none
   integer, intent(in) :: k
   double precision, intent(in) :: tstage
@@ -3551,7 +3559,8 @@ contains
   double precision, intent(inout) :: fxx(0:),fyy(0:),fzz(0:),fst(0:)
   double precision, intent(inout) :: fvx(0:),fvy(0:),fvz(0:),fev(0:)
   logical, intent(in), optional :: stochastic_model
-  integer :: ipoint,j,nactive
+  integer, intent(in), optional :: fused_stage
+  integer :: ipoint,j,nactive,mode
   logical :: stochastic_stage
   double precision :: fstocx,fstocy,fstocz
 
@@ -3585,8 +3594,15 @@ contains
 !$acc& fst(0:nactive),fvx(0:nactive),fvy(0:nactive), &
 !$acc& fvz(0:nactive),fev(0:nactive)) if_present
 #else
-  call smooth_charge(xs,ys,zs)
-  call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution,xs,ys,zs)
+  mode=0
+  if(present(fused_stage))mode=fused_stage
+  if(mode==0)then
+    call smooth_charge(xs,ys,zs)
+    call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution,xs,ys,zs)
+  elseif(.not.linserted)then
+    call accelerator_platen_stage_prep(npjet,mode==2,thresolution, &
+     dresolution,resolution,xs,ys,zs,jetch)
+  endif
   call compute_coulomelec_driver(k,tstage,coulforce,jetvl,xs,ys,zs,ves)
   call accelerator_maxwell_evap_stage(mystart,myend,npjet,xs,ys,zs,ss, &
    vxs,vys,vzs,jetvl,ves,coulforce,jetms,jetch,jetfr, &
@@ -3594,7 +3610,7 @@ contains
    lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
    yieldstress,att,fve,gr,ks,li,v,velext,stochastic_stage,noisefric,evairv, &
    evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev)
-  call restore_charge()
+  if(mode==0)call restore_charge()
 #endif
  end subroutine maxwell_evap_device_stage
 
@@ -5405,6 +5421,7 @@ contains
   
   logical, save :: lfirstsub=.true.
   logical, save :: persistent_acc=.false.
+  logical :: fusedstep
   
   double precision ::  fxx
   double precision ::  fyy
@@ -5762,9 +5779,17 @@ contains
     case default
 #ifdef _OPENACC
       if(persistent_acc)then
+! A dynamic step fuses its small kernels (2026-10-05): one preparation
+! kernel per force evaluation and one single-gang kernel for the end of the
+! step and the topology decisions.  The oracles keep the separate kernels.
+#if defined(JETSPIN_DEV_HOST_FORCE_ORACLE) || defined(JETSPIN_DEV_HOST_COULOMB_ORACLE) || defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+        fusedstep=.false.
+#else
+        fusedstep=linserting
+#endif
         call maxwell_evap_device_stage(timesub,k,jetxx,jetyy,jetzz,jetst, &
          jetvx,jetvy,jetvz,jetve,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-         f1ev,.true.)
+         f1ev,.true.,merge(1,0,fusedstep))
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
 !$acc update device(f1xx(0:myend-mystart),f1yy(0:myend-mystart), &
 !$acc& f1zz(0:myend-mystart),f1st(0:myend-mystart), &
@@ -5779,7 +5804,7 @@ contains
 
         call maxwell_evap_device_stage(timesub,k,y1xx,y1yy,y1zz,y1st, &
          y1vx,y1vy,y1vz,y1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
-         f2ev,.true.)
+         f2ev,.true.,merge(2,0,fusedstep))
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
 !$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
 !$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
@@ -5788,7 +5813,7 @@ contains
 #endif
         call maxwell_evap_device_stage(timesub,k,y2xx,y2yy,y2zz,y2st, &
          y2vx,y2vy,y2vz,y2ev,d3xx,d3yy,d3zz,d3st,d3vx,d3vy,d3vz, &
-         d3ev,.true.)
+         d3ev,.true.,merge(2,0,fusedstep))
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
 !$acc update device(d3xx(0:myend-mystart),d3yy(0:myend-mystart), &
 !$acc& d3zz(0:myend-mystart),d3st(0:myend-mystart), &
@@ -5834,11 +5859,20 @@ contains
          jetfr,f2st,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,y1st,jetvl,jetve, &
          cp0,Bev,mev,tev,consistency,findex,yieldstress)
 #endif
-        call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
-         jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
-         maxstressposx)
-        call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
-         jetxx,jetyy,jetzz)
+        if(fusedstep)then
+          call accelerator_platen_evap_end_step(mystart,myend,h,npjet, &
+           mxnpjet,inpjet,linserted,lremove,collector_h,resolution, &
+           dresolution,thresolution,ivelocity,istress,imassa,icharge, &
+           ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch, &
+           jetvl,jetfr,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
+           maxstressposx)
+        else
+          call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
+           jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
+           maxstressposx)
+          call accelerator_compute_posnoinserted_3d(npjet,linserted,resolution, &
+           jetxx,jetyy,jetzz)
+        endif
         call accelerator_mark_device_state(.true.)
         timesub=timesub+h
         return

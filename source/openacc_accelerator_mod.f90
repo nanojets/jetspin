@@ -23,6 +23,12 @@ module accelerator_mod
 ! bead added, capacity exhausted, bead removed), read back in one transfer
 ! by accelerator_topology_check.
  integer, save :: accelerator_topology_flags(5)=0
+! Set when accelerator_platen_evap_end_step has already made this step's
+! topology decisions and statistics update on the device: the following
+! accelerator_topology_check only reads the flags back, and
+! accelerator_store_statistics does nothing.
+ logical, save :: accelerator_topology_decided=.false.
+ logical, save :: accelerator_statistics_stored=.false.
 ! Results of one refinement threshold scan (last over-threshold segment,
 ! path length, nozzle correction), read back in one transfer.
  double precision, save :: accelerator_refinement_scan(3)=0.d0
@@ -105,6 +111,8 @@ module accelerator_mod
  public :: accelerator_platen_positions
  public :: accelerator_platen_evap_positions
  public :: accelerator_platen_stress_statistics
+ public :: accelerator_platen_stage_prep
+ public :: accelerator_platen_evap_end_step
 
  ! The RK state algebra is common to both evaporation rheologies.  Preserve
  ! the historical specific procedure names while exposing neutral interfaces
@@ -251,18 +259,17 @@ contains
   ! device-resident.  Once beads have been removed, eom4_ev gives the lead
   ! bead the surface-tension and lift terms computed with the last collected
   ! bead; collector_curvature reproduces them (missing until 2026-09-30).
+  ! Since 2026-10-05 the evaporation rate and the Maxwell stress are
+  ! computed in the same kernel (fev_evap), not in a second one.
   ok=accelerator_eom3_stage(firstpoint,lastpoint,npjet,yxx,yyy,yzz,yst, &
    yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
    linserted,liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
    consistency,findex,yieldstress,att,fveparam,gr,ks,li,vfield,velext, &
-   stochastic_model,noisefric,yve,collector_curvature=.true.)
+   stochastic_model,noisefric,yve,collector_curvature=.true., &
+   fev_evap=fve,ev_airv=evairv,ev_masscoeff=evmasscoeff,ev_sqrevsc=sqrevsc, &
+   ev_csvapour=evcsvapour,ev_umidity=evumidity,ev_cp0=cp0,ev_bev=Bev, &
+   ev_mev=mev,ev_tev=tev)
   if(.not.ok)return
-  call accelerator_maxwell_evap_stress_3d(firstpoint,lastpoint,npjet, &
-   linserting=linserting,linserted=linserted,jetfr=jetfr,fev=fve,fst=fst, &
-   yxx=yxx,yyy=yyy,yzz=yzz,yvx=yvx,yvy=yvy,yvz=yvz,yst=yst,yvl=yvl,yve=yve, &
-   evairv=evairv,evmasscoeff=evmasscoeff,sqrevsc=sqrevsc, &
-   evcsvapour=evcsvapour,evumidity=evumidity,cp0=cp0,Bev=Bev,mev=mev, &
-   tev=tev,consistency=consistency,findex=findex,yieldstress=yieldstress)
  end subroutine accelerator_maxwell_evap_stage
 
  subroutine accelerator_kv_evap_stage(firstpoint,lastpoint,npjet, &
@@ -477,11 +484,27 @@ contains
   logical, intent(in) :: linserted
   double precision, intent(in) :: resolution
   double precision, intent(inout) :: yxx(0:),yyy(0:),yzz(0:)
-  double precision :: dx,dy,dz,distance,scale
   if(linserted)return
 #ifdef _OPENACC
-!$acc serial async(accelerator_queue) present(yxx,yyy,yzz) private(dx,dy,dz,distance,scale)
+!$acc serial async(accelerator_queue) present(yxx,yyy,yzz)
 #endif
+  call device_place_inserting_bead(npjet,resolution,yxx,yyy,yzz)
+#ifdef _OPENACC
+!$acc end serial
+#endif
+ end subroutine accelerator_compute_posnoinserted_3d
+
+ subroutine device_place_inserting_bead(npjet,resolution,yxx,yyy,yzz)
+! compute_posnoinserted on one state: the blocked nozzle bead npjet-1 is put
+! at resolution from the nozzle bead, towards bead npjet-2.
+#ifdef _OPENACC
+!$acc routine seq
+#endif
+  implicit none
+  integer, intent(in) :: npjet
+  double precision, intent(in) :: resolution
+  double precision, intent(inout) :: yxx(0:),yyy(0:),yzz(0:)
+  double precision :: dx,dy,dz,distance,scale
   dx=yxx(npjet-2)-yxx(npjet)
   dy=yyy(npjet-2)-yyy(npjet)
   dz=yzz(npjet-2)-yzz(npjet)
@@ -492,10 +515,7 @@ contains
     yyy(npjet-1)=yyy(npjet)+scale*dy
     yzz(npjet-1)=yzz(npjet)+scale*dz
   endif
-#ifdef _OPENACC
-!$acc end serial
-#endif
- end subroutine accelerator_compute_posnoinserted_3d
+ end subroutine device_place_inserting_bead
 
  subroutine accelerator_smooth_charge_3d(npjet,linserted,thresolution,dresolution, &
    yxx,yyy,yzz,jetch)
@@ -505,11 +525,29 @@ contains
   double precision, intent(in) :: thresolution,dresolution
   double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:)
   double precision, intent(inout) :: jetch(0:)
-  double precision :: dx,dy,dz,distance,factor
   if(linserted)return
 #ifdef _OPENACC
-!$acc serial async(accelerator_queue) present(yxx,yyy,yzz,jetch) private(dx,dy,dz,distance,factor)
+!$acc serial async(accelerator_queue) present(yxx,yyy,yzz,jetch)
 #endif
+  call device_smooth_charge(npjet,thresolution,dresolution,yxx,yyy,yzz,jetch)
+#ifdef _OPENACC
+!$acc end serial
+#endif
+ end subroutine accelerator_smooth_charge_3d
+
+ subroutine device_smooth_charge(npjet,thresolution,dresolution,yxx,yyy,yzz, &
+   jetch)
+! smooth_charge on one state: keep the charge of the blocked nozzle bead in
+! accelerator_smoothed_charge and scale it by the cut-off of its distance.
+#ifdef _OPENACC
+!$acc routine seq
+#endif
+  implicit none
+  integer, intent(in) :: npjet
+  double precision, intent(in) :: thresolution,dresolution
+  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:)
+  double precision, intent(inout) :: jetch(0:)
+  double precision :: dx,dy,dz,distance,factor
   dx=yxx(npjet-2)-yxx(npjet)
   dy=yyy(npjet-2)-yyy(npjet)
   dz=yzz(npjet-2)-yzz(npjet)
@@ -524,10 +562,30 @@ contains
   endif
   accelerator_smoothed_charge=jetch(npjet-1)
   jetch(npjet-1)=factor*accelerator_smoothed_charge
+ end subroutine device_smooth_charge
+
+ subroutine accelerator_platen_stage_prep(npjet,restore,thresolution, &
+   dresolution,resolution,yxx,yyy,yzz,jetch)
+! One serial kernel before a force evaluation of the fused persistent Platen
+! step (accelerator_platen_evap_end_step): restore the charge smoothed for
+! the previous evaluation when restore is set, smooth it for this one, and
+! place the inserting bead; three kernels before 2026-10-05.  The kernels in
+! between do not read jetch.  Only for a blocked nozzle bead.
+  implicit none
+  integer, intent(in) :: npjet
+  logical, intent(in) :: restore
+  double precision, intent(in) :: thresolution,dresolution,resolution
+  double precision, intent(inout) :: yxx(0:),yyy(0:),yzz(0:),jetch(0:)
+#ifdef _OPENACC
+!$acc serial async(accelerator_queue) present(yxx,yyy,yzz,jetch)
+#endif
+  if(restore)jetch(npjet-1)=accelerator_smoothed_charge
+  call device_smooth_charge(npjet,thresolution,dresolution,yxx,yyy,yzz,jetch)
+  call device_place_inserting_bead(npjet,resolution,yxx,yyy,yzz)
 #ifdef _OPENACC
 !$acc end serial
 #endif
- end subroutine accelerator_smooth_charge_3d
+ end subroutine accelerator_platen_stage_prep
 
  subroutine accelerator_restore_charge(npjet,linserted,jetch)
   implicit none
@@ -707,52 +765,76 @@ contains
   double precision, intent(in) :: evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity
   double precision, intent(in) :: cp0,Bev,mev,tev,consistency,findex,yieldstress
   integer :: ipoint,j
-  double precision :: dx,dy,dz,beadlen,vnorm,re,beadvel,cp,ratmu,rattao
+  double precision :: fstval
 #ifdef _OPENACC
 !$acc parallel loop async(accelerator_queue) gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yst(0:npjet),yvl(0:npjet), &
 !$acc& yve(0:npjet),jetfr(0:npjet)) present_or_copyout(fev(0:lastpoint-firstpoint), &
-!$acc& fst(0:lastpoint-firstpoint)) private(j,dx,dy,dz,beadlen,vnorm,re,beadvel, &
-!$acc& cp,ratmu,rattao)
+!$acc& fst(0:lastpoint-firstpoint)) private(j,fstval)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
-    fev(j)=0.d0
-    fst(j)=0.d0
-    if(jetfr(ipoint) .or. ipoint>=npjet)cycle
-    if(ipoint==npjet-1 .and. .not.linserted)cycle
-    if(ipoint==npjet-2 .and. .not.linserted)then
-      dx=yxx(npjet)-yxx(ipoint); dy=yyy(npjet)-yyy(ipoint); dz=yzz(npjet)-yzz(ipoint)
-    else
-      dx=yxx(ipoint+1)-yxx(ipoint); dy=yyy(ipoint+1)-yyy(ipoint); dz=yzz(ipoint+1)-yzz(ipoint)
-    endif
-    beadlen=dsqrt(dx*dx+dy*dy+dz*dz)
-    vnorm=dsqrt(yvx(ipoint)*yvx(ipoint)+yvy(ipoint)*yvy(ipoint)+yvz(ipoint)*yvz(ipoint))
-    if(beadlen>0.d0 .and. evairv>0.d0 .and. yve(ipoint)>0.d0)then
-      re=(2.d0*dsqrt(yve(ipoint)/(3.14159265358979323846d0*beadlen))*vnorm)/evairv
-      fev(j)=-evmasscoeff*0.495d0*(re**(1.d0/3.d0))*sqrevsc* &
-       (evcsvapour-evumidity)*3.14159265358979323846d0*beadlen
-    endif
-    if(yve(ipoint)<=0.d0 .or. yvl(ipoint)<=0.d0)cycle
-    if(ipoint==npjet-2 .and. .not.linserted)then
-      dx=yxx(ipoint)-yxx(npjet); dy=yyy(ipoint)-yyy(npjet); dz=yzz(ipoint)-yzz(npjet)
-      beadvel=((yvx(ipoint)-yvx(npjet))*dx+(yvy(ipoint)-yvy(npjet))*dy+ &
-       (yvz(ipoint)-yvz(npjet))*dz)/beadlen
-    else
-      dx=yxx(ipoint)-yxx(ipoint+1); dy=yyy(ipoint)-yyy(ipoint+1); dz=yzz(ipoint)-yzz(ipoint+1)
-      beadvel=((yvx(ipoint)-yvx(ipoint+1))*dx+(yvy(ipoint)-yvy(ipoint+1))*dy+ &
-       (yvz(ipoint)-yvz(ipoint+1))*dz)/beadlen
-    endif
-    cp=cp0*yvl(ipoint)/yve(ipoint)
-    rattao=(cp/cp0)**tev
-    ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
-    fst(j)=(1.d0/rattao)*(yieldstress+consistency*ratmu* &
-     (beadvel/beadlen)**findex-yst(ipoint))
+    call device_maxwell_evap_stress_point(ipoint,j,npjet,linserted,jetfr,fev, &
+     fstval,yxx,yyy,yzz,yvx,yvy,yvz,yst,yvl,yve,evairv,evmasscoeff,sqrevsc, &
+     evcsvapour,evumidity,cp0,Bev,mev,tev,consistency,findex,yieldstress)
+    fst(j)=fstval
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop
 #endif
  end subroutine accelerator_maxwell_evap_stress_3d
+
+ subroutine device_maxwell_evap_stress_point(ipoint,j,npjet,linserted,jetfr, &
+   fev,fstval,yxx,yyy,yzz,yvx,yvy,yvz,yst,yvl,yve,evairv,evmasscoeff,sqrevsc, &
+   evcsvapour,evumidity,cp0,Bev,mev,tev,consistency,findex,yieldstress)
+! Evaporation rate fev(j) and Maxwell stress derivative of bead ipoint (Yarin
+! law), the body of accelerator_maxwell_evap_stress_3d; accelerator_eom3_stage
+! evaluates it inside its own loop when asked to (fev_evap).
+#ifdef _OPENACC
+!$acc routine seq
+#endif
+  implicit none
+  integer, intent(in) :: ipoint,j,npjet
+  logical, intent(in) :: linserted,jetfr(0:)
+  double precision, intent(inout) :: fev(0:)
+  double precision, intent(out) :: fstval
+  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yvx(0:),yvy(0:),yvz(0:)
+  double precision, intent(in) :: yst(0:),yvl(0:),yve(0:)
+  double precision, intent(in) :: evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity
+  double precision, intent(in) :: cp0,Bev,mev,tev,consistency,findex,yieldstress
+  double precision :: dx,dy,dz,beadlen,vnorm,re,beadvel,cp,ratmu,rattao
+  fev(j)=0.d0
+  fstval=0.d0
+  if(jetfr(ipoint) .or. ipoint>=npjet)return
+  if(ipoint==npjet-1 .and. .not.linserted)return
+  if(ipoint==npjet-2 .and. .not.linserted)then
+    dx=yxx(npjet)-yxx(ipoint); dy=yyy(npjet)-yyy(ipoint); dz=yzz(npjet)-yzz(ipoint)
+  else
+    dx=yxx(ipoint+1)-yxx(ipoint); dy=yyy(ipoint+1)-yyy(ipoint); dz=yzz(ipoint+1)-yzz(ipoint)
+  endif
+  beadlen=dsqrt(dx*dx+dy*dy+dz*dz)
+  vnorm=dsqrt(yvx(ipoint)*yvx(ipoint)+yvy(ipoint)*yvy(ipoint)+yvz(ipoint)*yvz(ipoint))
+  if(beadlen>0.d0 .and. evairv>0.d0 .and. yve(ipoint)>0.d0)then
+    re=(2.d0*dsqrt(yve(ipoint)/(3.14159265358979323846d0*beadlen))*vnorm)/evairv
+    fev(j)=-evmasscoeff*0.495d0*(re**(1.d0/3.d0))*sqrevsc* &
+     (evcsvapour-evumidity)*3.14159265358979323846d0*beadlen
+  endif
+  if(yve(ipoint)<=0.d0 .or. yvl(ipoint)<=0.d0)return
+  if(ipoint==npjet-2 .and. .not.linserted)then
+    dx=yxx(ipoint)-yxx(npjet); dy=yyy(ipoint)-yyy(npjet); dz=yzz(ipoint)-yzz(npjet)
+    beadvel=((yvx(ipoint)-yvx(npjet))*dx+(yvy(ipoint)-yvy(npjet))*dy+ &
+     (yvz(ipoint)-yvz(npjet))*dz)/beadlen
+  else
+    dx=yxx(ipoint)-yxx(ipoint+1); dy=yyy(ipoint)-yyy(ipoint+1); dz=yzz(ipoint)-yzz(ipoint+1)
+    beadvel=((yvx(ipoint)-yvx(ipoint+1))*dx+(yvy(ipoint)-yvy(ipoint+1))*dy+ &
+     (yvz(ipoint)-yvz(ipoint+1))*dz)/beadlen
+  endif
+  cp=cp0*yvl(ipoint)/yve(ipoint)
+  rattao=(cp/cp0)**tev
+  ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
+  fstval=(1.d0/rattao)*(yieldstress+consistency*ratmu* &
+   (beadvel/beadlen)**findex-yst(ipoint))
+ end subroutine device_maxwell_evap_stress_point
 
  subroutine accelerator_kv_stress_3d(firstpoint,lastpoint,npjet,linserted,jetfr, &
    fst,yxx,yyy,yzz,yvx,yvy,yvz,yax,yay,yaz,yst,yvl,yve,fevlocal, &
@@ -1621,6 +1703,108 @@ contains
 ! persistent Platen run was half the host value (fixed 2026-09-30).
  end subroutine accelerator_platen_stress_statistics
 
+ subroutine accelerator_platen_evap_end_step(firstpoint,lastpoint,dt, &
+   npjet,mxnpjet,inpjet,linserted,lremove,h,resolution,dresolution, &
+   thresolution,ivelocity,istress,imassa,icharge,ivolume,jetxx,jetyy,jetzz, &
+   jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,f1st,f2st,counterlpath, &
+   ncounterlpath,maxstress,maxstressposx)
+! The end of a fused persistent dynamic evaporative Platen step in one
+! single-gang kernel, which a few hundred beads keep busy: restore the
+! smoothed nozzle charge, update the stress with the path-length and maximum
+! statistics (accelerator_platen_stress_statistics), place the inserting
+! bead, decide the topology and freeze beads at the collector
+! (accelerator_topology_check), and store the step's statistics over the
+! active range the topology leaves (accelerator_store_statistics).  Until
+! 2026-10-05 these were eight or nine kernels.  accelerator_topology_check
+! then only reads the flags back.  Only the order of the path-length sum
+! changes.
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint,npjet,mxnpjet,inpjet
+  logical, intent(in) :: linserted,lremove
+  integer, intent(inout) :: ncounterlpath
+  double precision, intent(in) :: dt,h,resolution,dresolution,thresolution
+  double precision, intent(in) :: ivelocity,istress,imassa,icharge,ivolume
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
+  logical, intent(inout) :: jetfr(0:)
+  double precision, intent(in) :: f1st(0:),f2st(0:)
+  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
+  integer :: ipoint,j,first,last,lastfreeze,idx
+  double precision :: newst,dx,dy,dz,lpsum,stmax
+  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress,maxstressposx)
+  lastfreeze=min(npjet+1,mxnpjet)
+#ifdef _OPENACC
+!$acc parallel num_gangs(1) vector_length(256) async(accelerator_queue) &
+!$acc& present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl, &
+!$acc& jetfr,f1st,f2st,counterlpath,ncounterlpath,maxstress,maxstressposx, &
+!$acc& statistics_step_max,statistics_step_index,accelerator_topology_flags) &
+!$acc& private(lpsum,stmax,first,last,idx)
+#endif
+  if(.not.linserted)jetch(npjet-1)=accelerator_smoothed_charge
+  lpsum=0.d0
+  stmax=-huge(0.d0)
+#ifdef _OPENACC
+!$acc loop vector reduction(+:lpsum) reduction(max:stmax) private(j,newst,dx,dy,dz)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+    newst=jetst(ipoint)+0.5d0*dt*(f1st(j)+f2st(j))
+    if(ipoint<lastpoint)then
+      dx=jetxx(ipoint)-jetxx(ipoint+1)
+      dy=jetyy(ipoint)-jetyy(ipoint+1)
+      dz=jetzz(ipoint)-jetzz(ipoint+1)
+      lpsum=lpsum+dsqrt(dx*dx+dy*dy+dz*dz)
+    endif
+    jetst(ipoint)=newst
+    stmax=max(stmax,newst)
+  enddo
+  counterlpath=counterlpath+lpsum
+  statistics_step_max=max(statistics_step_max,stmax)
+  if(.not.linserted)call device_place_inserting_bead(npjet,resolution, &
+   jetxx,jetyy,jetzz)
+  call device_topology_decide(npjet,mxnpjet,inpjet,linserted,lremove,h, &
+   resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
+   ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+  if(lremove)then
+#ifdef _OPENACC
+!$acc loop vector
+#endif
+    do ipoint=inpjet,lastfreeze
+      if(accelerator_topology_flags(4)==0 .and. &
+       ipoint<=accelerator_topology_flags(1))then
+        if(jetxx(ipoint)>=h)then
+          jetfr(ipoint)=.true.
+          jetxx(ipoint)=h
+        endif
+      endif
+    enddo
+  endif
+! accelerator_store_statistics over the range left by the topology step.
+  first=inpjet+accelerator_topology_flags(5)
+  last=accelerator_topology_flags(1)
+  idx=statistics_step_index
+#ifdef _OPENACC
+!$acc loop vector reduction(max:idx)
+#endif
+  do ipoint=first,last
+    if(jetst(ipoint)==statistics_step_max)idx=max(idx,ipoint)
+  enddo
+  statistics_step_index=idx
+  ncounterlpath=ncounterlpath+1
+  if(statistics_step_max>=maxstress)then
+    maxstress=statistics_step_max
+    maxstressposx=jetxx(statistics_step_index)
+  endif
+  statistics_step_max=-huge(0.d0)
+  statistics_step_index=-1
+#ifdef _OPENACC
+!$acc end parallel
+#endif
+  accelerator_topology_decided=.true.
+  accelerator_statistics_stored=.true.
+ end subroutine accelerator_platen_evap_end_step
+
  subroutine accelerator_euler_final_statistics(firstpoint,lastpoint,h, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
    fxx,fyy,fzz,fst,fvx,fvy,fvz,counterlpath,ncounterlpath, &
@@ -1835,6 +2019,8 @@ contains
   implicit none
   logical, intent(in) :: enabled
   if(.not.enabled)call accelerator_set_async(.false.)
+  if(.not.enabled)accelerator_topology_decided=.false.
+  if(.not.enabled)accelerator_statistics_stored=.false.
   accelerator_persistent=enabled
   if(.not.enabled)accelerator_device_state_authoritative=.false.
   return
@@ -1978,15 +2164,91 @@ contains
   double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
   double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
   logical, intent(inout) :: jetfr(0:)
-  integer :: ipoint,lastpoint,np,newadd,newresize,newremove
-  logical :: ins
-  double precision :: dx,dy,dz,distance,scale
+  integer :: ipoint,lastpoint
 
+! accelerator_platen_evap_end_step may already have decided this step on
+! the device; then only the readback below remains.
+  if(accelerator_topology_decided)then
+    accelerator_topology_decided=.false.
+  else
 #ifdef _OPENACC
 !$acc serial async(accelerator_queue) present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
-!$acc& jetch,jetvl,jetfr,accelerator_topology_flags) &
-!$acc& private(np,ins,newadd,newresize,newremove,dx,dy,dz,distance,scale)
+!$acc& jetch,jetvl,jetfr,accelerator_topology_flags)
 #endif
+    call device_topology_decide(npjet,mxnpjet,inpjet,linserted,lremove,h, &
+     resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
+     ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+#ifdef _OPENACC
+!$acc end serial
+#endif
+    if(lremove)then
+! The upper bound covers a bead added above; the device npjet decides.
+      lastpoint=min(npjet+1,mxnpjet)
+#ifdef _OPENACC
+!$acc parallel loop async(accelerator_queue) present(jetxx,jetfr,accelerator_topology_flags)
+#endif
+      do ipoint=inpjet,lastpoint
+        if(accelerator_topology_flags(4)==0 .and. &
+         ipoint<=accelerator_topology_flags(1))then
+          if(jetxx(ipoint)>=h)then
+            jetfr(ipoint)=.true.
+            jetxx(ipoint)=h
+          endif
+        endif
+      enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+    endif
+  endif
+#ifdef _OPENACC
+!$acc update self(accelerator_topology_flags) async(accelerator_queue)
+  call accelerator_wait()
+#endif
+  npjet=accelerator_topology_flags(1)
+  linserted=accelerator_topology_flags(2)==1
+  ladd=accelerator_topology_flags(3)==1
+  lresize=accelerator_topology_flags(4)==1
+  lrem=accelerator_topology_flags(5)==1
+#ifdef _OPENACC
+  if(ladd)then
+! The host statistics need only the injected mass and charge.  The complete
+! bead state remains device-resident until an output/checkpoint or resize.
+    if(accelerator_device_state_authoritative)then
+!$acc update self(jetms(npjet-1),jetch(npjet-1))
+    else
+! The development host-force path continues on the host after the topology
+! event, so it needs the complete new-bead state.
+!$acc update self(jetxx(npjet-1:npjet),jetyy(npjet-1:npjet), &
+!$acc& jetzz(npjet-1:npjet),jetst(npjet-1:npjet),jetvx(npjet-1:npjet), &
+!$acc& jetvy(npjet-1:npjet),jetvz(npjet-1:npjet),jetms(npjet-1:npjet), &
+!$acc& jetch(npjet-1:npjet),jetvl(npjet-1:npjet),jetfr(npjet-1:npjet))
+    endif
+  endif
+#endif
+ end subroutine accelerator_topology_check
+
+ subroutine device_topology_decide(npjet,mxnpjet,inpjet,linserted,lremove,h, &
+   resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
+   ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+! The serial part of one step's topology decisions (release or insertion at
+! the nozzle, capacity exhaustion, removal test) on the device, written to
+! accelerator_topology_flags; the freezing loop follows in the caller.
+#ifdef _OPENACC
+!$acc routine seq
+#endif
+  implicit none
+  integer, intent(in) :: npjet,mxnpjet,inpjet
+  logical, intent(in) :: linserted,lremove
+  double precision, intent(in) :: h,resolution,dresolution,thresolution
+  double precision, intent(in) :: ivelocity,istress,imassa,icharge,ivolume
+  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
+  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
+  double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
+  logical, intent(inout) :: jetfr(0:)
+  integer :: np,newadd,newresize,newremove
+  logical :: ins
+  double precision :: dx,dy,dz,distance,scale
   np=npjet
   ins=linserted
   newadd=0
@@ -2055,54 +2317,7 @@ contains
   accelerator_topology_flags(3)=newadd
   accelerator_topology_flags(4)=newresize
   accelerator_topology_flags(5)=newremove
-#ifdef _OPENACC
-!$acc end serial
-#endif
-  if(lremove)then
-! The upper bound covers a bead added above; the device npjet decides.
-    lastpoint=min(npjet+1,mxnpjet)
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) present(jetxx,jetfr,accelerator_topology_flags)
-#endif
-    do ipoint=inpjet,lastpoint
-      if(accelerator_topology_flags(4)==0 .and. &
-       ipoint<=accelerator_topology_flags(1))then
-        if(jetxx(ipoint)>=h)then
-          jetfr(ipoint)=.true.
-          jetxx(ipoint)=h
-        endif
-      endif
-    enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
-  endif
-#ifdef _OPENACC
-!$acc update self(accelerator_topology_flags) async(accelerator_queue)
-  call accelerator_wait()
-#endif
-  npjet=accelerator_topology_flags(1)
-  linserted=accelerator_topology_flags(2)==1
-  ladd=accelerator_topology_flags(3)==1
-  lresize=accelerator_topology_flags(4)==1
-  lrem=accelerator_topology_flags(5)==1
-#ifdef _OPENACC
-  if(ladd)then
-! The host statistics need only the injected mass and charge.  The complete
-! bead state remains device-resident until an output/checkpoint or resize.
-    if(accelerator_device_state_authoritative)then
-!$acc update self(jetms(npjet-1),jetch(npjet-1))
-    else
-! The development host-force path continues on the host after the topology
-! event, so it needs the complete new-bead state.
-!$acc update self(jetxx(npjet-1:npjet),jetyy(npjet-1:npjet), &
-!$acc& jetzz(npjet-1:npjet),jetst(npjet-1:npjet),jetvx(npjet-1:npjet), &
-!$acc& jetvy(npjet-1:npjet),jetvz(npjet-1:npjet),jetms(npjet-1:npjet), &
-!$acc& jetch(npjet-1:npjet),jetvl(npjet-1:npjet),jetfr(npjet-1:npjet))
-    endif
-  endif
-#endif
- end subroutine accelerator_topology_check
+ end subroutine device_topology_decide
 
  subroutine accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
   implicit none
@@ -2192,6 +2407,11 @@ contains
   double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
   integer :: ipoint
 
+  if(accelerator_statistics_stored)then
+! Already done on the device by accelerator_platen_evap_end_step.
+    accelerator_statistics_stored=.false.
+    return
+  endif
   if(.not.accelerator_persistent)return
 #ifdef _OPENACC
 !$acc parallel loop async(accelerator_queue) gang vector present(jetst,statistics_step_max, &
@@ -2259,7 +2479,13 @@ contains
    fxx,fyy,fzz,fst,fvx,fvy,fvz,linserted,liniperturb,lairdrag, &
    lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
    att,fve,gr,ks,li,vfield,velext,stochastic_model,noisefric,yve, &
-   apply_airdrag,collector_curvature)
+   apply_airdrag,collector_curvature,fev_evap,ev_airv,ev_masscoeff, &
+   ev_sqrevsc,ev_csvapour,ev_umidity,ev_cp0,ev_bev,ev_mev,ev_tev)
+! With fev_evap (and the ev_ parameters of the Yarin law) the loop also
+! computes the evaporation rate and replaces the Newtonian stress
+! derivative with the Maxwell one (device_maxwell_evap_stress_point), the
+! work of a second kernel, accelerator_maxwell_evap_stress_3d, until
+! 2026-10-05.
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,npjet,nfieldtype
   logical, intent(in) :: linserted,liniperturb,lairdrag,lflorentz,luppot
@@ -2268,6 +2494,10 @@ contains
   double precision, intent(in) :: att,fve,gr,ks,li,vfield,velext,noisefric
   double precision, intent(in), optional :: yve(0:)
   logical, intent(in), optional :: apply_airdrag,collector_curvature
+  double precision, intent(inout), optional :: fev_evap(0:)
+  double precision, intent(in), optional :: ev_airv,ev_masscoeff,ev_sqrevsc
+  double precision, intent(in), optional :: ev_csvapour,ev_umidity,ev_cp0
+  double precision, intent(in), optional :: ev_bev,ev_mev,ev_tev
   double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yst(0:)
   double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:),yvl(0:)
   double precision, intent(in) :: ycf(0:,1:),jetms(0:),jetch(0:)
@@ -2284,6 +2514,9 @@ contains
   double precision :: factor1,factor2,factor3,factor4,factor5
   double precision :: fvet,kst,attt,lit,veltangent,cmass,fvolume,fvolume_prev
   logical :: straight,use_evap,use_airdrag,use_collector_curvature
+  logical :: fuse_evap
+  double precision :: e_airv,e_masscoeff,e_sqrevsc,e_csvapour,e_umidity
+  double precision :: e_cp0,e_bev,e_mev,e_tev,fst_evap
 
   accelerator_eom3_stage=.false.
   if(.not.accelerator_eom_env_checked)then
@@ -2306,6 +2539,14 @@ contains
   if(present(apply_airdrag))use_airdrag=apply_airdrag
   use_collector_curvature=.false.
   if(present(collector_curvature))use_collector_curvature=collector_curvature
+  fuse_evap=present(fev_evap) .and. present(yve)
+  e_airv=0.d0; e_masscoeff=0.d0; e_sqrevsc=0.d0; e_csvapour=0.d0
+  e_umidity=0.d0; e_cp0=0.d0; e_bev=0.d0; e_mev=0.d0; e_tev=0.d0
+  if(fuse_evap)then
+    e_airv=ev_airv; e_masscoeff=ev_masscoeff; e_sqrevsc=ev_sqrevsc
+    e_csvapour=ev_csvapour; e_umidity=ev_umidity; e_cp0=ev_cp0
+    e_bev=ev_bev; e_mev=ev_mev; e_tev=ev_tev
+  endif
 
 #ifdef _OPENACC
 !$acc parallel loop async(accelerator_queue) gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
@@ -2316,13 +2557,14 @@ contains
 #else
 !$acc& present_or_copyin(ycf) &
 #endif
-!$acc& present(yve) &
+!$acc& present(yve) present(fev_evap) &
 !$acc& present_or_copyout(fxx,fyy,fzz,fst,fvx,fvy,fvz) &
 !$acc& private(j,dxu,dyu,dzu,dxd,dyd,dzd,lup,ldown,tux,tuy,tuz, &
 !$acc& tdx,tdy,tdz,beadvel,v1x,v1y,v1z,v2x,v2y,v2z,l1,l2,dotp, &
 !$acc& nbx,nby,nbz,lnb,b,c,t,scale1,scale2,ccx,ccy,ccz,rcx,rcy, &
 !$acc& rcz,radius,curvature,factor1,factor2,factor3,factor4,factor5, &
-!$acc& fvet,kst,attt,lit,veltangent,cmass,fvolume,fvolume_prev,straight)
+!$acc& fvet,kst,attt,lit,veltangent,cmass,fvolume,fvolume_prev,straight, &
+!$acc& fst_evap)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
@@ -2333,6 +2575,12 @@ contains
     fvx(j)=0.d0
     fvy(j)=0.d0
     fvz(j)=0.d0
+! Every bead skipped below before its stress is set (frozen, blocked nozzle
+! bead, nozzle) also has a zero Maxwell stress derivative.
+    if(fuse_evap)call device_maxwell_evap_stress_point(ipoint,j,npjet, &
+     linserted,jetfr,fev_evap,fst_evap,yxx,yyy,yzz,yvx,yvy,yvz,yst,yvl,yve, &
+     e_airv,e_masscoeff,e_sqrevsc,e_csvapour,e_umidity,e_cp0,e_bev,e_mev, &
+     e_tev,consistency,findex,yieldstress)
 
     if(jetfr(ipoint))cycle
     if(ipoint==npjet-1 .and. .not.linserted)cycle
@@ -2391,7 +2639,11 @@ contains
     fxx(j)=yvx(ipoint)
     fyy(j)=yvy(ipoint)
     fzz(j)=yvz(ipoint)
-    fst(j)=yieldstress+consistency*(beadvel/lup)**findex-yst(ipoint)
+    if(fuse_evap)then
+      fst(j)=fst_evap
+    else
+      fst(j)=yieldstress+consistency*(beadvel/lup)**findex-yst(ipoint)
+    endif
     ! The electric acceleration is divided by the actual (evaporated) bead
     ! mass in the CPU Maxwell evaporation equation.  Keep the same scaling
     ! on device; omitting cmass creates an O(1/cmass) velocity derivative

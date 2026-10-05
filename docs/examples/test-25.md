@@ -119,7 +119,7 @@ The noise realization hardly matters: four more CPU seeds (318 – 321) give
 mean active counts between 267.8 and 268.4, a path length of 111.8 cm, and an
 off-axis distance of 2.78 cm over the same window.
 
-One NVIDIA A30 runs the same 5 million steps in about 770 s, against
+One NVIDIA A30 runs the same 5 million steps in about 690 s, against
 5893 s for the CPU build (see [where the time goes](#where-the-a30-run-spends-its-time)).
 It reads the same Gaussian pool and reproduces the CPU run byte for byte up
 to step 1,446,413, where it engages the persistent path; afterwards it stays
@@ -183,7 +183,8 @@ phase 1 and one unbound full run:
 
 | Build | Phase 1 | Phase 2 | Time-integration loop |
 | --- | ---: | ---: | ---: |
-| A30, current | 154 s, 155 s (107 µs/step) | 612 s, 613 s (172 µs/step) | 766 s, 768 s |
+| A30, current | 155 s, 154 s (107 µs/step) | 530 s, 544 s (151 µs/step) | 685 s, 699 s |
+| A30, one queue, kernels not fused | 154 s, 155 s (107 µs/step) | 612 s, 613 s (172 µs/step) | 766 s, 768 s |
 | A30, synchronous phase 2 | 156 s (108 µs/step) | 1418 s (399 µs/step) | 1574 s |
 | A30, 2026-10-01 | 429 s, 430 s (298 µs/step) | 1410 s, 1425 s (399 µs/step) | 1840 s, 1856 s |
 | A30, before the 2026-10-01 transfer reduction | 431 s, 433 s (299 µs/step) | 1585 s, 1581 s (445 µs/step) | 2016 s, 2014 s |
@@ -202,15 +203,15 @@ downloads per step, and in the refinement scan: the 2026-10-01 build saves
 Median time per step over the 20,000-step print intervals, by active-bead
 count:
 
-| Active beads | CPU | A30, current | A30, synchronous phase 2 | A30, 2026-10-01 | A30, before 2026-10-01 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 1 – 30 | 31 µs | 30 µs | 30 µs | 247 µs | 249 µs |
-| 30 – 60 | 91 µs | 91 µs | 92 µs | 293 µs | 294 µs |
-| 60 – 100 | 258 µs | 256 µs | 258 µs | 388 µs | 389 µs |
-| 100 – 150 | 502 µs | 161 µs | 398 µs | 401 µs | 459 µs |
-| 150 – 200 | 787 µs | 163 µs | 396 µs | 401 µs | 455 µs |
-| 200 – 250 | 1513 µs | 172 µs | 400 µs | 399 µs | 448 µs |
-| 250 – 300 | 1833 µs | 175 µs | 403 µs | 402 µs | 447 µs |
+| Active beads | CPU | A30, current | A30, kernels not fused | A30, synchronous phase 2 | A30, 2026-10-01 | A30, before 2026-10-01 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 – 30 | 31 µs | 30 µs | 30 µs | 30 µs | 247 µs | 249 µs |
+| 30 – 60 | 91 µs | 91 µs | 91 µs | 92 µs | 293 µs | 294 µs |
+| 60 – 100 | 258 µs | 256 µs | 256 µs | 258 µs | 388 µs | 389 µs |
+| 100 – 150 | 502 µs | 137 µs | 161 µs | 398 µs | 401 µs | 459 µs |
+| 150 – 200 | 787 µs | 139 µs | 163 µs | 396 µs | 401 µs | 455 µs |
+| 200 – 250 | 1513 µs | 149 µs | 172 µs | 400 µs | 399 µs | 448 µs |
+| 250 – 300 | 1833 µs | 154 µs | 175 µs | 403 µs | 402 µs | 447 µs |
 
 ### Phase 1: the Coulomb sum on the host
 
@@ -250,7 +251,7 @@ instead of 430 s, the time of the CPU build, and the first 2.1 million steps
 of Test 24, which never engages a persistent path, take 586 s instead of
 854 s.
 
-### Phase 2: one asynchronous queue
+### Phase 2: one asynchronous queue, fused kernels
 
 Until 2026-10-05 every kernel of the persistent step was synchronous. The
 step time stayed at about 400 µs from 120 to 300 beads, while the CPU build
@@ -274,6 +275,32 @@ events). Nsight Systems at about 219 beads counts per step 31 launches, one
 stream synchronization, and one 20-byte download; the kernels take 144 µs,
 so the device is busy for about 84 % of the step. `JETSPIN_OPENACC_SYNC=1`
 restores the synchronous step.
+
+About fourteen of those 31 kernels did almost nothing: they computed a few
+numbers, yet each still occupied the device for 1.6 – 2.7 µs and left a gap
+of about 1 µs before the next one. They are now fused, without changing the
+arithmetic:
+
+- before each force evaluation, one serial kernel restores the charge
+  smoothed for the previous evaluation, smooths it for this one, and places
+  the inserting bead (three kernels before; only while the nozzle bead is
+  blocked);
+- the force kernel also computes the evaporation rate and the Maxwell
+  stress, the work of a second kernel per evaluation before;
+- after the last update, one single-gang kernel restores the smoothed
+  charge, updates the stress with its path-length and maximum statistics,
+  places the inserting bead, takes the topology decisions, freezes beads at
+  the collector, and stores the step's statistics (eight or nine kernels
+  before).
+
+A step now launches 15 – 18 kernels, 16.4 on average in an Nsight Systems
+window at about 237 beads, with one stream synchronization and the 20-byte
+download; the kernels take 125 µs. The step takes 137 – 154 µs from 120 to
+300 beads, and the 5-million-step run is again byte-identical, printed
+observables included. The four per-bead updates that remain separate
+(velocity, the final evaporative stress, positions, Maxwell stress) could
+join the single-gang kernel too, but NVHPC 24.3 did not compile that kernel
+correctly (see `docs/STATE.md`).
 
 ### Process placement
 

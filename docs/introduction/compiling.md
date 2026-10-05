@@ -86,7 +86,9 @@ the selected GPU before running the resulting executable.
 
 `JETSPIN_OPENACC_COULOMB_MIN_BEADS=<n>` sets the fewest active beads for which
 a three-dimensional run that has not engaged a persistent device path
-offloads the Coulomb sum (default 128; 0 offloads every call). When timing a
+offloads the Coulomb sum (default 128; 0 offloads every call).
+`JETSPIN_OPENACC_SYNC=1` runs the persistent dynamic evaporative Platen step
+synchronously instead of on one asynchronous queue. When timing a
 GPU run, bind it to the NUMA node of its GPU (`nvidia-smi topo -m` lists the
 affinity), for example `numactl --cpunodebind=3 --membind=3 ./main.x`:
 placement of the host process alone changes latency-bound runs by up to

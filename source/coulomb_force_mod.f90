@@ -21,7 +21,8 @@
                              accelerator_coulomb_evap_3d, &
                              accelerator_coulomb_evap_compare, &
                              accelerator_smooth_charge_3d, &
-                             accelerator_restore_charge
+                             accelerator_restore_charge, &
+                             accelerator_wait
 #endif
  use profiling_mod,         only : profiling_start,profiling_stop, &
                              prof_coulomb
@@ -146,6 +147,7 @@ contains
 
 #ifdef _OPENACC
   if(accelerator_coulomb_mapped)then
+    call accelerator_wait()
 !$acc exit data delete(coulcrossec)
 !$acc exit data delete(ycf)
   endif
@@ -1979,6 +1981,7 @@ end subroutine reset_coulomb_accelerator
         call get_environment_variable('JETSPIN_COULOMB_DIAGNOSTIC',coulomb_diag)
         if(trim(coulomb_diag)=='1')then
 #ifdef _OPENACC
+          call accelerator_wait()
 !$acc update self(ycf(0:npjet,1:3),coulcrossec(0:npjet), &
 !$acc& yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yve(0:npjet), &
 !$acc& jetch(0:npjet),jetfr(0:npjet))

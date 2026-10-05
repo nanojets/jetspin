@@ -40,6 +40,7 @@ module integrator_mod
                          prof_rk_update
 #ifdef _OPENACC
  use accelerator_mod, only : accelerator_eom3_stage, &
+                         accelerator_set_async, &
                          accelerator_maxwell_evap_stage, &
                          accelerator_maxwell_rk4_stage_update, &
                          accelerator_evap_rk2_final_update, &
@@ -5433,6 +5434,7 @@ contains
 ! Refinement can grow capacity before this call, so doallocate itself is a
 ! reset request even when the main topology loop did not issue one.
   if((persistent_reset_requested .or. doallocate) .and. persistent_acc)then
+    call accelerator_set_async(.false.)
 !$acc exit data delete(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
 !$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev,d3xx,d3yy,d3zz,d3st, &
 !$acc& d3vx,d3vy,d3vz,d3ev,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev, &
@@ -5585,6 +5587,11 @@ contains
     call accelerator_set_persistent(.true.)
     if(dynamic_evaporative_platen_eligible()) &
      call accelerator_set_topology_enabled(.true.)
+#if !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_COULOMB_ORACLE) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+! The dynamic path waits once per step, for the topology record; the
+! oracles exchange forces with the host between the kernels.
+    if(dynamic_evaporative_platen_eligible())call accelerator_set_async(.true.)
+#endif
     persistent_acc=.true.
   endif
 #endif

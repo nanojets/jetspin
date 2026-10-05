@@ -1,5 +1,8 @@
 module accelerator_mod
 
+#ifdef _OPENACC
+ use openacc, only : acc_async_sync
+#endif
  implicit none
  private
 
@@ -23,6 +26,16 @@ module accelerator_mod
 ! Results of one refinement threshold scan (last over-threshold segment,
 ! path length, nozzle correction), read back in one transfer.
  double precision, save :: accelerator_refinement_scan(3)=0.d0
+! Queue of the persistent dynamic evaporative Platen step: its kernels are
+! enqueued without waiting, and the host waits once per step for the
+! topology record (accelerator_topology_check) and before every other
+! transfer (accelerator_wait).  -1 (acc_async_sync) is synchronous, the
+! setting of every other path.
+#ifdef _OPENACC
+ integer, save :: accelerator_queue=acc_async_sync
+#else
+ integer, save :: accelerator_queue=-1
+#endif
 #ifdef _OPENACC
 !$acc declare create(accelerator_smoothed_charge)
 !$acc declare create(accelerator_topology_flags)
@@ -30,6 +43,8 @@ module accelerator_mod
 #endif
 
  public :: accelerator_prepare
+ public :: accelerator_set_async
+ public :: accelerator_wait
  public :: accelerator_eom3_stage
  public :: accelerator_maxwell_evap_stage
  public :: accelerator_kv_evap_stage
@@ -105,6 +120,34 @@ module accelerator_mod
  end interface
 
 contains
+
+ subroutine accelerator_set_async(enabled)
+! Put the persistent step on one asynchronous queue, or back on the
+! synchronous one.  JETSPIN_OPENACC_SYNC=1 keeps it synchronous.
+  implicit none
+  logical, intent(in) :: enabled
+  character(len=16) :: env
+  call accelerator_wait()
+#ifdef _OPENACC
+  accelerator_queue=acc_async_sync
+  if(.not.enabled)return
+  env=''
+  call get_environment_variable('JETSPIN_OPENACC_SYNC',env)
+  if(trim(env)=='1')return
+  accelerator_queue=1
+#endif
+ end subroutine accelerator_set_async
+
+ subroutine accelerator_wait()
+! Complete the queued work before the host reads device data or a
+! synchronous construct touches it.  A no-op on the synchronous queue.
+  implicit none
+#ifdef _OPENACC
+  if(accelerator_queue/=acc_async_sync)then
+!$acc wait(accelerator_queue)
+  endif
+#endif
+ end subroutine accelerator_wait
 
  subroutine accelerator_maxwell_evap_force_correction(firstpoint,lastpoint,npjet, &
    linserting,yxx,yyy,yzz,yvx,yvy,yvz,yvl,yve,jetms,jetfr,att,li,fvx,fvy,fvz)
@@ -437,7 +480,7 @@ contains
   double precision :: dx,dy,dz,distance,scale
   if(linserted)return
 #ifdef _OPENACC
-!$acc serial present(yxx,yyy,yzz) private(dx,dy,dz,distance,scale)
+!$acc serial async(accelerator_queue) present(yxx,yyy,yzz) private(dx,dy,dz,distance,scale)
 #endif
   dx=yxx(npjet-2)-yxx(npjet)
   dy=yyy(npjet-2)-yyy(npjet)
@@ -465,7 +508,7 @@ contains
   double precision :: dx,dy,dz,distance,factor
   if(linserted)return
 #ifdef _OPENACC
-!$acc serial present(yxx,yyy,yzz,jetch) private(dx,dy,dz,distance,factor)
+!$acc serial async(accelerator_queue) present(yxx,yyy,yzz,jetch) private(dx,dy,dz,distance,factor)
 #endif
   dx=yxx(npjet-2)-yxx(npjet)
   dy=yyy(npjet-2)-yyy(npjet)
@@ -493,7 +536,7 @@ contains
   double precision, intent(inout) :: jetch(0:)
   if(linserted)return
 #ifdef _OPENACC
-!$acc serial present(jetch)
+!$acc serial async(accelerator_queue) present(jetch)
 #endif
   jetch(npjet-1)=accelerator_smoothed_charge
 #ifdef _OPENACC
@@ -611,7 +654,7 @@ contains
   integer :: ipoint,j
   double precision :: dx,dy,dz,beadlen,beadvel,cp,ratmu,rattao
 #ifdef _OPENACC
-!$acc parallel loop gang vector copyin(yxx(0:npjet),yyy(0:npjet), &
+!$acc parallel loop async(accelerator_queue) gang vector copyin(yxx(0:npjet),yyy(0:npjet), &
 !$acc& yzz(0:npjet),yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yst(0:npjet), &
 !$acc& yvl(0:npjet),yve(0:npjet),jetfr(0:npjet)) &
 !$acc& copyout(fst(0:lastpoint-firstpoint)) private(j,dx,dy,dz,beadlen, &
@@ -666,7 +709,7 @@ contains
   integer :: ipoint,j
   double precision :: dx,dy,dz,beadlen,vnorm,re,beadvel,cp,ratmu,rattao
 #ifdef _OPENACC
-!$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
+!$acc parallel loop async(accelerator_queue) gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yst(0:npjet),yvl(0:npjet), &
 !$acc& yve(0:npjet),jetfr(0:npjet)) present_or_copyout(fev(0:lastpoint-firstpoint), &
 !$acc& fst(0:lastpoint-firstpoint)) private(j,dx,dy,dz,beadlen,vnorm,re,beadvel, &
@@ -870,7 +913,7 @@ contains
   double precision :: sumx,sumy,sumz
   integer :: ihigh
 #ifdef _OPENACC
-!$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
+!$acc parallel loop async(accelerator_queue) gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
 !$acc& yzz(0:npjet),yve(0:npjet)) present_or_copyout(coulcrossec(0:npjet)) &
 !$acc& private(dx,dy,dz,distance)
 #endif
@@ -897,7 +940,7 @@ contains
 ! almost idle for jets of a few hundred beads.  The summation order differs
 ! from both the host pair loop and the former kernel only at roundoff.
 #ifdef _OPENACC
-!$acc parallel loop gang present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
+!$acc parallel loop async(accelerator_queue) gang present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
 !$acc& yzz(0:npjet),yvl(0:npjet),yve(0:npjet),jetms(0:npjet), &
 !$acc& jetch(0:npjet),jetfr(0:npjet),coulcrossec(0:npjet)) &
 !$acc& present_or_copyout(ycf(0:npjet,1:3)) private(cmass1,qt,rmass, &
@@ -1038,6 +1081,7 @@ contains
   double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
   logical, intent(inout) :: jetfr(0:)
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc exit data delete(jetxx(0:mxnpjet),jetyy(0:mxnpjet),jetzz(0:mxnpjet), &
 !$acc& jetst(0:mxnpjet),jetvx(0:mxnpjet),jetvy(0:mxnpjet),jetvz(0:mxnpjet), &
 !$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetvl(0:mxnpjet),jetfr(0:mxnpjet))
@@ -1052,6 +1096,7 @@ contains
   integer, intent(in) :: mxnpjet
   double precision, intent(inout) :: jetve(0:),jetce(0:)
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc exit data delete(jetve(0:mxnpjet),jetce(0:mxnpjet))
 #endif
  end subroutine accelerator_release_evaporation_capacity
@@ -1065,6 +1110,7 @@ contains
   double precision, intent(in) :: jetms(0:),jetch(0:),jetvl(0:)
   logical, intent(in) :: jetfr(0:)
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet),jetzz(0:mxnpjet), &
 !$acc& jetst(0:mxnpjet),jetvx(0:mxnpjet),jetvy(0:mxnpjet),jetvz(0:mxnpjet), &
 !$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetvl(0:mxnpjet),jetfr(0:mxnpjet))
@@ -1077,6 +1123,7 @@ contains
   integer, intent(in) :: mxnpjet
   double precision, intent(in) :: jetve(0:),jetce(0:)
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc enter data copyin(jetve(0:mxnpjet),jetce(0:mxnpjet))
 #endif
  end subroutine accelerator_rebind_evaporation
@@ -1091,6 +1138,7 @@ contains
   logical, intent(in) :: jetfr(0:)
   if(.not.accelerator_topology_enabled)return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update device(jetxx(0:npjet),jetyy(0:npjet),jetzz(0:npjet),jetst(0:npjet), &
 !$acc& jetvx(0:npjet),jetvy(0:npjet),jetvz(0:npjet),jetms(0:npjet), &
 !$acc& jetch(0:npjet),jetvl(0:npjet),jetfr(0:npjet))
@@ -1103,6 +1151,7 @@ contains
   double precision, intent(in) :: jetve(0:),jetce(0:)
   if(.not.accelerator_topology_enabled)return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update device(jetve(0:npjet),jetce(0:npjet))
 #endif
  end subroutine accelerator_update_device_evaporation_state
@@ -1144,6 +1193,7 @@ contains
 ! on the device; until 2026-10-01 the three reduction scalars were each
 ! copied in and out, six transfers per scan.  Only the order of the
 ! path-length sum differs, and that sum only selects whether to download.
+  call accelerator_wait()
 !$acc parallel num_gangs(1) vector_length(128) present(jetxx,jetyy,jetzz, &
 !$acc& accelerator_refinement_scan) private(scan_start,scan_length,scan_correction)
 #endif
@@ -1277,7 +1327,7 @@ contains
   double precision :: dsqrh,stoc,cmass,ve
   dsqrh=dsqrt(dabs(h))
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetms,jetvl,jetve,jetxx,jetyy, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetms,jetvl,jetve,jetxx,jetyy, &
 !$acc& jetzz,jetst,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy, &
 !$acc& f1vz,f1ev,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev,y2xx,y2yy, &
 !$acc& y2zz,y2st,y2vx,y2vy,y2vz,y2ev,jetfr) private(j,stoc,cmass,ve)
@@ -1403,7 +1453,7 @@ contains
   hbase=historybase; hstride=historywindow; hvalues=historyvalues
   hfirst=firstpoint
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetms,jetvl,jetve,gaussianhistory, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetms,jetvl,jetve,gaussianhistory, &
 !$acc& jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz, &
 !$acc& jetfr) private(j,component,index1,index2,stoc,cmass,u1,u2,ww,zz)
 #endif
@@ -1497,7 +1547,7 @@ contains
   integer :: ipoint,j
   double precision :: f2x,f2y,f2z,y1y,y1z,ve
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
 !$acc& jetvz,jetvl,jetve,f1xx,f1yy,f1zz,f1ev,f2ev,jetfr) &
 !$acc& private(j,f2x,f2y,f2z,y1y,y1z,ve)
 #endif
@@ -1545,7 +1595,7 @@ contains
   double precision :: newst,dx,dy,dz
   call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress,maxstressposx)
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst,f1st,f2st, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetxx,jetyy,jetzz,jetst,f1st,f2st, &
 !$acc& counterlpath,statistics_step_max) private(j,newst,dx,dy,dz) &
 !$acc& reduction(+:counterlpath) reduction(max:statistics_step_max)
 #endif
@@ -1784,6 +1834,7 @@ contains
  subroutine accelerator_set_persistent(enabled)
   implicit none
   logical, intent(in) :: enabled
+  if(.not.enabled)call accelerator_set_async(.false.)
   accelerator_persistent=enabled
   if(.not.enabled)accelerator_device_state_authoritative=.false.
   return
@@ -1834,6 +1885,7 @@ contains
   if(.not.(accelerator_persistent .or. accelerator_topology_enabled))return
 #ifdef _OPENACC
 ! The collector radius also needs the adjacent active bead.
+  call accelerator_wait()
 !$acc update self(jetxx(ipoint:ipoint+1),jetyy(ipoint:ipoint+1), &
 !$acc& jetzz(ipoint:ipoint+1),jetst(ipoint),jetvx(ipoint), &
 !$acc& jetvy(ipoint),jetvz(ipoint))
@@ -1847,6 +1899,7 @@ contains
   double precision, intent(inout) :: jetve(0:)
   if(.not.(accelerator_persistent .or. accelerator_topology_enabled))return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update self(jetve(ipoint))
 #endif
  end subroutine accelerator_update_host_evaporation_point
@@ -1863,6 +1916,7 @@ contains
     if(nstep==accelerator_last_host_sync_step)return
   endif
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update self(jetxx(0:npjet),jetyy(0:npjet),jetzz(0:npjet), &
 !$acc& jetst(0:npjet),jetvx(0:npjet),jetvy(0:npjet),jetvz(0:npjet))
 #endif
@@ -1881,6 +1935,7 @@ contains
   logical, intent(inout) :: jetfr(0:)
   if(.not.(accelerator_persistent .or. accelerator_topology_enabled))return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update self(jetxx(0:npjet),jetyy(0:npjet),jetzz(0:npjet), &
 !$acc& jetst(0:npjet),jetvx(0:npjet),jetvy(0:npjet),jetvz(0:npjet), &
 !$acc& jetms(0:npjet),jetch(0:npjet),jetvl(0:npjet),jetfr(0:npjet))
@@ -1894,6 +1949,7 @@ contains
   double precision, intent(inout) :: jetve(0:),jetce(0:)
   if(.not.(accelerator_persistent .or. accelerator_topology_enabled))return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update self(jetve(0:npjet),jetce(0:npjet))
 #endif
  end subroutine accelerator_update_host_evaporation_state
@@ -1927,7 +1983,7 @@ contains
   double precision :: dx,dy,dz,distance,scale
 
 #ifdef _OPENACC
-!$acc serial present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
+!$acc serial async(accelerator_queue) present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms, &
 !$acc& jetch,jetvl,jetfr,accelerator_topology_flags) &
 !$acc& private(np,ins,newadd,newresize,newremove,dx,dy,dz,distance,scale)
 #endif
@@ -2006,7 +2062,7 @@ contains
 ! The upper bound covers a bead added above; the device npjet decides.
     lastpoint=min(npjet+1,mxnpjet)
 #ifdef _OPENACC
-!$acc parallel loop present(jetxx,jetfr,accelerator_topology_flags)
+!$acc parallel loop async(accelerator_queue) present(jetxx,jetfr,accelerator_topology_flags)
 #endif
     do ipoint=inpjet,lastpoint
       if(accelerator_topology_flags(4)==0 .and. &
@@ -2022,7 +2078,8 @@ contains
 #endif
   endif
 #ifdef _OPENACC
-!$acc update self(accelerator_topology_flags)
+!$acc update self(accelerator_topology_flags) async(accelerator_queue)
+  call accelerator_wait()
 #endif
   npjet=accelerator_topology_flags(1)
   linserted=accelerator_topology_flags(2)==1
@@ -2053,6 +2110,7 @@ contains
   double precision, intent(in) :: ivolume
   double precision, intent(inout) :: jetve(0:),jetce(0:)
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc serial present(jetve,jetce)
 #endif
   jetve(npjet)=jetve(npjet-1)
@@ -2082,6 +2140,7 @@ contains
   inpjet=inpjet+1
 #ifdef _OPENACC
 ! Removal observables need both the removed bead and its active neighbour.
+  call accelerator_wait()
 !$acc update self(jetxx(inpjet-1:inpjet),jetyy(inpjet-1:inpjet), &
 !$acc& jetzz(inpjet-1:inpjet), &
 !$acc& jetst(inpjet-1),jetvx(inpjet-1),jetvy(inpjet-1),jetvz(inpjet-1), &
@@ -2094,6 +2153,7 @@ contains
   integer, intent(in) :: ipoint
   double precision, intent(inout) :: jetve(0:),jetce(0:)
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update self(jetve(ipoint),jetce(ipoint))
 #endif
  end subroutine accelerator_update_host_removed_evaporation
@@ -2106,6 +2166,7 @@ contains
   double precision, intent(in) :: jetms(0:),jetch(0:),jetvl(0:)
   if(.not.(accelerator_persistent .or. accelerator_topology_enabled) .or. last<first)return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update device(jetst(first:last),jetvx(first:last),jetvy(first:last), &
 !$acc& jetvz(first:last),jetms(first:last),jetch(first:last),jetvl(first:last))
 #endif
@@ -2117,6 +2178,7 @@ contains
   double precision, intent(in) :: jetve(0:),jetce(0:)
   if(.not.(accelerator_persistent .or. accelerator_topology_enabled) .or. last<first)return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update device(jetve(first:last),jetce(first:last))
 #endif
  end subroutine accelerator_update_device_removed_evaporation
@@ -2132,7 +2194,7 @@ contains
 
   if(.not.accelerator_persistent)return
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetst,statistics_step_max, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetst,statistics_step_max, &
 !$acc& statistics_step_index) reduction(max:statistics_step_index)
 #endif
   do ipoint=inpjet,npjet
@@ -2142,7 +2204,7 @@ contains
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop
-!$acc serial present(jetxx,counterlpath,ncounterlpath,maxstress, &
+!$acc serial async(accelerator_queue) present(jetxx,counterlpath,ncounterlpath,maxstress, &
 !$acc& maxstressposx,statistics_step_max,statistics_step_index)
 #endif
   ncounterlpath=ncounterlpath+1
@@ -2165,6 +2227,7 @@ contains
   double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
   if(.not.accelerator_statistics_mapped)return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update self(counterlpath,ncounterlpath,maxstress,maxstressposx)
 #endif
   return
@@ -2177,6 +2240,7 @@ contains
   double precision, intent(in) :: counterlpath,maxstress,maxstressposx
   if(.not.accelerator_statistics_mapped)return
 #ifdef _OPENACC
+  call accelerator_wait()
 !$acc update device(counterlpath,ncounterlpath,maxstress,maxstressposx)
 #endif
   return
@@ -2244,7 +2308,7 @@ contains
   if(present(collector_curvature))use_collector_curvature=collector_curvature
 
 #ifdef _OPENACC
-!$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
+!$acc parallel loop async(accelerator_queue) gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet), &
 !$acc& yzz(0:npjet),yst(0:npjet),yvx(0:npjet),yvy(0:npjet), &
 !$acc& yvz(0:npjet)) present(yvl,jetms,jetch,jetfr) &
 #if defined(JETSPIN_DEV_HOST_COULOMB_ORACLE) || defined(JETSPIN_DEV_HOST_FORCE_ORACLE)

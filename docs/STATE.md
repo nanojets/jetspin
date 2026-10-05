@@ -1,5 +1,57 @@
 # JETSPIN development state and handoff log
 
+## Persistent evaporative Platen step on one asynchronous queue (2026-10-05)
+
+### Change
+
+- `accelerator_queue` (`openacc_accelerator_mod.f90`): while the persistent
+  dynamic evaporative Platen path is engaged (`platen_ev`,
+  `dynamic_evaporative_platen_eligible`), its compute constructs carry
+  `async(accelerator_queue)`: charge smoothing and restoring, placement of
+  the inserting bead, the two Coulomb kernels, the EOM stage, the
+  evaporative and Maxwell stress kernels, the Platen predictor, velocity and
+  position kernels, the path-length and stress statistics, the per-step
+  statistics, and the topology check. The topology record is read back on
+  the queue and `accelerator_wait` drains it: one synchronization per
+  ordinary step instead of 59-65.
+- Every routine that moves data between host and device waits on the queue
+  first (state, capacity, evaporation, point, removal, and statistics
+  transfers, rebind and release, the refinement scan), as do the Coulomb
+  reset and diagnostic. `accelerator_set_persistent(.false.)` and the
+  `platen_ev` reset return to the synchronous queue before unmapping.
+- Every other path, the oracle builds and `JETSPIN_OPENACC_SYNC=1` keep the
+  synchronous queue (`acc_async_sync`).
+
+### Evidence
+
+- Test 25 (seed 317, 5 million steps, bound A30s): phase 2 612 and 613 s
+  instead of 1418 s (161-175 us per step from 120 to 300 beads instead of
+  about 400), loop 766 and 768 s instead of 1574 s. `traj.xyz`,
+  `statout.dat`, the printed observables, and the topology and refinement
+  events are byte-identical to the synchronous build over the 5 million
+  steps; with `JETSPIN_OPENACC_SYNC=1` the async build reproduces the
+  synchronous one byte for byte and takes about 420 us per phase-2 step.
+- Nsight Systems at about 219 beads: per step 31 launches, one stream
+  synchronization, one event synchronization, one 20-byte download; kernels
+  144 us of the 172 us step.
+- Tests 21-23 (dynamic evaporative Platen with refinement; Test 22 grows the
+  capacity, Test 23 removes beads): `statout.dat` byte-identical to the
+  synchronous build, checks pass. Tests 12-15 and 20 byte-identical;
+  regression openacc 1-8 and Tests 16/17 pass.
+- Every OpenACC variant builds (force and Coulomb oracles, host and compare
+  Akima, compare refinement, OpenACC host, dynamic-Platen fork) as do the
+  NVFORTRAN and GFortran CPU builds. The two oracles run Test 25 through the
+  engagement to 1.5 million steps, phase 1 identical to the standard build
+  and within `2.2e-10` (force oracle) and `0` (Coulomb oracle) at 1.5
+  million. The fork engages at about 1.37 million steps of Test 24 and equals
+  its non-persistent reference at every print to 1.5 million.
+
+### Next
+
+The device is busy for about 84 % of a phase-2 step; the 31 launches are
+the remaining host cost. Fusing the serial smoothing, placement and
+restoring kernels and the statistics kernels comes first.
+
 ## Coulomb sum on the host for short non-persistent jets (2026-10-05)
 
 ### Change

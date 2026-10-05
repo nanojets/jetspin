@@ -460,7 +460,7 @@ beads when `prepare_integrator_random_history` ran, which is never true for a
 single-bead start, so the persistent path never engaged and only the Coulomb
 kernel ran on the device. The path now engages at step 1,446,413 (120 beads),
 right after an accepted refinement event. Over the 5 million steps of the
-Test 25 reference the A30 takes about 1570 s and the NVFORTRAN CPU build
+Test 25 reference the A30 takes about 770 s and the NVFORTRAN CPU build
 5893 s.
 
 Nsight Systems profiles of the current build explain the remaining cost:
@@ -480,6 +480,21 @@ Nsight Systems profiles of the current build explain the remaining cost:
   so it is set by launch and synchronization overhead rather than by the
   bead count. Before the Coulomb kernel rewrite of 2026-09-30 the three
   Coulomb calls took 88 us each at about 170 beads, 72 % of the device time.
+  Since 2026-10-05 the dynamic evaporative step runs on one asynchronous
+  queue (below): at about 219 beads it makes 31 launches, one stream
+  synchronization, and one 20-byte download per step, takes about 172 us,
+  and keeps the device busy for about 84 % of it.
+
+The queue (`accelerator_queue`) carries the charge smoothing and restoring,
+the placement of the inserting bead, the Coulomb, EOM, and stress kernels,
+the Platen updates, the statistics, and the topology check of a persistent
+dynamic evaporative Platen step. The topology record is read back on the
+queue and is the only wait of an ordinary step; every routine that moves
+data between host and device waits on the queue first, so output, removals,
+refinement events, and capacity resets see the completed device state. Other
+paths, the oracle builds, and `JETSPIN_OPENACC_SYNC=1` stay synchronous. The
+5-million-step Test 25 run and Tests 21--23 are byte-identical with and
+without the queue.
 
 Below about 100 beads the CPU build is also faster than the persistent path;
 there the A30 run now does the same work on the host.
@@ -553,11 +568,11 @@ insertions and 282 active beads against 88 and 276.
 
 ## Next porting stages
 
-1. For the dynamic evaporative Platen path: run the persistent step on one
-   asynchronous queue with a single synchronization per step. An ordinary
-   step now returns only two small records (topology decisions, and the
-   refinement scan when it runs); fuse each force stage into fewer kernels
-   afterwards if needed.
+1. For the dynamic evaporative Platen path: fewer kernels per step. On one
+   asynchronous queue the device is busy for about 84 % of a step, and the
+   31 launches are the remaining host cost; the serial smoothing, placement,
+   and restoring kernels and the statistics kernels are the first candidates
+   for fusion.
 2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.
 3. Extend the refinement-capacity lifecycle beyond the currently validated

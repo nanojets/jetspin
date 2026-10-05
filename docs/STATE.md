@@ -1,5 +1,22 @@
 # JETSPIN development state and handoff log
 
+## 64-bit wall-clock counts (2026-10-05)
+
+`wall_time_world` (`serial_version_mod.f90`) and `profiling_mod` pass
+`integer(kind=8)` arguments to `system_clock`. With default integers
+NVFORTRAN counts microseconds from program start up to 2^31-1, so a serial
+run longer than 2147.48 s printed a wrong `Time-integration loop wall time`
+and throughput, and its `JETSPIN_PROFILE` table lost 2147 s for every
+interval that spanned a wrap (entry below). The 64-bit NVFORTRAN rate is
+1e7 per second. The profile prints its seconds as `f12.6` instead of
+`f10.6`, which overflowed beyond 1000 s. GFortran counts milliseconds with
+default integers (a wrap every 24.8 days) and the MPI build uses
+`MPI_WTIME`; neither changes in practice.
+
+Verified on a 5-million-step Test 24 A30 run that took 4546.6 s of wall
+time: it prints a loop wall time of 4545.78 s and 1099.9 steps/s, where the
+32-bit count would have wrapped twice.
+
 ## Test 25 time budget on the A30: two phases (2026-10-05)
 
 Measurement and documentation only; no source change. The breakdown, with a
@@ -50,7 +67,7 @@ Each process bound to its GPU's NUMA node (`numactl --cpunodebind
 - Phase-2 step time is flat (about 400 us from 120 to 300 beads); the CPU
   build grows from 0.5 to 1.8 ms.
 
-### Defect found, not fixed: loop timer wraps after 2147 s with NVFORTRAN
+### Defect found: loop timer wraps after 2147 s with NVFORTRAN (fixed the same day)
 
 `wall_time_world` (`serial_version_mod.f90`) and `profiling_mod` call
 `system_clock` with default integers. With NVFORTRAN the count starts at 0

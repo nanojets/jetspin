@@ -18,9 +18,11 @@ module profiling_mod
 
  logical, public, save :: profiling_enabled=.false.
  double precision, save :: elapsed(nprofile)=0.d0
- integer, save :: starts(nprofile)=0
+ ! 64-bit clock counts, as in wall_time_world: a default-integer count
+ ! wraps every 2147 s with NVFORTRAN.
+ integer(kind=8), save :: starts(nprofile)=0
  integer, save :: calls(nprofile)=0
- integer, save :: clock_rate=0
+ integer(kind=8), save :: clock_rate=0
 
  public :: profiling_initialize
  public :: profiling_reset
@@ -66,7 +68,7 @@ contains
  subroutine profiling_stop(timer_id)
   implicit none
   integer, intent(in) :: timer_id
-  integer :: finish
+  integer(kind=8) :: finish
   if(.not.profiling_enabled)return
   call system_clock(finish)
   elapsed(timer_id)=elapsed(timer_id)+ &
@@ -91,13 +93,13 @@ contains
   if((.not.profiling_enabled) .or. idrank/=0)return
   write(6,'(/,a)')'Subroutine timing profile (wall clock)'
   write(6,'(a)')'--------------------------------------'
-  write(6,'(a24,2x,a10,2x,a8,2x,a10)')'Region','Seconds','Loop %','Calls'
+  write(6,'(a24,2x,a12,2x,a8,2x,a10)')'Region','Seconds','Loop %','Calls'
   do i=1,nprofile
     if(loop_time>0.d0)then
-      write(6,'(a24,2x,f10.6,2x,f8.2,2x,i10)')labels(i),elapsed(i), &
+      write(6,'(a24,2x,f12.6,2x,f8.2,2x,i10)')labels(i),elapsed(i), &
        100.d0*elapsed(i)/loop_time,calls(i)
     else
-      write(6,'(a24,2x,f10.6,2x,f8.2,2x,i10)')labels(i),elapsed(i), &
+      write(6,'(a24,2x,f12.6,2x,f8.2,2x,i10)')labels(i),elapsed(i), &
        0.d0,calls(i)
     endif
   enddo

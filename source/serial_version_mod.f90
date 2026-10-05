@@ -309,7 +309,9 @@
   implicit none
 
   double precision, intent(out) :: walltime
-  integer :: clock_count,clock_rate
+! 64-bit counts: with default integers NVFORTRAN counts microseconds up to
+! 2**31-1 and the clock wraps 2147 s after program start.
+  integer(kind=8) :: clock_count,clock_rate
 
   call system_clock(clock_count,clock_rate)
   walltime=dble(clock_count)/dble(clock_rate)

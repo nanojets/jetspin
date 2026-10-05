@@ -184,8 +184,8 @@ of phase 1 and one unbound full run:
 | CPU | 166 s bound, 156 s unbound (114 and 108 µs/step) | 5708 s (1606 µs/step) | 5863 s |
 
 The CPU loop time comes from the timestamps: with NVFORTRAN the code's own
-`Time-integration loop wall time` wraps after 2147 s and reported 1568 s for
-that run.
+`Time-integration loop wall time` wrapped after 2147 s until the 64-bit fix of
+2026-10-05 and reported 1568 s for that run.
 
 The two builds run the same code in phase 1 and give byte-identical
 `traj.xyz`. On this path they differ only in the topology check, which now

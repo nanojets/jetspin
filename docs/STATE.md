@@ -1,5 +1,150 @@
 # JETSPIN development state and handoff log
 
+## Exact restart, fused Platen tail, evaporative RK below 100 beads (2026-10-06)
+
+### Changes
+
+- **Restart (`io_mod.f90`).** Runs with evaporation can be restarted:
+  `read_dat_restart` accepted only formats 11-14 while `set_sprintdat_restart`
+  wrote 15 or 16 ("restart file is corrupted"). `save.dat` now holds the
+  bead records in double precision (formats 11 and 12 without evaporation,
+  new 17 and 18 with it; 13-16 are still read) followed by a versioned block
+  (`restartstatemagic`, restart state version 1): Gaussian-pool cursor and
+  size, `refinementcheckcounter` (steps since the last refinement event,
+  formerly a local SAVE variable of `check_dynamic_refinement_akima`),
+  `irefinementdone`, the anchor-spacing state of `tag_beads`
+  (`lfirsttagbead`, `tagbeaddistance`, now public), the velocity of the last
+  bead released at the nozzle (`insvx/y/z`, for `vn`), the topology totals,
+  `timedeposition`, and the intrinsic generator state (`random_seed(get=)`).
+  `apply_restart_random_state` (main, after
+  `prepare_integrator_random_history`) moves the cursor of the regenerated
+  pool and restores the generator. Files without the block are read with a
+  warning. Two more restart defects: the bead records were read up to the
+  capacity that `allocate_jet(.true.)` had just reserved (100 more beads for
+  an inserting, tagged jet of at least 100 beads), past the records of the
+  file; and the appended outputs were opened with `status='old'`, so a
+  restart in a directory without them stopped. New check:
+  `tests/restart/run.sh [nvfortran|openacc]`.
+- **`vn` on the device topology path (`main.f90`).** The device path never
+  set `insvx/y/z`; a release on the device now sets them to the nozzle
+  velocity, as `add_jetbead` does without `ldragvel` (excluded on the device
+  paths). Tests 24/25 print the same `vn` as before (the nozzle velocity).
+- **Persistent Platen tail.** The step after its last force evaluation is
+  two kernels in both fused paths. `accelerator_platen_update` (one bead per
+  thread, explicit-shape dummies, no device routine) updates the velocity,
+  the evaporation rate at the predicted positions and the positions and
+  evaporated volume: each bead needs only its own new velocity and the
+  predicted state. `accelerator_platen_end_step` evaluates the stress
+  derivative at the new state in its stress loop (Maxwell law of
+  `accelerator_maxwell_stress_3d` with evaporation, the arithmetic of
+  `accelerator_eom3_stage` without), since it reads the neighbours' new
+  state, and no longer takes `f2st`; it also places the inserting bead, so
+  the separate placement is gone. Before: velocity, evaporation rate,
+  positions and Maxwell-stress kernels with evaporation; velocity,
+  positions, placement and a fourth EOM stage (all derivatives for the
+  stress one) without. A single-gang version of the update kernel (all
+  four updates) was as fast up to 300 beads, 5 us slower at 500-600 beads,
+  and grows linearly with the active count.
+- **Tail fusion with NVHPC 25.5.** The same fusion with assumed-shape dummies
+  (36 arrays) fails in NVHPC 25.5 exactly as in 24.3 (`NVVM_ERROR_COMPILATION`,
+  "parse expected ')' at end of argument list"), and explicit-shape arrays
+  passed to the assumed-shape device routines still make 25.5 build `$sd`
+  descriptor temporaries on the host stack and copy them on queue 1 after
+  the routine has returned (segmentation fault at the engagement step,
+  `NVCOMPILER_ACC_NOTIFY=2`). The kept kernel avoids both, so it builds and
+  runs with 24.3 and 25.5. NVHPC 25.5 (`module load
+  intel/nvidia_hpc_sdk/nvhpc/25.5`, `CUDA_VERSION=12.9`) runs on a CUDA 12.3
+  driver; its results differ from 24.3 builds by about 1e-7 relative over
+  2.1 million steps of Test 25.
+- **Evaporative Euler/RK2/RK4 (system 3).** Bug 1 does not apply to
+  `rk4sys_ev`: it draws no pool, and its gate
+  (`evaporative_dynamic_accelerator_eligible`) had no size threshold, so a
+  single-bead jet ran on the device from the first step (430 us per step
+  with a few beads, 7 us on the host). The gate now requires `npjet>=100`
+  until it has opened once (`evaporative_dynamic_engaged`: these integrators
+  test it every step, and `reallocate_jet` can lower `npjet`). Below it,
+  `rk4sys_ev` runs the CPU build's code: its host path also recomputed the
+  Maxwell evaporative stress and the stage updates on the device with
+  per-call copies (600 us per step). Its workspace is now mapped when the
+  device path engages after the first step (it was mapped only in the
+  allocation block: "data in PRESENT clause was not found", `fev_evap`).
+
+### Evidence
+
+- Restart, A30 and CPU: Test 24 and Test 25 restarted at steps 100,000
+  (CPU), 1,600,000 (CPU and A30 persistent path) and 2,600,000 (A30, after
+  the first collector removals): every `statout.dat` row, printed row and
+  `traj.xyz` frame of the restarted run equals the uninterrupted run's.
+  Before: Test 25 stopped ("restart file is corrupted"); Test 24 restarted
+  with the noise from the start of the pool and single-precision beads
+  (`statout.dat` 19 % off at the first print). `tests/restart/run.sh` passes
+  with the NVFORTRAN CPU and OpenACC builds and fails with 245df9b.
+- Tail, NVHPC 24.3 and 25.5: Tests 24 and 25 byte-identical over 2.1
+  million steps to the builds without it (98 and 99 events), and over
+  5 million steps to 245df9b (250 rows and frames). Bound A30, NUMA node 1,
+  2.1 million steps, phase 2: Test 24 117.5 us per step (245df9b), 109.5
+  with the stress in the end-of-step kernel, 106.6 with a single-gang update
+  kernel; Test 25 144.6, 144.9, 131.8. On node 0 the kept update kernel and
+  the single-gang one gave 106.0 and 106.8 (Test 24), 132.6 and 131.4
+  (Test 25), but at 500-600 beads of Test 24 the single-gang kernel cost
+  150 us per step against 145 (19.5 us of kernel at 260 beads of Test 25,
+  against 6.9 us for the update kernel kept).
+  Five million steps, same node: Test 24 593 s instead of 626 s (phase 2
+  132.1 instead of 141.3 us per step), Test 25 658 s instead of 696 s (140.6
+  instead of 150.9). Nsight Systems: Test 24 at 537 beads 13.2 launches and
+  114 us of kernels per step (15.1 and 122), Test 25 at 265 beads 12.1 and
+  118 us (16.4 and 125 at 237 beads); one synchronization per step.
+- Evaporative RK, single bead, system 3 (Test 25 physics with system 3,
+  integrators 1-3, no refinement, collector at 25 cm and potential scaled to
+  keep the field so that the jet passes 100 beads): the OpenACC build is
+  byte-identical to the CPU build below the gate (100,000 steps 0.7 s
+  instead of 43 s with the former gate and 60 s with the hybrid host path)
+  and engages at 100 beads (step 2,228,487-2,228,511); every printed row
+  equals the CPU's up to 2.44 million steps (Euler), 2.36 (RK2) and
+  2.26 (RK4). With the collector at 16 cm these jets stay below 100 beads
+  and never engage.
+- Unchanged: Tests 9-15 and 20 `statout.dat` byte-identical (Tests 13-15:
+  26, 37, 111 events); force and Coulomb oracles of Test 24 and force oracle
+  of Test 25 (1.5 million steps) byte-identical to the previous build;
+  Tests 21-23 events identical; Tests 18 and 19 the documented counts (CPU
+  500/899/3/401 and 500/76/5/1224, A30 499/898/3/401 and 498/77/5/1221);
+  regression openacc 1-8, `validate_evaporation.sh` (Tests 16 and 17,
+  integrators 1-3) and `tests/restart/run.sh` (CPU and OpenACC) pass; all
+  nine variants build.
+
+### Full-length references
+
+Seed 317, the distributed inputs with `print time 1.d-4` and the `cpue cpu`
+columns, A30 (one process per GPU, both on one NUMA node), build 245df9b,
+whose output equals the final build's over the 5 million steps checked; both
+runs closed correctly, without NaN.
+
+- Test 24: 100 million steps in 14,906 s; 4,363 insertions, 44,590
+  removals, 496 accepted refinement events, one reallocation. From 10 to
+  100 million steps: collector velocity 1960 cm/s, `yz` 3.83 cm, 26.9
+  degrees, 516.8 active beads (474-560), `lp` 213.8 cm, `rc` 3.16 um;
+  each 10-million-step block within 516.6-517.1 beads. The 4-5 million
+  window (510.8 beads, 211.4 cm) is about 1 % lower: still settling.
+- Test 25: 100 million steps in 15,192 s; 4,398 insertions, 31,618
+  removals, 495 refinement events, no reallocation. From 10 to 100 million
+  steps: 2534 cm/s, 2.78 cm, 19.7 degrees, 268.1 beads (241-297), 111.9 cm,
+  2.77 um; blocks within 268.0-268.3; the 4-5 million window (267.9) is
+  already stationary.
+
+### Next
+
+- The exact-restart check covers the dynamic Platen runs (Tests 24 and 25);
+  the other integrators and the Kelvin-Voigt model were not checked.
+- With the default pool (1e8 values) the noise of Test 24 repeats after
+  about 32,000 steps at 517 beads, about 3,000 times in a full-length run;
+  a full-length run with a larger `noise pool` (1e9 values, 8 GB on each
+  side) would show whether the stationary values depend on it.
+- The evaporative Euler/RK2/RK4 device paths (Tests 16-19, single-bead
+  jets above 100 beads) do not use the asynchronous queue, which only the
+  persistent Platen paths enable, nor fused kernels; their step time on a
+  dedicated GPU was not measured here (about 13 ms per step on a GPU
+  shared by five processes).
+
 ## Test 24 aligned with Test 25: non-evaporative dynamic Platen path promoted (2026-10-05)
 
 ### Change

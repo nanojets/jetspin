@@ -182,8 +182,10 @@
  double precision, allocatable, public, save :: jetve(:) ! cm^3
  
  logical, private, parameter :: listresscompensate=.false.
- logical, private, save :: lfirsttagbead=.true.
- double precision, private, save :: tagbeaddistance=0.d0
+! Spacing state of the anchors tagged at insertion (tag_beads); public so
+! that the restart file can store it (2026-10-06).
+ logical, public, save :: lfirsttagbead=.true.
+ double precision, public, save :: tagbeaddistance=0.d0
  logical, public, parameter :: ldevelopers=.false.
  logical, public, save :: lnthreads=.false.
  logical, public, save :: lsystype=.false.

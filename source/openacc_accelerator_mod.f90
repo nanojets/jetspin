@@ -113,6 +113,7 @@ module accelerator_mod
  public :: accelerator_platen_stress_statistics
  public :: accelerator_platen_stage_prep
  public :: accelerator_platen_end_step
+ public :: accelerator_platen_update
 
  ! The RK state algebra is common to both evaporation rheologies.  Preserve
  ! the historical specific procedure names while exposing neutral interfaces
@@ -1706,8 +1707,9 @@ contains
  subroutine accelerator_platen_end_step(firstpoint,lastpoint,dt, &
    npjet,mxnpjet,inpjet,linserted,lremove,h,resolution,dresolution, &
    thresolution,ivelocity,istress,imassa,icharge,ivolume,jetxx,jetyy,jetzz, &
-   jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,f1st,f2st,counterlpath, &
-   ncounterlpath,maxstress,maxstressposx)
+   jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetve,jetfr,f1st,yst, &
+   evaporative,consistency,findex,yieldstress,cp0,Bev,mev,tev, &
+   counterlpath,ncounterlpath,maxstress,maxstressposx)
 ! The end of a fused persistent dynamic Platen step, evaporative or not, in
 ! one single-gang kernel, which a few hundred beads keep busy: restore the
 ! smoothed nozzle charge, update the stress with the path-length and maximum
@@ -1718,6 +1720,13 @@ contains
 ! 2026-10-05 these were eight or nine kernels.  accelerator_topology_check
 ! then only reads the flags back.  Only the order of the path-length sum
 ! changes.
+! Since 2026-10-06 the stress loop also evaluates the stress derivative at
+! the end of the step from the new positions and velocities and the
+! predicted stress yst: the Maxwell law of the evaporating jet
+! (accelerator_maxwell_stress_3d, one kernel before) or, without
+! evaporation, the arithmetic of accelerator_eom3_stage (a fourth EOM stage
+! before, which computed all the derivatives for this one).  Without
+! evaporation jetve is not referenced.
   implicit none
   integer, intent(in) :: firstpoint,lastpoint,npjet,mxnpjet,inpjet
   logical, intent(in) :: linserted,lremove
@@ -1727,17 +1736,23 @@ contains
   double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
   double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
   double precision, intent(inout) :: jetms(0:),jetch(0:),jetvl(0:)
+  double precision, intent(in) :: jetve(0:)
   logical, intent(inout) :: jetfr(0:)
-  double precision, intent(in) :: f1st(0:),f2st(0:)
+  double precision, intent(in) :: f1st(0:),yst(0:)
+  logical, intent(in) :: evaporative
+  double precision, intent(in) :: consistency,findex,yieldstress
+  double precision, intent(in) :: cp0,Bev,mev,tev
   double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
   integer :: ipoint,j,first,last,lastfreeze,idx
   double precision :: newst,dx,dy,dz,lpsum,stmax
+  double precision :: fst2,dxu,dyu,dzu,lup,tux,tuy,tuz,beadvel
+  double precision :: beadlen,cp,ratmu,rattao
   call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress,maxstressposx)
   lastfreeze=min(npjet+1,mxnpjet)
 #ifdef _OPENACC
 !$acc parallel num_gangs(1) vector_length(256) async(accelerator_queue) &
 !$acc& present(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl, &
-!$acc& jetfr,f1st,f2st,counterlpath,ncounterlpath,maxstress,maxstressposx, &
+!$acc& jetve,jetfr,f1st,yst,counterlpath,ncounterlpath,maxstress,maxstressposx, &
 !$acc& statistics_step_max,statistics_step_index,accelerator_topology_flags) &
 !$acc& private(lpsum,stmax,first,last,idx)
 #endif
@@ -1745,11 +1760,64 @@ contains
   lpsum=0.d0
   stmax=-huge(0.d0)
 #ifdef _OPENACC
-!$acc loop vector reduction(+:lpsum) reduction(max:stmax) private(j,newst,dx,dy,dz)
+!$acc loop vector reduction(+:lpsum) reduction(max:stmax) &
+!$acc& private(j,newst,dx,dy,dz,fst2,dxu,dyu,dzu,lup,tux,tuy,tuz,beadvel, &
+!$acc& beadlen,cp,ratmu,rattao)
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
-    newst=jetst(ipoint)+0.5d0*dt*(f1st(j)+f2st(j))
+! Zero for a frozen bead, the blocked nozzle bead and the last bead; the
+! bead before a blocked one is joined to the last.
+    fst2=0.d0
+    if(.not.jetfr(ipoint) .and. ipoint<npjet .and. &
+     .not.(ipoint==npjet-1 .and. .not.linserted))then
+      if(ipoint==npjet-2 .and. .not.linserted)then
+        dxu=jetxx(ipoint)-jetxx(npjet)
+        dyu=jetyy(ipoint)-jetyy(npjet)
+        dzu=jetzz(ipoint)-jetzz(npjet)
+      else
+        dxu=jetxx(ipoint)-jetxx(ipoint+1)
+        dyu=jetyy(ipoint)-jetyy(ipoint+1)
+        dzu=jetzz(ipoint)-jetzz(ipoint+1)
+      endif
+      if(evaporative)then
+! accelerator_maxwell_stress_3d.
+        beadlen=dsqrt(dxu*dxu+dyu*dyu+dzu*dzu)
+        if(beadlen>0.d0 .and. jetve(ipoint)>0.d0 .and. jetvl(ipoint)>0.d0)then
+          if(ipoint==npjet-2 .and. .not.linserted)then
+            beadvel=((jetvx(ipoint)-jetvx(npjet))*dxu+ &
+             (jetvy(ipoint)-jetvy(npjet))*dyu+ &
+             (jetvz(ipoint)-jetvz(npjet))*dzu)/beadlen
+          else
+            beadvel=((jetvx(ipoint)-jetvx(ipoint+1))*dxu+ &
+             (jetvy(ipoint)-jetvy(ipoint+1))*dyu+ &
+             (jetvz(ipoint)-jetvz(ipoint+1))*dzu)/beadlen
+          endif
+          cp=cp0*jetvl(ipoint)/jetve(ipoint)
+          rattao=(cp/cp0)**tev
+          ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
+          fst2=(1.d0/rattao)*(yieldstress+consistency*ratmu* &
+           (beadvel/beadlen)**findex-yst(ipoint))
+        endif
+      else
+! accelerator_eom3_stage.
+        lup=dsqrt(dxu*dxu+dyu*dyu+dzu*dzu)
+        tux=dxu/lup
+        tuy=dyu/lup
+        tuz=dzu/lup
+        if(ipoint==npjet-2 .and. .not.linserted)then
+          beadvel=(jetvx(ipoint)-jetvx(npjet))*tux+ &
+           (jetvy(ipoint)-jetvy(npjet))*tuy+ &
+           (jetvz(ipoint)-jetvz(npjet))*tuz
+        else
+          beadvel=(jetvx(ipoint)-jetvx(ipoint+1))*tux+ &
+           (jetvy(ipoint)-jetvy(ipoint+1))*tuy+ &
+           (jetvz(ipoint)-jetvz(ipoint+1))*tuz
+        endif
+        fst2=yieldstress+consistency*(beadvel/lup)**findex-yst(ipoint)
+      endif
+    endif
+    newst=jetst(ipoint)+0.5d0*dt*(f1st(j)+fst2)
     if(ipoint<lastpoint)then
       dx=jetxx(ipoint)-jetxx(ipoint+1)
       dy=jetyy(ipoint)-jetyy(ipoint+1)
@@ -1804,6 +1872,154 @@ contains
   accelerator_topology_decided=.true.
   accelerator_statistics_stored=.true.
  end subroutine accelerator_platen_end_step
+
+ subroutine accelerator_platen_update(firstpoint,lastpoint,dt,npjet, &
+   mxnpjet,linserted,evaporative,airamp,noisediff,pfreq,liniperturb,evlim, &
+   historybase,historywindow,historyvalues,gaussianhistory,jetxx,jetyy, &
+   jetzz,jetvx,jetvy,jetvz,jetms,jetvl,jetve,jetfr,f1xx,f1yy,f1zz,f1vx, &
+   f1vy,f1vz,f1ev,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz,y1xx,y1yy,y1zz,y1ev,evairv, &
+   evmasscoeff,sqrevsc,evcsvapour,evumidity)
+! The per-bead updates after the last force evaluation of a fused persistent
+! dynamic Platen step in one kernel (2026-10-06): velocity
+! (accelerator_platen[_evap]_velocity), evaporation rate at the predicted
+! positions with the new velocity (accelerator_maxwell_evap_stress_3d), and
+! positions and evaporated volume (accelerator_platen[_evap]_positions).
+! Each bead reads only its own new velocity and the predicted state, so one
+! loop does all three; the Maxwell stress at the new state, which reads the
+! neighbours, is evaluated by accelerator_platen_end_step.  Three kernels
+! with evaporation (plus the stress kernel), two without, until then.
+! Explicit-shape dummies: with one descriptor per assumed-shape array, NVHPC
+! 24.3 and 25.5 reject the larger single kernel this replaces (invalid NVVM
+! IR) and copy descriptor temporaries for arrays passed on to device
+! routines on the asynchronous queue after the routine has returned.
+! Without evaporation, jetve, f1ev, y1xx, y1yy, y1zz and y1ev are not
+! referenced.
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint,npjet,mxnpjet
+  integer, intent(in) :: historybase,historywindow,historyvalues
+  logical, intent(in) :: linserted,evaporative,liniperturb
+  double precision, intent(in) :: dt,airamp,noisediff,pfreq,evlim
+  double precision, intent(in) :: gaussianhistory(0:historyvalues-1)
+  double precision, intent(inout) :: jetxx(0:mxnpjet),jetyy(0:mxnpjet)
+  double precision, intent(inout) :: jetzz(0:mxnpjet),jetvx(0:mxnpjet)
+  double precision, intent(inout) :: jetvy(0:mxnpjet),jetvz(0:mxnpjet)
+  double precision, intent(in) :: jetms(0:mxnpjet),jetvl(0:mxnpjet)
+  double precision, intent(inout) :: jetve(0:mxnpjet)
+  logical, intent(in) :: jetfr(0:mxnpjet)
+  double precision, intent(in) :: f1xx(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f1yy(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f1zz(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f1vx(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f1vy(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f1vz(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f1ev(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f2vx(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f2vy(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f2vz(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f3vx(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f3vy(0:lastpoint-firstpoint)
+  double precision, intent(in) :: f3vz(0:lastpoint-firstpoint)
+  double precision, intent(in) :: y1xx(0:npjet),y1yy(0:npjet),y1zz(0:npjet)
+  double precision, intent(in) :: y1ev(0:npjet)
+  double precision, intent(in) :: evairv,evmasscoeff,sqrevsc,evcsvapour
+  double precision, intent(in) :: evumidity
+  integer :: ipoint,j,component,index1,index2,hbase,hstride,hvalues,hfirst
+  double precision :: dx,dy,dz,beadlen,vnorm,re,fev
+  double precision :: dsqrh,tsqh,prefactor,stoc,cmass,u1,u2,ww,zz
+  double precision :: f2x,f2y,f2z,y1y,y1z,ve
+  dsqrh=dsqrt(dabs(dt)); tsqh=dsqrh**3.d0; prefactor=0.5d0/dsqrh
+  hbase=historybase; hstride=historywindow; hvalues=historyvalues
+  hfirst=firstpoint
+#ifdef _OPENACC
+!$acc parallel loop gang vector async(accelerator_queue) &
+!$acc& present(gaussianhistory,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetms, &
+!$acc& jetvl,jetve,jetfr,f1xx,f1yy,f1zz,f1vx,f1vy,f1vz,f1ev,f2vx,f2vy, &
+!$acc& f2vz,f3vx,f3vy,f3vz,y1xx,y1yy,y1zz,y1ev) &
+!$acc& private(j,component,index1,index2,stoc,cmass,u1,u2,ww,zz,dx,dy,dz, &
+!$acc& beadlen,vnorm,re,fev,f2x,f2y,f2z,y1y,y1z,ve)
+#endif
+  do ipoint=firstpoint,lastpoint
+    j=ipoint-firstpoint
+! Velocity.
+    if(evaporative)then
+      cmass=jetve(ipoint)/jetvl(ipoint)
+      stoc=dsqrt(2.d0*(airamp/(jetms(ipoint)*cmass)+noisediff))
+    else
+      stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
+    endif
+    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
+     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
+    component=1
+    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
+    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
+    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
+    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
+    jetvx(ipoint)=jetvx(ipoint)+stoc*ww+prefactor*(f2vx(j)-f3vx(j))*zz+ &
+     0.25d0*dt*(f2vx(j)+2.d0*f1vx(j)+f3vx(j))
+    component=2
+    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
+    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
+    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
+    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
+    jetvy(ipoint)=jetvy(ipoint)+stoc*ww+prefactor*(f2vy(j)-f3vy(j))*zz+ &
+     0.25d0*dt*(f2vy(j)+2.d0*f1vy(j)+f3vy(j))
+    component=3
+    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
+    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
+    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
+    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
+    jetvz(ipoint)=jetvz(ipoint)+stoc*ww+prefactor*(f2vz(j)-f3vz(j))*zz+ &
+     0.25d0*dt*(f2vz(j)+2.d0*f1vz(j)+f3vz(j))
+! Evaporation rate at the predicted positions with the new velocity
+! (device_maxwell_evap_stress_point).
+    fev=0.d0
+    if(evaporative .and. .not.(jetfr(ipoint) .or. ipoint>=npjet) .and. &
+     .not.(ipoint==npjet-1 .and. .not.linserted))then
+      if(ipoint==npjet-2 .and. .not.linserted)then
+        dx=y1xx(npjet)-y1xx(ipoint); dy=y1yy(npjet)-y1yy(ipoint)
+        dz=y1zz(npjet)-y1zz(ipoint)
+      else
+        dx=y1xx(ipoint+1)-y1xx(ipoint); dy=y1yy(ipoint+1)-y1yy(ipoint)
+        dz=y1zz(ipoint+1)-y1zz(ipoint)
+      endif
+      beadlen=dsqrt(dx*dx+dy*dy+dz*dz)
+      vnorm=dsqrt(jetvx(ipoint)*jetvx(ipoint)+jetvy(ipoint)*jetvy(ipoint)+ &
+       jetvz(ipoint)*jetvz(ipoint))
+      if(beadlen>0.d0 .and. evairv>0.d0 .and. y1ev(ipoint)>0.d0)then
+        re=(2.d0*dsqrt(y1ev(ipoint)/(3.14159265358979323846d0*beadlen))* &
+         vnorm)/evairv
+        fev=-evmasscoeff*0.495d0*(re**(1.d0/3.d0))*sqrevsc* &
+         (evcsvapour-evumidity)*3.14159265358979323846d0*beadlen
+      endif
+    endif
+! Positions and evaporated volume.
+    f2x=jetvx(ipoint); f2y=jetvy(ipoint); f2z=jetvz(ipoint)
+    if(jetfr(ipoint) .or. (ipoint==npjet-1 .and. .not.linserted))then
+      f2x=0.d0; f2y=0.d0; f2z=0.d0
+    endif
+    if(ipoint==npjet)then
+      f2x=0.d0
+      if(liniperturb)then
+        y1y=jetyy(ipoint)+dt*f1yy(j)
+        y1z=jetzz(ipoint)+dt*f1zz(j)
+        f2y=-pfreq*y1z; f2z=pfreq*y1y
+      else
+        f2y=0.d0; f2z=0.d0
+      endif
+    endif
+    jetxx(ipoint)=jetxx(ipoint)+0.5d0*dt*(f1xx(j)+f2x)
+    jetyy(ipoint)=jetyy(ipoint)+0.5d0*dt*(f1yy(j)+f2y)
+    jetzz(ipoint)=jetzz(ipoint)+0.5d0*dt*(f1zz(j)+f2z)
+    if(evaporative)then
+      ve=jetve(ipoint)+0.5d0*dt*(f1ev(j)+fev)
+      if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
+      jetve(ipoint)=ve
+    endif
+  enddo
+#ifdef _OPENACC
+!$acc end parallel loop
+#endif
+ end subroutine accelerator_platen_update
 
  subroutine accelerator_euler_final_statistics(firstpoint,lastpoint,h, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &

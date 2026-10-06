@@ -185,21 +185,30 @@ stride layout, a run that grew through insertion alone once kept a history
 sized for the previous `mxnpjet` and indexed past its end
 (`CUDA_ERROR_ILLEGAL_ADDRESS` inside `accelerator_platen_velocity`).
 
-## Restart limitation
+## Restart
 
-The historical restart format does not serialize the Fortran intrinsic
-random-generator state. A restarted stochastic run can therefore continue
-from the saved physical state but is not guaranteed to reproduce the exact
-uninterrupted random sequence. Exact stochastic restart would require saving
-and restoring `random_seed(get=...)` state, with an explicit restart-format
-version and compatibility policy.
+Since 2026-10-06 the restart file `save.dat` ends with a versioned block
+(restart state version 1, after the bead records) that holds the two random
+states of a run, together with the counters of the dynamic refinement and of
+the anchor tagging:
 
-The pre-generated pool adds a second, distinct restart gap. Its cursor is
-genuinely stateful — it is the cumulative sum of active bead counts, not
-derivable from the step number — and it is not written to the checkpoint, so
-a restarted run that uses the pool is regenerated and resumes the noise
-sequence from offset zero. This is harmless statistically but breaks
-bit-exact restart reproducibility.
+- the cursor of the pre-generated pool and the pool size. The cursor is the
+  cumulative sum of the active bead counts and cannot be derived from the
+  step number. A restarted run regenerates the pool from the seed of
+  `input.dat` and then moves the cursor to the saved position; a different
+  `noise pool` size prints a warning and the cursor is taken modulo the new
+  size.
+- the state of the intrinsic generator (`random_seed(get=...)`), from which
+  the runs without a pool draw their noise step by step. It is restored
+  after the pool has been drawn from the input seed. Its layout belongs to
+  the compiler's runtime: when the size differs (an executable built with
+  another compiler) a warning is printed and the generator is not restored.
+
+With the same input file and executable, a restarted run therefore continues
+the uninterrupted one exactly (`tests/restart/run.sh`, Tests 24 and 25).
+Files written before 2026-10-06 have no such block; they are still read,
+with a warning, and the noise then restarts from the beginning of the pool
+and from the input seed.
 
 ## Maintenance invariants
 
@@ -221,8 +230,9 @@ bit-exact restart reproducibility.
   on the bead count, because that decision is taken once before the timestep
   loop, when a jet growing from a single bead has not yet reached any
   size-based eligibility threshold.
-- Restart reproducibility must not be claimed until generator state is part
-  of the restart format.
+- Every random state that a run advances (pool cursor, intrinsic generator)
+  must be written to the restart file; restart state version 1 holds both. A
+  new state means a new version, read only when present.
 
 ## Regression coverage
 

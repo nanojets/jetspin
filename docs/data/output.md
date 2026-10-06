@@ -45,7 +45,7 @@ profiling either enabled in both or disabled in both.
 | `frame%06d.xyz` | Individual XYZ geometry frames |
 | `frame%06d.pdb` | Individual PDB geometry frames |
 | `frame%06d.psf` | Bond topology accompanying PDB output |
-| `save.dat` | Binary restart and accumulated-statistics state |
+| `save.dat` | Binary restart state: bead records in double precision and the run state (pool cursor, random generator, refinement counters); see [running](../introduction/running.md) |
 
 Use `print list` to select terminal observables and `printstat list` to
 select columns written to the statistics file. Common keys include:

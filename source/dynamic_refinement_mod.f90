@@ -75,6 +75,11 @@
  integer, public, save :: irefinementstart=0
  integer, public, save :: irefinementevery=0
  integer, public, save :: irefinementdone=0
+! Steps since the last accepted refinement event; the threshold test runs
+! once it reaches irefinementevery.  Module-level (it was a local SAVE
+! variable of check_dynamic_refinement_akima until 2026-10-06) so that the
+! restart file can store it.
+ integer, public, save :: refinementcheckcounter=0
  
  double precision, public, save :: refinementthreshold=0.d0
  
@@ -243,7 +248,6 @@ implicit none
   integer, intent(in) :: nstep
   logical, intent(out) :: dorefinment
  
-  integer, save :: icounter=0
   integer :: device_refinement_start,device_nfitting
   double precision :: tempmod0,device_lengthpath,device_nozzle_correction
   logical :: ldorefinement,device_candidate
@@ -253,8 +257,8 @@ implicit none
   if(.not.lrefinement)return
   if(linserting .and. (npjet-inpjet+1)<10)return
   
-  icounter=icounter+1
-  if(icounter<irefinementevery)return
+  refinementcheckcounter=refinementcheckcounter+1
+  if(refinementcheckcounter<irefinementevery)return
 
 #ifdef _OPENACC
   if(accelerator_device_state_is_current())then
@@ -327,7 +331,7 @@ implicit none
   endif
   
   dorefinment=.true.
-  icounter=0
+  refinementcheckcounter=0
   irefinementdone=irefinementdone+1
   
   return

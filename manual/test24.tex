@@ -59,15 +59,18 @@ cone angle 26.6 degrees, the active-bead count between 471 and 553 around a
 mean of 511, and the path length 211 cm, so the balanced insertion and removal
 regime is reached; four more CPU seeds give mean active counts between 511.3
 and 512.0.  One NVIDIA
-A30 runs the same 5 million steps in about 620 s: it reproduces the CPU run
+A30 runs the same 5 million steps in about 590 s: it reproduces the CPU run
 exactly until step 1,379,105, where it engages the device-resident path,
 follows the CPU trajectory afterwards, and five seeds give between 511 and 512
 active beads and a path length of 211 cm over the same window.  The A30 step
-then costs between about 110 and 150~$\mu$s from 100 to 600 beads, against 4
+then costs between about 105 and 145~$\mu$s from 100 to 600 beads, against 4
 to 5 ms for the CPU build with about 500 beads; the standard GPU build of the
 same day, which kept this case on the host with only the Coulomb sums on the
-GPU, needed 4546 s.  A full-length reference does not yet exist; on one A30 it
-would take about four hours.
+GPU, needed 4546 s.  On one A30 the full 100 million steps take about four
+hours: from 10 to 100 million steps the jet keeps 517 active beads on average
+(474 to 560), a path length of 214 cm, an off-axis distance of 3.8 cm and a
+cone angle of 26.9 degrees, about 1\% above the values between 4 and 5
+million steps, where the jet is still settling.
 
 Track the printed \texttt{n} column over time to observe the stationary
 oscillation.  The input is stored in

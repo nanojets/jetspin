@@ -16,7 +16,9 @@
  use error_mod
  use utility_mod,           only : write_fmtnumb,pi,get_prntime, &
                              maxgaussianhistory,mingaussianhistory, &
-                             maxgaussianhistorylimit
+                             maxgaussianhistorylimit,gaussianhistoryvalues, &
+                             gaussian_history_cursor, &
+                             set_gaussian_history_cursor
  use nanojet_mod,           only : airdragamp,doreorder,tao,aird,airv,&
                              chargescale,consistency,findex,g,h,&
                              icharge,icrossec,ilength,&
@@ -60,13 +62,16 @@
                              evtemp,evumidity,levumidity,evmasscoeff, &
                              jetve,lbev,bev,lmev,mev,levmasscoeff, &
                              evmasscoeff,levcsvapour,evcsvapour, &
-                             ltev,tev,incnpjet,lincnpjet
+                             ltev,tev,incnpjet,lincnpjet,lfirsttagbead, &
+                             tagbeaddistance,timedeposition, &
+                             topology_add_total,topology_remove_total, &
+                             reallocate_total,insvx,insvy,insvz
  use dynamic_refinement_mod, only : lrefinement,lrefinementthreshold,&
                              refinementthreshold,lrefinementevery, &
                              irefinementevery,lrefinementstart, &
                              irefinementstart,lrefbeadstart, &
                              refbeadstartfit,irefinementdone, &
-                             llenthresholdbead
+                             llenthresholdbead,refinementcheckcounter
  use electric_field_mod,    only : nfieldtype
  use integrator_mod,        only : integrator,endtime,lendtime,&
                              lintegrator
@@ -131,6 +136,19 @@
  
  logical :: lrestartreset=.false.
  logical :: lrestartdump=.false.
+! Run state appended to the restart file after the bead records since
+! 2026-10-06 (restartstateversion 1): Gaussian-pool cursor, refinement and
+! anchor-spacing counters, and the intrinsic random-generator state.  The
+! pool and the generator are prepared only after the restart file is read,
+! so their part is kept here until apply_restart_random_state.  A file
+! without this block (older JETSPIN) still restarts, without these states.
+ integer, parameter :: restartstatemagic=20261006
+ integer, parameter :: restartstateversion=1
+ logical, save :: lrestartstate=.false.
+ integer, save :: restartpoolcursor=0
+ integer, save :: restartpoolvalues=-1
+ integer, save :: nrestartrandom=0
+ integer, allocatable, save :: restartrandom(:)
  logical :: ldragvelfound=.false.
  
  logical :: ltimjob=.false.
@@ -156,6 +174,7 @@
  public :: write_pdb_singlefile
  public :: write_restart_file
  public :: read_restart_file
+ public :: apply_restart_random_state
  
  contains
  
@@ -3111,7 +3130,7 @@
     lfirst=.false.
     if(lreadrest)then
       open(unit=outp,file=trim(soutp),form='formatted', &
-       status='old',action='write',position='append')
+       status='unknown',action='write',position='append')
     else
       open(unit=outp,file=trim(soutp),form='formatted', &
        status='replace',action='write')
@@ -3171,7 +3190,7 @@
   
   if(lreadrest)then
     open(fileout,file=trim(filename),form='unformatted', &
-     status='old',action='write',position='append')
+     status='unknown',action='write',position='append')
   else
     open(fileout,file=trim(filename),form='unformatted', &
      status='replace',action='write')
@@ -3206,7 +3225,7 @@
   
   if(lreadrest)then
     open(fileout,file=trim(filename),form='unformatted', &
-     status='old',action='write',position='append')
+     status='unknown',action='write',position='append')
   else
     open(fileout,file=trim(filename),form='unformatted', &
      status='replace',action='write')
@@ -3729,8 +3748,8 @@
   integer, intent(inout) ::k
   double precision, intent(inout) :: timesub
   
-  integer :: natms,i,j,sprintdatsub,systypesub,ipoint
-  logical :: lstart
+  integer :: natms,i,j,sprintdatsub,systypesub,ipoint,mxnpjetfile
+  logical :: lstart,lscratchve,lscratchbd
   real(4) :: dtemp(12)
   
   
@@ -3751,16 +3770,42 @@
   call bcast_world_i(inpjet)
   call bcast_world_i(npjet)
   
-  if(sprintdatsub>=11 .and. sprintdatsub<=14)then
+! Formats 15 and 16 (evaporation, single precision) were written but
+! rejected here until 2026-10-06; 17 and 18 are their double-precision
+! counterparts.
+  if(sprintdatsub>=11 .and. sprintdatsub<=18)then
     if(idrank==0)read(filein)mxnpjet
     call bcast_world_i(mxnpjet)
   else
     call error(18)
   endif
+! allocate_jet may reserve more capacity than the file holds (100 more
+! beads for an inserting, tagged jet of at least 100 beads): read the
+! records of the file and leave the rest empty.  Until 2026-10-06 the reads
+! ran to the new capacity, past the bead records.
+  mxnpjetfile=mxnpjet
   
   doreorder=.false.
   call deallocate_jet()
   call allocate_jet(.true.) 
+! Evaporation or anchor fields that this run does not use are read into
+! scratch arrays and dropped.
+  lscratchve=(.not.allocated(jetve)) .and. sprintdatsub>=15
+  if(lscratchve)allocate(jetve(0:mxnpjet))
+  lscratchbd=(.not.allocated(jetbd)) .and. mod(sprintdatsub,2)==0
+  if(lscratchbd)allocate(jetbd(0:mxnpjet))
+  jetxx(:)=0.d0
+  jetyy(:)=0.d0
+  jetzz(:)=0.d0
+  jetst(:)=0.d0
+  jetvx(:)=0.d0
+  jetvy(:)=0.d0
+  jetvz(:)=0.d0
+  jetms(:)=0.d0
+  jetch(:)=0.d0
+  jetvl(:)=0.d0
+  if(allocated(jetve))jetve(:)=0.d0
+  if(allocated(jetbd))jetbd(:)=.false.
   lreordertrack=.false.
   naddtrack=0
   nremtrack=0
@@ -3768,12 +3813,12 @@
     if(sprintdatsub==11)then
       select case(systypesub)
       case (1:2)
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)jetxx(i),jetst(i),jetvx(i),jetms(i),jetch(i), &
            jetvl(i)
         end do
       case default
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)jetxx(i),jetyy(i),jetzz(i),jetst(i),jetvx(i), &
            jetvy(i),jetvz(i),jetms(i),jetch(i),jetvl(i)
          end do
@@ -3781,12 +3826,12 @@
     elseif(sprintdatsub==12)then
       select case(systype)
       case (1:2)
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)jetxx(i),jetst(i),jetvx(i),jetms(i),jetch(i), &
            jetvl(i),jetbd(i)
         end do
       case default
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)jetxx(i),jetyy(i),jetzz(i),jetst(i),jetvx(i), &
            jetvy(i),jetvz(i),jetms(i),jetch(i),jetvl(i),jetbd(i)
          end do
@@ -3794,7 +3839,7 @@
     elseif(sprintdatsub==13)then
       select case(systypesub)
       case (1:2)
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,6)
           jetxx(i)=dble(dtemp(1))
           jetst(i)=dble(dtemp(2))
@@ -3804,7 +3849,7 @@
           jetvl(i)=dble(dtemp(6))
         end do
       case default
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,10)
           jetxx(i)=dble(dtemp(1))
           jetyy(i)=dble(dtemp(2))
@@ -3821,7 +3866,7 @@
     elseif(sprintdatsub==14)then
       select case(systype)
       case (1:2)
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,6),jetbd(i)
           jetxx(i)=dble(dtemp(1))
           jetst(i)=dble(dtemp(2))
@@ -3831,7 +3876,7 @@
           jetvl(i)=dble(dtemp(6))
         end do
       case default
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,10),jetbd(i)
           jetxx(i)=dble(dtemp(1))
           jetyy(i)=dble(dtemp(2))
@@ -3848,7 +3893,7 @@
     elseif(sprintdatsub==15)then
       select case(systypesub)
       case (1:2)
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,7)
           jetxx(i)=dble(dtemp(1))
           jetst(i)=dble(dtemp(2))
@@ -3859,7 +3904,7 @@
           jetve(i)=dble(dtemp(7))
         end do
       case default
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,11)
           jetxx(i)=dble(dtemp(1))
           jetyy(i)=dble(dtemp(2))
@@ -3877,7 +3922,7 @@
     elseif(sprintdatsub==16)then
       select case(systype)
       case (1:2)
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,7),jetbd(i)
           jetxx(i)=dble(dtemp(1))
           jetst(i)=dble(dtemp(2))
@@ -3888,7 +3933,7 @@
           jetve(i)=dble(dtemp(7))
         end do
       case default
-        do i=0,mxnpjet
+        do i=0,mxnpjetfile
           read(filein)(dtemp(j),j=1,11),jetbd(i)
           jetxx(i)=dble(dtemp(1))
           jetyy(i)=dble(dtemp(2))
@@ -3901,6 +3946,32 @@
           jetch(i)=dble(dtemp(9))
           jetvl(i)=dble(dtemp(10))
           jetve(i)=dble(dtemp(11))
+         end do
+      end select
+    elseif(sprintdatsub==17)then
+      select case(systypesub)
+      case (1:2)
+        do i=0,mxnpjetfile
+          read(filein)jetxx(i),jetst(i),jetvx(i),jetms(i),jetch(i), &
+           jetvl(i),jetve(i)
+        end do
+      case default
+        do i=0,mxnpjetfile
+          read(filein)jetxx(i),jetyy(i),jetzz(i),jetst(i),jetvx(i), &
+           jetvy(i),jetvz(i),jetms(i),jetch(i),jetvl(i),jetve(i)
+         end do
+      end select
+    elseif(sprintdatsub==18)then
+      select case(systypesub)
+      case (1:2)
+        do i=0,mxnpjetfile
+          read(filein)jetxx(i),jetst(i),jetvx(i),jetms(i),jetch(i), &
+           jetvl(i),jetve(i),jetbd(i)
+        end do
+      case default
+        do i=0,mxnpjetfile
+          read(filein)jetxx(i),jetyy(i),jetzz(i),jetst(i),jetvx(i), &
+           jetvy(i),jetvz(i),jetms(i),jetch(i),jetvl(i),jetve(i),jetbd(i)
          end do
       end select
     endif
@@ -3950,7 +4021,7 @@
       call bcast_world_darr(jetvl,mxnpjet+1)
       call bcast_world_larr(jetbd,mxnpjet+1)
     end select
-  elseif(sprintdatsub==15)then
+  elseif(sprintdatsub==15 .or. sprintdatsub==17)then
     select case(systypesub)
     case (1:2)
       call bcast_world_darr(jetxx,mxnpjet+1)
@@ -3973,7 +4044,7 @@
       call bcast_world_darr(jetvl,mxnpjet+1)
       call bcast_world_darr(jetve,mxnpjet+1)
     end select
-  elseif(sprintdatsub==16)then
+  elseif(sprintdatsub==16 .or. sprintdatsub==18)then
     select case(systypesub)
     case (1:2)
       call bcast_world_darr(jetxx,mxnpjet+1)
@@ -3999,6 +4070,17 @@
       call bcast_world_larr(jetbd,mxnpjet+1)
     end select
   endif
+  
+! A file written without evaporation gives an evaporative run fresh solvent
+! (as at insertion), and a file without anchors an untagged jet.
+  if(levaporation .and. (sprintdatsub<15 .or. sprintdatsub>18))then
+    jetve(:)=jetvl(:)
+  endif
+  if(allocated(jetbd) .and. mod(sprintdatsub,2)==1)jetbd(:)=.false.
+  if(lscratchve)deallocate(jetve)
+  if(lscratchbd)deallocate(jetbd)
+  
+  call read_restart_state(filein)
   
   jetfr(:)=.false.
   do ipoint=inpjet,npjet
@@ -4148,14 +4230,185 @@
            real(jetch(i),4),real(jetvl(i),4),real(jetve(i),4),jetbd(i)
          end do
       end select
+    elseif(sprintdatsub==17)then
+      select case(systypesub)
+      case (1:2)
+        do i=0,mxnpjet
+          write(fileout)jetxx(i),jetst(i),jetvx(i),jetms(i),jetch(i), &
+           jetvl(i),jetve(i)
+        end do
+      case default
+        do i=0,mxnpjet
+          write(fileout)jetxx(i),jetyy(i),jetzz(i),jetst(i),jetvx(i), &
+           jetvy(i),jetvz(i),jetms(i),jetch(i),jetvl(i),jetve(i)
+         end do
+      end select
+    elseif(sprintdatsub==18)then
+      select case(systypesub)
+      case (1:2)
+        do i=0,mxnpjet
+          write(fileout)jetxx(i),jetst(i),jetvx(i),jetms(i),jetch(i), &
+           jetvl(i),jetve(i),jetbd(i)
+        end do
+      case default
+        do i=0,mxnpjet
+          write(fileout)jetxx(i),jetyy(i),jetzz(i),jetst(i),jetvx(i), &
+           jetvy(i),jetvz(i),jetms(i),jetch(i),jetvl(i),jetve(i),jetbd(i)
+         end do
+      end select
     endif
   endif
   
-  
+  call write_restart_state(fileout)
   
   return
     
  end subroutine write_dat_restart
+ 
+ subroutine write_restart_state(fileout)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for appending to the restart file the run
+!     state that the bead records do not hold (restartstateversion 1):
+!     Gaussian-pool cursor and size, refinement and anchor-spacing
+!     counters, topology totals, the velocity of the last bead released
+!     at the nozzle (statistics), and the state of the intrinsic random
+!     generator, which only rank 0 advances.
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(in) :: fileout
+  
+  integer :: nseed
+  integer, allocatable :: seed(:)
+  
+  if(idrank/=0)return
+  
+  write(fileout)restartstatemagic,restartstateversion
+  write(fileout)gaussian_history_cursor(),gaussianhistoryvalues, &
+   refinementcheckcounter,irefinementdone,topology_add_total, &
+   topology_remove_total,reallocate_total,lfirsttagbead, &
+   tagbeaddistance,timedeposition,insvx,insvy,insvz
+  call random_seed(size=nseed)
+  allocate(seed(nseed))
+  call random_seed(get=seed)
+  write(fileout)nseed
+  write(fileout)seed
+  deallocate(seed)
+  
+  return
+  
+ end subroutine write_restart_state
+ 
+ subroutine read_restart_state(filein)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for reading the run state written by
+!     write_restart_state, if the restart file has it.  The pool cursor
+!     and the generator state are applied later, by
+!     apply_restart_random_state.
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer, intent(in) :: filein
+  
+  integer :: ios,imagic,iversion
+  
+  lrestartstate=.false.
+  if(idrank==0)then
+    read(filein,iostat=ios)imagic,iversion
+    if(ios==0 .and. imagic==restartstatemagic .and. iversion>=1)then
+      read(filein)restartpoolcursor,restartpoolvalues, &
+       refinementcheckcounter,irefinementdone,topology_add_total, &
+       topology_remove_total,reallocate_total,lfirsttagbead, &
+       tagbeaddistance,timedeposition,insvx,insvy,insvz
+      read(filein)nrestartrandom
+      if(allocated(restartrandom))deallocate(restartrandom)
+      allocate(restartrandom(nrestartrandom))
+      read(filein)restartrandom
+      lrestartstate=.true.
+    endif
+  endif
+  call bcast_world_l(lrestartstate)
+  
+  if(.not.lrestartstate)then
+    if(idrank==0)write(6,'(a)')'WARNING - restart.dat holds no Gaussian-'// &
+     'pool cursor or random-generator state (written before 2026-10-06):'// &
+     ' the noise does not continue the saved sequence'
+    return
+  endif
+  
+  call bcast_world_i(restartpoolcursor)
+  call bcast_world_i(restartpoolvalues)
+  call bcast_world_i(refinementcheckcounter)
+  call bcast_world_i(irefinementdone)
+  call bcast_world_i(topology_add_total)
+  call bcast_world_i(topology_remove_total)
+  call bcast_world_i(reallocate_total)
+  call bcast_world_l(lfirsttagbead)
+  call bcast_world_d(tagbeaddistance)
+  call bcast_world_d(timedeposition)
+  call bcast_world_d(insvx)
+  call bcast_world_d(insvy)
+  call bcast_world_d(insvz)
+  
+  return
+  
+ end subroutine read_restart_state
+ 
+ subroutine apply_restart_random_state()
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for resuming the Gaussian pool and the random
+!     generator where the restart file left them.  Called once, after
+!     prepare_integrator_random_history: the pool is regenerated from the
+!     seed of input.dat, which rewinds its cursor and advances the
+!     generator.
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     
+!***********************************************************************
+  
+  implicit none
+  
+  integer :: nseed
+  
+  if(.not.lrestartstate)return
+  
+  if(gaussianhistoryvalues>0)then
+    if(restartpoolvalues/=gaussianhistoryvalues .and. idrank==0) &
+     write(6,'(a,i0,a,i0,a)')'WARNING - Gaussian pool of ', &
+     gaussianhistoryvalues,' values, restart.dat was written with ', &
+     restartpoolvalues,': the noise does not continue the saved sequence'
+    call set_gaussian_history_cursor(restartpoolcursor)
+  endif
+  
+  if(idrank==0)then
+    call random_seed(size=nseed)
+    if(nseed==nrestartrandom)then
+      call random_seed(put=restartrandom)
+    else
+      write(6,'(a)')'WARNING - the random-generator state in restart.dat'// &
+       ' does not fit this executable: the generator is not restored'
+    endif
+  endif
+  if(allocated(restartrandom))deallocate(restartrandom)
+  lrestartstate=.false.
+  
+  return
+  
+ end subroutine apply_restart_random_state
  
  subroutine write_dat_parameter(lprintdatsub,fileout,timesub)
  
@@ -4645,7 +4898,7 @@
   
   if(lreadrest)then
     open(fileout,file=trim(filename),form='formatted', &
-     status='old',action='write',position='append')
+     status='unknown',action='write',position='append')
   else
     open(fileout,file=trim(filename),form='formatted', &
      status='replace',action='write')
@@ -5317,7 +5570,7 @@
     lfirst=.false.
     if(lreadrest)then
       open(fileout,file=trim(filename),form='unformatted', &
-       status='old',action='write',position='append')
+       status='unknown',action='write',position='append')
     else
       open(fileout,file=trim(filename),form='unformatted', &
        status='replace',action='write')
@@ -5351,17 +5604,20 @@
   
   integer, intent(out) :: myoutdata
   
+! Double precision since 2026-10-06 (formats 11, 12, 17, 18), so that a
+! restarted run continues the saved one exactly; the single-precision
+! formats 13-16 are still read.
   if(levaporation)then
     if(ltagbeads)then
-      myoutdata=16
+      myoutdata=18
     else
-      myoutdata=15
+      myoutdata=17
     endif
   else
     if(ltagbeads)then
-      myoutdata=14
+      myoutdata=12
     else
-      myoutdata=13
+      myoutdata=11
     endif
   endif
   

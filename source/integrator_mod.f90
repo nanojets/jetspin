@@ -68,7 +68,8 @@ module integrator_mod
                          accelerator_platen_evap_positions, &
                          accelerator_platen_stress_statistics, &
                          accelerator_platen_stage_prep, &
-                         accelerator_platen_end_step
+                         accelerator_platen_end_step, &
+                         accelerator_platen_update
  use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
                          maxstressposx
 #endif
@@ -92,6 +93,9 @@ module integrator_mod
  integer, public, save :: integrator
  logical, public, save :: lintegrator=.false.
  logical, save :: persistent_reset_requested=.false.
+! Set once the evaporative Euler/RK2/RK4 device path has engaged (see
+! evaporative_dynamic_accelerator_eligible).
+ logical, save :: evaporative_dynamic_engaged=.false.
  
  double precision, public, save :: initime = 0.d0
  double precision, public, save :: endtime = 5.d0
@@ -287,6 +291,14 @@ contains
  end function small_dynamic_test_eligible
 
  logical function evaporative_dynamic_accelerator_eligible()
+! The device path of the evaporative Euler, RK2 and RK4 integrators.  Since
+! 2026-10-06 it engages once the jet has reached 100 beads, as the dynamic
+! Platen paths do: a jet grown from a single bead ran on the device from the
+! first step, about a hundred times slower than on the host while it had a
+! few beads.  It then stays engaged, because these integrators test this
+! function at every step and npjet can fall below 100 when reallocate_jet
+! compacts the arrays.  A jet starting with 100 beads or more (Tests 16-19)
+! engages at the first step, as before.
   implicit none
   evaporative_dynamic_accelerator_eligible=integrator>=1 .and. &
    integrator<=3 .and. systype.eq.3 .and. npjet>=inpjet .and. &
@@ -295,7 +307,10 @@ contains
    .not.lKVfluid .and. .not.lmultiplestep .and. lairdrag .and. &
    .not.lflorentz .and. .not.luppot .and. nfieldtype.eq.0 .and. &
    .not.ldragvel .and. typemass.eq.0 .and. .not.ltrackbeads .and. &
-   .not.ltagbeads .and. .not.lbreakup
+   .not.ltagbeads .and. .not.lbreakup .and. &
+   (npjet>=100 .or. evaporative_dynamic_engaged)
+  if(evaporative_dynamic_accelerator_eligible) &
+   evaporative_dynamic_engaged=.true.
  end function evaporative_dynamic_accelerator_eligible
 
 #if defined(_OPENACC) && defined(JETSPIN_DEV_HOST_FORCE_ORACLE)
@@ -2217,40 +2232,51 @@ contains
          collector_curvature=.true.)
 #endif
         if(.not.fusedstep)call restore_charge()
-        call accelerator_platen_velocity(mystart,myend,mxnpjet, &
-         gaussianhistorysteps,k,h, &
-         airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
-         f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz, &
-         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
-         linserted,jetfr)
-        call accelerator_platen_positions(mystart,myend,npjet,h,pfreq, &
-         liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz, &
-         linserted,jetfr)
-        call place_inserting_bead(jetxx,jetyy,jetzz,.true.)
-#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
-        used_acc_eom=non_evap_host_force_oracle(timesub+h,k,jetxx,jetyy,jetzz, &
-         y1st,jetvx,jetvy,jetvz,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz)
-!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
-!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
-!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart),f2vz(0:myend-mystart))
-#else
-        used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx,jetyy, &
-         jetzz,y1st,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch,jetfr, &
-         f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
-         lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
-         yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
-         collector_curvature=.true.)
-#endif
-! The restore of the last smoothing waits for the end-of-step kernel in a
-! fused step: the stress derivative above does not depend on jetch.
+! A fused step updates velocities and positions in one kernel and
+! evaluates the stress derivative at the end of the step in its end-of-step
+! kernel (2026-10-06), which also places the inserting bead: that bead does
+! not enter the derivative, and a fourth EOM evaluation computed all the
+! derivatives for this one alone.  The restore of the last smoothing waits
+! for that kernel too: the derivative does not depend on jetch.
         if(fusedstep)then
+          call accelerator_platen_update(mystart,myend,h,npjet,mxnpjet, &
+           linserted,.false.,airdragamp(1),noisediff,pfreq,liniperturb,0.d0, &
+           gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
+           gaussianhistory,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetms,jetvl, &
+           jetvl,jetfr,f1xx,f1yy,f1zz,f1vx,f1vy,f1vz,f1st,f2vx,f2vy,f2vz, &
+           d3vx,d3vy,d3vz,y1xx,y1yy,y1zz,y1st,0.d0,0.d0,0.d0,0.d0,0.d0)
           call accelerator_platen_end_step(mystart,myend,h,npjet, &
            mxnpjet,inpjet,linserted,lremove,collector_h,resolution, &
            dresolution,thresolution,ivelocity,istress,imassa,icharge, &
            ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch, &
-           jetvl,jetfr,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
-           maxstressposx)
+           jetvl,jetvl,jetfr,f1st,y1st,.false.,consistency,findex, &
+           yieldstress,0.d0,0.d0,0.d0,0.d0,counterlpath,ncounterlpath, &
+           maxstress,maxstressposx)
         else
+          call accelerator_platen_velocity(mystart,myend,mxnpjet, &
+           gaussianhistorysteps,k,h, &
+           airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
+           f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,d3vx,d3vy,d3vz, &
+           gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
+           linserted,jetfr)
+          call accelerator_platen_positions(mystart,myend,npjet,h,pfreq, &
+           liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz, &
+           linserted,jetfr)
+          call place_inserting_bead(jetxx,jetyy,jetzz,.true.)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+          used_acc_eom=non_evap_host_force_oracle(timesub+h,k,jetxx,jetyy, &
+           jetzz,y1st,jetvx,jetvy,jetvz,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz)
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart),f2vz(0:myend-mystart))
+#else
+          used_acc_eom=accelerator_eom3_stage(mystart,myend,npjet,jetxx, &
+           jetyy,jetzz,y1st,jetvx,jetvy,jetvz,jetvl,coulforce,jetms,jetch, &
+           jetfr,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,linserted,liniperturb, &
+           lairdrag,lflorentz,luppot,nfieldtype,pfreq,consistency,findex, &
+           yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
+           collector_curvature=.true.)
+#endif
           call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
            jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
            maxstressposx)
@@ -4665,6 +4691,20 @@ contains
 #endif
     lfirstsub=.false.
   endif
+#ifdef _OPENACC
+! A jet that reaches the 100-bead gate (evaporative_dynamic_accelerator_
+! eligible) after its workspace was allocated maps it when the device path
+! engages (2026-10-06); until then the path engaged only at the first step.
+  if((persistent_acc .or. accelerator_is_topology_enabled()) .and. &
+   systype/=1 .and. .not.workspace_device_mapped)then
+!$acc enter data create(yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
+!$acc& f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
+!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+!$acc& f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
+!$acc& f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev)
+    workspace_device_mapped=.true.
+  endif
+#endif
 ! select the proper system type
   select case(systype)
     case(1)
@@ -5020,12 +5060,6 @@ contains
       if(timesub==0.d0 .and. .not.used_acc_maxwell)write(*,'(a,8(1pe14.6,1x))')'Stage-2 CPU bead50=', &
        f2xx(50),f2yy(50),f2zz(50),f2st(50),f2vx(50),f2vy(50),f2vz(50),f2ev(50)
 #endif
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_MAXWELL_EVAP)
-      if(.not.used_acc_maxwell)call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
-       jetfr,f2ev,f2st,yxx,yyy,yzz,yvx,yvy,yvz,yst,jetvl,yev, &
-       evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev, &
-       consistency,findex,yieldstress)
-#endif
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -5035,29 +5069,38 @@ contains
       yvy(:)=0.d0
       yvz(:)=0.d0
       yev(:)=0.d0
+! The stage updates run on the device only on the device path
+! (used_acc_maxwell); a jet below its 100-bead gate stays on the host, as in
+! the CPU build.  Until 2026-10-06 that host path also recomputed the Maxwell
+! evaporative stress and the stage updates on the device, copying the
+! arrays at every call.
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
-      call accelerator_maxwell_rk4_stage_update(mystart,myend,h,2,jetxx,jetyy,jetzz,jetst, &
-       jetvx,jetvy,jetvz,jetve,jetvl,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
-       yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
-      if(.not.device_rk4_chain)then
+      if(used_acc_maxwell)then
+        call accelerator_maxwell_rk4_stage_update(mystart,myend,h,2,jetxx,jetyy,jetzz,jetst, &
+         jetvx,jetvy,jetvz,jetve,jetvl,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+         yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+        if(.not.device_rk4_chain)then
 !$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet)) if_present
-      endif
-#else
-      do ipoint=mystart,myend
-        yxx(ipoint) = jetxx(ipoint) + 0.5d0*h*f2xx(j)
-        yyy(ipoint) = jetyy(ipoint) + 0.5d0*h*f2yy(j)
-        yzz(ipoint) = jetzz(ipoint) + 0.5d0*h*f2zz(j)
-        yst(ipoint) = jetst(ipoint) + 0.5d0*h*f2st(j)
-        yvx(ipoint) = jetvx(ipoint) + 0.5d0*h*f2vx(j)
-        yvy(ipoint) = jetvy(ipoint) + 0.5d0*h*f2vy(j)
-        yvz(ipoint) = jetvz(ipoint) + 0.5d0*h*f2vz(j)
-        yev(ipoint) = jetve(ipoint) + 0.5d0*h*f2ev(j)
-        if((yev(ipoint)/jetvl(ipoint))<evlim)then
-          yev(ipoint)=jetvl(ipoint)*evlim
         endif
-        j=j+1
-      enddo
+      else
+#endif
+        do ipoint=mystart,myend
+          yxx(ipoint) = jetxx(ipoint) + 0.5d0*h*f2xx(j)
+          yyy(ipoint) = jetyy(ipoint) + 0.5d0*h*f2yy(j)
+          yzz(ipoint) = jetzz(ipoint) + 0.5d0*h*f2zz(j)
+          yst(ipoint) = jetst(ipoint) + 0.5d0*h*f2st(j)
+          yvx(ipoint) = jetvx(ipoint) + 0.5d0*h*f2vx(j)
+          yvy(ipoint) = jetvy(ipoint) + 0.5d0*h*f2vy(j)
+          yvz(ipoint) = jetvz(ipoint) + 0.5d0*h*f2vz(j)
+          yev(ipoint) = jetve(ipoint) + 0.5d0*h*f2ev(j)
+          if((yev(ipoint)/jetvl(ipoint))<evlim)then
+            yev(ipoint)=jetvl(ipoint)*evlim
+          endif
+          j=j+1
+        enddo
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+      endif
 #endif
       call restore_charge()
       if(.not.device_rk4_chain)then
@@ -5158,12 +5201,6 @@ contains
       if(timesub==0.d0)write(*,'(a,8(1pe14.6,1x))')'TRACE S3 CPU=',f3xx(50),f3yy(50),f3zz(50),f3st(50),f3vx(50),f3vy(50),f3vz(50),f3ev(50)
 #endif
       endif
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_MAXWELL_EVAP)
-      if(.not.used_acc_maxwell)call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
-       jetfr,f3ev,f3st,yxx,yyy,yzz,yvx,yvy,yvz,yst,jetvl,yev, &
-       evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev, &
-       consistency,findex,yieldstress)
-#endif
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -5174,28 +5211,32 @@ contains
       yvz(:)=0.d0
       yev(:)=0.d0
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
-      call accelerator_maxwell_rk4_stage_update(mystart,myend,h,3,jetxx,jetyy,jetzz,jetst, &
-       jetvx,jetvy,jetvz,jetve,jetvl,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
-       yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
-      if(.not.device_rk4_chain)then
+      if(used_acc_maxwell)then
+        call accelerator_maxwell_rk4_stage_update(mystart,myend,h,3,jetxx,jetyy,jetzz,jetst, &
+         jetvx,jetvy,jetvz,jetve,jetvl,f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
+         yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+        if(.not.device_rk4_chain)then
 !$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet)) if_present
-      endif
-#else
-      do ipoint=mystart,myend
-        yxx(ipoint) = jetxx(ipoint) + h*f3xx(j)
-        yyy(ipoint) = jetyy(ipoint) + h*f3yy(j)
-        yzz(ipoint) = jetzz(ipoint) + h*f3zz(j)
-        yst(ipoint) = jetst(ipoint) + h*f3st(j)
-        yvx(ipoint) = jetvx(ipoint) + h*f3vx(j)
-        yvy(ipoint) = jetvy(ipoint) + h*f3vy(j)
-        yvz(ipoint) = jetvz(ipoint) + h*f3vz(j)
-        yev(ipoint) = jetve(ipoint) + h*f3ev(j)
-        if((yev(ipoint)/jetvl(ipoint))<evlim)then
-          yev(ipoint)=jetvl(ipoint)*evlim
         endif
-        j=j+1
-      enddo
+      else
+#endif
+        do ipoint=mystart,myend
+          yxx(ipoint) = jetxx(ipoint) + h*f3xx(j)
+          yyy(ipoint) = jetyy(ipoint) + h*f3yy(j)
+          yzz(ipoint) = jetzz(ipoint) + h*f3zz(j)
+          yst(ipoint) = jetst(ipoint) + h*f3st(j)
+          yvx(ipoint) = jetvx(ipoint) + h*f3vx(j)
+          yvy(ipoint) = jetvy(ipoint) + h*f3vy(j)
+          yvz(ipoint) = jetvz(ipoint) + h*f3vz(j)
+          yev(ipoint) = jetve(ipoint) + h*f3ev(j)
+          if((yev(ipoint)/jetvl(ipoint))<evlim)then
+            yev(ipoint)=jetvl(ipoint)*evlim
+          endif
+          j=j+1
+        enddo
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+      endif
 #endif
       call restore_charge()
       if(.not.device_rk4_chain)then
@@ -5320,12 +5361,6 @@ contains
          j=j+1
       enddo
       endif
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_MAXWELL_EVAP)
-      if(.not.used_acc_maxwell)call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet,linserting,linserted, &
-       jetfr,f4ev,f4st,yxx,yyy,yzz,yvx,yvy,yvz,yst,jetvl,yev, &
-       evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev, &
-       consistency,findex,yieldstress)
-#endif
       j=0
       yxx(:)=0.d0
       yyy(:)=0.d0
@@ -5336,37 +5371,41 @@ contains
       yvz(:)=0.d0
       yev(:)=0.d0
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
-      call accelerator_maxwell_rk4_final_update(mystart,myend,h,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
-       f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
-       f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev, &
-       yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
-      if(.not.device_rk4_chain)then
+      if(used_acc_maxwell)then
+        call accelerator_maxwell_rk4_final_update(mystart,myend,h,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
+         f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
+         f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev, &
+         yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+        if(.not.device_rk4_chain)then
 !$acc update self(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yst(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yev(0:npjet)) if_present
-      endif
-#else
-      do ipoint=mystart,myend
-        yxx(ipoint) = jetxx(ipoint) + (h/6.d0)*(f1xx(j)+ &
-         2.d0*(f2xx(j)+f3xx(j))+f4xx(j))
-        yyy(ipoint) = jetyy(ipoint) + (h/6.d0)*(f1yy(j)+ &
-         2.d0*(f2yy(j)+f3yy(j))+f4yy(j))
-        yzz(ipoint) = jetzz(ipoint) + (h/6.d0)*(f1zz(j)+ &
-         2.d0*(f2zz(j)+f3zz(j))+f4zz(j))
-        yst(ipoint) = jetst(ipoint) + (h/6.d0)*(f1st(j)+ &
-         2.d0*(f2st(j)+f3st(j))+f4st(j))
-        yvx(ipoint) = jetvx(ipoint) + (h/6.d0)*(f1vx(j)+ &
-         2.d0*(f2vx(j)+f3vx(j))+f4vx(j))
-        yvy(ipoint) = jetvy(ipoint) + (h/6.d0)*(f1vy(j)+ &
-         2.d0*(f2vy(j)+f3vy(j))+f4vy(j))
-        yvz(ipoint) = jetvz(ipoint) + (h/6.d0)*(f1vz(j)+ &
-         2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
-        yev(ipoint) = jetve(ipoint) + (h/6.d0)*(f1ev(j)+ &
-         2.d0*(f2ev(j)+f3ev(j))+f4ev(j))
-        if((yev(ipoint)/jetvl(ipoint))<evlim)then
-          yev(ipoint)=jetvl(ipoint)*evlim
         endif
-        j=j+1
-      enddo
+      else
+#endif
+        do ipoint=mystart,myend
+          yxx(ipoint) = jetxx(ipoint) + (h/6.d0)*(f1xx(j)+ &
+           2.d0*(f2xx(j)+f3xx(j))+f4xx(j))
+          yyy(ipoint) = jetyy(ipoint) + (h/6.d0)*(f1yy(j)+ &
+           2.d0*(f2yy(j)+f3yy(j))+f4yy(j))
+          yzz(ipoint) = jetzz(ipoint) + (h/6.d0)*(f1zz(j)+ &
+           2.d0*(f2zz(j)+f3zz(j))+f4zz(j))
+          yst(ipoint) = jetst(ipoint) + (h/6.d0)*(f1st(j)+ &
+           2.d0*(f2st(j)+f3st(j))+f4st(j))
+          yvx(ipoint) = jetvx(ipoint) + (h/6.d0)*(f1vx(j)+ &
+           2.d0*(f2vx(j)+f3vx(j))+f4vx(j))
+          yvy(ipoint) = jetvy(ipoint) + (h/6.d0)*(f1vy(j)+ &
+           2.d0*(f2vy(j)+f3vy(j))+f4vy(j))
+          yvz(ipoint) = jetvz(ipoint) + (h/6.d0)*(f1vz(j)+ &
+           2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
+          yev(ipoint) = jetve(ipoint) + (h/6.d0)*(f1ev(j)+ &
+           2.d0*(f2ev(j)+f3ev(j))+f4ev(j))
+          if((yev(ipoint)/jetvl(ipoint))<evlim)then
+            yev(ipoint)=jetvl(ipoint)*evlim
+          endif
+          j=j+1
+        enddo
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_MAXWELL_STATE_UPDATE)
+      endif
 #endif
       call restore_charge()
       if(device_rk4_chain)then
@@ -5867,52 +5906,61 @@ contains
 !$acc& d3vz(0:myend-mystart),d3ev(0:myend-mystart))
 #endif
 
-        call accelerator_platen_evap_velocity(mystart,myend,mxnpjet, &
-         gaussianhistorysteps,k,h,airdragamp(1),noisediff,jetms,jetvl, &
-         jetve,gaussianhistory,jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx, &
-         f2vy,f2vz,d3vx,d3vy,d3vz, &
-         gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
-         linserted,jetfr)
-
-#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
-        call maxwell_evap_device_stage(timesub+h,k,y1xx,y1yy,y1zz,y1st, &
-         jetvx,jetvy,jetvz,y1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
-         f2ev,.true.)
-!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
-!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
-!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart), &
-!$acc& f2vz(0:myend-mystart),f2ev(0:myend-mystart))
-#else
-        call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet, &
-         linserting,linserted,jetfr,f2ev,f2st,y1xx,y1yy,y1zz,jetvx,jetvy, &
-         jetvz,y1st,jetvl,y1ev,evairv,evmasscoeff,sqrevsc,evcsvapour, &
-         evumidity,cp0,Bev,mev,tev,consistency,findex,yieldstress)
-#endif
-        call accelerator_platen_evap_positions(mystart,myend,npjet,h,pfreq, &
-         liniperturb,evlim,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetvl,jetve, &
-         f1xx,f1yy,f1zz,f1ev,f2ev,linserted,jetfr)
-
-#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
-        call maxwell_evap_device_stage(timesub+h,k,jetxx,jetyy,jetzz,y1st, &
-         jetvx,jetvy,jetvz,jetve,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
-         f2ev,.true.)
-!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
-!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
-!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart), &
-!$acc& f2vz(0:myend-mystart),f2ev(0:myend-mystart))
-#else
-        call accelerator_maxwell_stress_3d(mystart,myend,npjet,linserted, &
-         jetfr,f2st,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,y1st,jetvl,jetve, &
-         cp0,Bev,mev,tev,consistency,findex,yieldstress)
-#endif
+! A fused step updates velocities, evaporation rates and positions in one
+! kernel, and its end-of-step kernel evaluates the Maxwell stress at the new
+! state (2026-10-06).
         if(fusedstep)then
+          call accelerator_platen_update(mystart,myend,h,npjet,mxnpjet, &
+           linserted,.true.,airdragamp(1),noisediff,pfreq,liniperturb,evlim, &
+           gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
+           gaussianhistory,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetms,jetvl, &
+           jetve,jetfr,f1xx,f1yy,f1zz,f1vx,f1vy,f1vz,f1ev,f2vx,f2vy,f2vz, &
+           d3vx,d3vy,d3vz,y1xx,y1yy,y1zz,y1ev,evairv,evmasscoeff,sqrevsc, &
+           evcsvapour,evumidity)
           call accelerator_platen_end_step(mystart,myend,h,npjet, &
            mxnpjet,inpjet,linserted,lremove,collector_h,resolution, &
            dresolution,thresolution,ivelocity,istress,imassa,icharge, &
            ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch, &
-           jetvl,jetfr,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
-           maxstressposx)
+           jetvl,jetve,jetfr,f1st,y1st,.true.,consistency,findex, &
+           yieldstress,cp0,Bev,mev,tev,counterlpath,ncounterlpath, &
+           maxstress,maxstressposx)
         else
+          call accelerator_platen_evap_velocity(mystart,myend,mxnpjet, &
+           gaussianhistorysteps,k,h,airdragamp(1),noisediff,jetms,jetvl, &
+           jetve,gaussianhistory,jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx, &
+           f2vy,f2vz,d3vx,d3vy,d3vz, &
+           gaussianhistorybase,gaussianhistorywindow,gaussianhistoryvalues, &
+           linserted,jetfr)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+          call maxwell_evap_device_stage(timesub+h,k,y1xx,y1yy,y1zz,y1st, &
+           jetvx,jetvy,jetvz,y1ev,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+           f2ev,.true.)
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart), &
+!$acc& f2vz(0:myend-mystart),f2ev(0:myend-mystart))
+#else
+          call accelerator_maxwell_evap_stress_3d(mystart,myend,npjet, &
+           linserting,linserted,jetfr,f2ev,f2st,y1xx,y1yy,y1zz,jetvx,jetvy, &
+           jetvz,y1st,jetvl,y1ev,evairv,evmasscoeff,sqrevsc,evcsvapour, &
+           evumidity,cp0,Bev,mev,tev,consistency,findex,yieldstress)
+#endif
+          call accelerator_platen_evap_positions(mystart,myend,npjet,h, &
+           pfreq,liniperturb,evlim,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz, &
+           jetvl,jetve,f1xx,f1yy,f1zz,f1ev,f2ev,linserted,jetfr)
+#ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
+          call maxwell_evap_device_stage(timesub+h,k,jetxx,jetyy,jetzz,y1st, &
+           jetvx,jetvy,jetvz,jetve,f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
+           f2ev,.true.)
+!$acc update device(f2xx(0:myend-mystart),f2yy(0:myend-mystart), &
+!$acc& f2zz(0:myend-mystart),f2st(0:myend-mystart), &
+!$acc& f2vx(0:myend-mystart),f2vy(0:myend-mystart), &
+!$acc& f2vz(0:myend-mystart),f2ev(0:myend-mystart))
+#else
+          call accelerator_maxwell_stress_3d(mystart,myend,npjet,linserted, &
+           jetfr,f2st,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,y1st,jetvl,jetve, &
+           cp0,Bev,mev,tev,consistency,findex,yieldstress)
+#endif
           call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
            jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
            maxstressposx)

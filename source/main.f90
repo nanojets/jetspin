@@ -82,7 +82,7 @@
                        topology_remove_total,nremtrack,naddtrack,reallocate_total, &
                        h,mxnpjet, &
                        resolution,dresolution,thresolution,ivelocity,istress, &
-                       imassa,icharge,ivolume,timedeposition
+                       imassa,icharge,ivolume,timedeposition,insvx,insvy,insvz
   use breaking_mod,   only : ckeck_breakup
   use dynamic_refinement_mod, only : refinementthreshold, &
                                set_refinement_threshold, &
@@ -106,6 +106,7 @@
                        iprintxyzsing,open_datrem_file, &
                        write_datrem_frame,close_datrem_file, &
                        write_restart_file,read_restart_file, &
+                       apply_restart_random_state, &
                        write_pdb_singlefile,lprintpdbsing, &
                        iprintpdbsing,timcls,timjob,nrestartdump
   
@@ -119,7 +120,7 @@
   double precision :: loop_start_time,loop_end_time,loop_elapsed_time
   
   logical :: ladd,lresize,lrem,lremdat,ldorefinment,lrecycle
-  logical :: ldevicetopology
+  logical :: ldevicetopology,lwasinserted
   logical :: lfullhostoutput
   logical :: ltopologysnapshot
   character(len=32) :: topology_snapshot_env
@@ -221,6 +222,9 @@
 ! Pre-generate fixed stochastic benchmark noise before loop timing. CPU and
 ! GPU executions use the same step/bead/component-indexed history.
   call prepare_integrator_random_history(tstep)
+! A restarted run resumes the pool and the generator where save.dat left
+! them (both were just regenerated from the seed of input.dat).
+  call apply_restart_random_state()
   call profiling_initialize()
   call profiling_reset()
   call get_sync_world()
@@ -268,10 +272,19 @@
       timedeposition=timedeposition+tstep
 ! Insertion and the removal test run on the device and report back in one
 ! transfer; the removal itself is completed below, where it always was.
+      lwasinserted=linserted
       call accelerator_topology_check(npjet,mxnpjet,inpjet,linserted, &
        lremove,h,resolution,dresolution,thresolution,ivelocity,istress, &
        imassa,icharge,ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
        jetms,jetch,jetvl,jetfr,ladd,lresize,lrem)
+! A bead released at the nozzle starts with the nozzle velocity on the
+! device path (no ldragvel there); keep the vn statistics as add_jetbead
+! does (until 2026-10-06 vn stayed at its last host value).
+      if(linserted .and. .not.lwasinserted)then
+        insvx=ivelocity
+        insvy=0.d0
+        insvz=0.d0
+      endif
       if(ladd .and. levaporation) &
        call accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
       if(ladd)call tag_accelerator_added_bead()

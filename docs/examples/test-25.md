@@ -119,8 +119,8 @@ The noise realization hardly matters: four more CPU seeds (318 – 321) give
 mean active counts between 267.8 and 268.4, a path length of 111.8 cm, and an
 off-axis distance of 2.78 cm over the same window.
 
-One NVIDIA A30 runs the same 5 million steps in about 690 s, against
-5893 s for the CPU build (see [where the time goes](#where-the-a30-run-spends-its-time)).
+One NVIDIA A30 runs the same 5 million steps in about 660 s (690 s with the
+build of 2026-10-05), against 5893 s for the CPU build (see [where the time goes](#where-the-a30-run-spends-its-time)).
 It reads the same Gaussian pool and reproduces the CPU run byte for byte up
 to step 1,446,413, where it engages the persistent path; afterwards it stays
 on the CPU trajectory, and with seed 317 the active bead count first differs
@@ -141,7 +141,16 @@ distance and a 27° cone:
 evaporation and the stiffening it causes make the bending loops smaller, as
 reported by Yarin et al.
 
-A full-length reference does not yet exist.
+Full-length reference (2026-10-06): one A30 ran the 100 million steps of the
+distributed input (seed 317, with `print time 1.d-4` and the `cpue cpu`
+columns) in 15,192 s with the build of 2026-10-05, whose output is
+byte-identical to the current build's over the first 5 million steps; the run
+closed correctly, with 4,398 insertions, 31,618 removals, 495 accepted
+refinement events, and no reallocation. From 10 to 100 million steps:
+collector velocity 2534 cm/s, off-axis distance 2.78 cm, 19.7°, 268 active
+beads (241 – 297), path length 111.9 cm, and fibre radius 2.77 µm; every
+10-million-step block agrees within 0.3 beads, and the window between 4 and
+5 million steps above is already stationary.
 
 ## Where the A30 run spends its time
 
@@ -183,7 +192,8 @@ phase 1 and one unbound full run:
 
 | Build | Phase 1 | Phase 2 | Time-integration loop |
 | --- | ---: | ---: | ---: |
-| A30, current | 155 s, 154 s (107 µs/step) | 530 s, 544 s (151 µs/step) | 685 s, 699 s |
+| A30, current (2026-10-06, two-kernel tail) | 154 s (106 µs/step) | 500 s (141 µs/step) | 653 s |
+| A30, 2026-10-05 (fused small kernels) | 155 s, 154 s, 154 s (107 µs/step) | 530 s, 544 s, 536 s (151 µs/step) | 685 s, 699 s, 691 s |
 | A30, one queue, kernels not fused | 154 s, 155 s (107 µs/step) | 612 s, 613 s (172 µs/step) | 766 s, 768 s |
 | A30, synchronous phase 2 | 156 s (108 µs/step) | 1418 s (399 µs/step) | 1574 s |
 | A30, 2026-10-01 | 429 s, 430 s (298 µs/step) | 1410 s, 1425 s (399 µs/step) | 1840 s, 1856 s |
@@ -203,15 +213,19 @@ downloads per step, and in the refinement scan: the 2026-10-01 build saves
 Median time per step over the 20,000-step print intervals, by active-bead
 count:
 
-| Active beads | CPU | A30, current | A30, kernels not fused | A30, synchronous phase 2 | A30, 2026-10-01 | A30, before 2026-10-01 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 – 30 | 31 µs | 30 µs | 30 µs | 30 µs | 247 µs | 249 µs |
-| 30 – 60 | 91 µs | 91 µs | 91 µs | 92 µs | 293 µs | 294 µs |
-| 60 – 100 | 258 µs | 256 µs | 256 µs | 258 µs | 388 µs | 389 µs |
-| 100 – 150 | 502 µs | 137 µs | 161 µs | 398 µs | 401 µs | 459 µs |
-| 150 – 200 | 787 µs | 139 µs | 163 µs | 396 µs | 401 µs | 455 µs |
-| 200 – 250 | 1513 µs | 149 µs | 172 µs | 400 µs | 399 µs | 448 µs |
-| 250 – 300 | 1833 µs | 154 µs | 175 µs | 403 µs | 402 µs | 447 µs |
+| Active beads | CPU | A30, current | A30, 2026-10-05 | A30, kernels not fused | A30, synchronous phase 2 | A30, 2026-10-01 | A30, before 2026-10-01 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 – 30 | 31 µs | 30 µs | 30 µs | 30 µs | 30 µs | 247 µs | 249 µs |
+| 30 – 60 | 91 µs | 91 µs | 91 µs | 91 µs | 92 µs | 293 µs | 294 µs |
+| 60 – 100 | 258 µs | 256 µs | 257 µs | 256 µs | 258 µs | 388 µs | 389 µs |
+| 100 – 150 | 502 µs | 121 µs | 137 µs | 161 µs | 398 µs | 401 µs | 459 µs |
+| 150 – 200 | 787 µs | 127 µs | 138 µs | 163 µs | 396 µs | 401 µs | 455 µs |
+| 200 – 250 | 1513 µs | 138 µs | 150 µs | 172 µs | 400 µs | 399 µs | 448 µs |
+| 250 – 300 | 1833 µs | 145 µs | 154 µs | 175 µs | 403 µs | 402 µs | 447 µs |
+
+The two columns of 2026-10-06 and 2026-10-05 are runs on the same NUMA node,
+one after the other; both give the same output, byte for byte, over the
+5 million steps.
 
 ### Phase 1: the Coulomb sum on the host
 
@@ -297,10 +311,26 @@ A step now launches 15 – 18 kernels, 16.4 on average in an Nsight Systems
 window at about 237 beads, with one stream synchronization and the 20-byte
 download; the kernels take 125 µs. The step takes 137 – 154 µs from 120 to
 300 beads, and the 5-million-step run is again byte-identical, printed
-observables included. The four per-bead updates that remain separate
-(velocity, the final evaporative stress, positions, Maxwell stress) could
-join the single-gang kernel too, but NVHPC 24.3 did not compile that kernel
-correctly (see `docs/STATE.md`).
+observables included.
+
+Since 2026-10-06 the four per-bead updates after the last force evaluation
+take two kernels instead of four. The velocity, the evaporation rate at the
+predicted positions, and the positions and evaporated volume need only each
+bead's own new velocity and the predicted state, so one kernel,
+`accelerator_platen_update`, does all three; the Maxwell stress at the new
+state reads the neighbours' new positions and moves into the stress loop of
+the end-of-step kernel. Folding all four updates into the end-of-step kernel
+failed with NVHPC 24.3 and 25.5 alike: with one array descriptor per argument
+the compiler rejects a kernel of that size, and arrays passed on to the
+device routines it calls make it copy descriptor temporaries on the
+asynchronous queue after the routine has returned (see `docs/STATE.md`). The
+update kernel takes explicit-shape arrays and calls no device routine. On the
+same NUMA node, phase 2 of the 5 million steps takes 141 µs per step instead
+of 151, byte-identical, and a step launches 12 – 15 kernels. Nsight
+Systems at about 265 beads counts 12.1 launches per step (the preparation
+kernels run only while the nozzle bead is blocked), one stream
+synchronization, and the 20-byte download; the kernels take 118 µs, the
+update kernel 7 µs where the four update kernels took about 24 µs.
 
 ### Process placement
 

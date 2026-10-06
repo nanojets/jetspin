@@ -101,8 +101,17 @@ development build; its longest run (6,000,000 steps, about 570 active beads at
 the end) predates the device-side charge smoothing and placement of the
 inserting bead (2026-10-01) and halved `lp`, and is not a reference.
 
-A full-length reference does not yet exist; at the current A30 speed it takes
-about 4 hours (see below).
+Full-length reference (2026-10-06): one A30 ran the 100 million steps of the
+distributed input (seed 317, with `print time 1.d-4` and the `cpue cpu`
+columns) in 14,906 s with the build of 2026-10-05, whose output is
+byte-identical to the current build's over the first 5 million steps; the run
+closed correctly, with 4,363 insertions, 44,590 removals, 496 accepted
+refinement events, and one reallocation. From 10 to 100 million steps the
+regime is stationary: collector velocity 1960 cm/s, `yz` 3.83 cm, 26.9°,
+517 active beads (474 – 560), path length 213.8 cm, and `rc` 3.16 µm, and
+every 10-million-step block agrees within 0.3 beads and 0.2 cm. The window
+between 4 and 5 million steps above is about 1 % lower (511 beads, 211.4 cm):
+the jet is still settling there.
 
 ## Where the A30 run spends its time
 
@@ -112,27 +121,31 @@ until step 1,379,104 (up to 95 active beads) the CPU integrates the whole
 step, Coulomb sums included; from step 1,379,105, where an accepted refinement
 event takes the jet to 121 beads, the step runs on the
 device-resident state, on one asynchronous queue with the fused small
-kernels, and an ordinary step returns one 20-byte topology record. The
-non-evaporative step computes its stress derivative at the new state with a
-fourth EOM stage instead of the evaporative stress kernel.
+kernels, and an ordinary step returns one 20-byte topology record. Since
+2026-10-06 the non-evaporative step evaluates its stress derivative at the
+new state inside the end-of-step kernel (a fourth EOM stage computed all the
+derivatives for it before), and its velocity and position updates share the
+update kernel of Test 25.
 
-Seed 317, process bound to the GPU's NUMA node: the loop takes 621 s, 114 s
-in phase 1 (83 µs/step) and 507 s in phase 2 (140 µs/step); seed 318 takes
-616 s. The standard GPU build of the same morning, which kept this case on the
-host with only the Coulomb sums on the GPU, took 4546 s. Median time per step
-over the 20,000-step print intervals:
+Seed 317, process bound to the GPU's NUMA node: the loop takes 588 s, 110 s
+in phase 1 (80 µs/step) and 478 s in phase 2 (132 µs/step), with the build of
+2026-10-06; the build of 2026-10-05 takes 621 s on the same node (512 s,
+141 µs/step, in phase 2) and gives the same output byte for byte. The standard
+GPU build of 2026-10-05 morning, which kept this case on the host with only
+the Coulomb sums on the GPU, took 4546 s. Median time per step over the
+20,000-step print intervals:
 
-| Active beads | CPU | A30, current | A30, before 2026-10-05 |
-| --- | ---: | ---: | ---: |
-| 1 – 30 | 19 µs | 21 µs | 27 µs |
-| 30 – 60 | 59 µs | 65 µs | 74 µs |
-| 60 – 100 | 148 µs | 159 µs | 245 µs |
-| 100 – 150 | 405 µs | 113 µs | 444 µs |
-| 150 – 200 | 689 µs | 116 µs | 602 µs |
-| 200 – 300 | 1156 µs | 123 µs | 737 µs |
-| 300 – 400 | 2515 µs | 132 µs | 1049 µs |
-| 400 – 500 | 4086 µs | 145 µs | 1373 µs |
-| 500 – 600 | 5037 µs | 152 µs | 1467 µs |
+| Active beads | CPU | A30, current | A30, 2026-10-05 | A30, before 2026-10-05 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 – 30 | 19 µs | 20 µs | 20 µs | 27 µs |
+| 30 – 60 | 59 µs | 61 µs | 61 µs | 74 µs |
+| 60 – 100 | 148 µs | 153 µs | 153 µs | 245 µs |
+| 100 – 150 | 405 µs | 105 µs | 114 µs | 444 µs |
+| 150 – 200 | 689 µs | 105 µs | 115 µs | 602 µs |
+| 200 – 300 | 1156 µs | 115 µs | 124 µs | 737 µs |
+| 300 – 400 | 2515 µs | 124 µs | 134 µs | 1049 µs |
+| 400 – 500 | 4086 µs | 138 µs | 147 µs | 1373 µs |
+| 500 – 600 | 5037 µs | 145 µs | 154 µs | 1467 µs |
 
 Four changes of 2026-10-05 produce the difference: the persistent path
 itself (until then a development build), the asynchronous queue with the
@@ -140,11 +153,16 @@ fused kernels shared with Test 25, the non-evaporative Coulomb kernel, which
 now gives each target bead one gang and reduces over the sources across its
 vector lanes, and the removal of the nine array-descriptor uploads that kernel
 made, with a wait, at every call. Over the first 2.1 million steps phase 2
-averaged 575, 347, 175, and 119 µs per step after each change in turn. With
-about 500 beads the A30 step costs about 150 µs against 4 – 5 ms on the
-CPU. Nsight Systems at about 540 beads counts per step 15 kernel launches, one
-stream synchronization, the 20-byte download, and no upload; the kernels take
-122 µs, half of it in the three Coulomb sums.
+averaged 575, 347, 175, and 119 µs per step after each change in turn. On
+2026-10-06 the stress derivative at the new state moved into the end-of-step
+kernel, replacing a fourth EOM stage, and the velocity and position updates
+joined in one kernel: on one NUMA node, phase 2 of the first 2.1 million
+steps went from 117.5 to 109.5 µs per step with the first change, and phase 2
+of the 5 million steps from 141 to 132 µs with both. With about 500
+beads the A30 step costs about 145 µs against 4 – 5 ms on the CPU. Nsight
+Systems at about 540 beads counts per step 13.2 kernel launches (15 before
+2026-10-06), one stream synchronization, the 20-byte download, and no upload;
+the kernels take 114 µs (122 before), half of it in the three Coulomb sums.
 
 ## Use
 

@@ -81,6 +81,7 @@ module utility_mod
  public :: gaussian_history_value
  public :: mark_gaussianhistory_device_mapped
  public :: begin_gaussian_history_step
+ public :: gaussian_history_cursor,set_gaussian_history_cursor
  public :: modulvec
  public :: dot
  public :: cross
@@ -434,6 +435,22 @@ module utility_mod
    gaussianhistoryvalues)
 
  end subroutine begin_gaussian_history_step
+
+ integer function gaussian_history_cursor()
+! Position of the next timestep's slice in the pool, saved in the restart
+! file (save.dat) so that a restarted run reads the same noise.
+  implicit none
+  gaussian_history_cursor=gaussianhistorycursor
+ end function gaussian_history_cursor
+
+ subroutine set_gaussian_history_cursor(cursor)
+! Resume the pool where a restart file left it.  Call after
+! prepare_gaussian_history, which rewinds the cursor.
+  implicit none
+  integer, intent(in) :: cursor
+  if(gaussianhistoryvalues<=0)return
+  gaussianhistorycursor=modulo(cursor,gaussianhistoryvalues)
+ end subroutine set_gaussian_history_cursor
 
  subroutine mark_gaussianhistory_device_mapped(mapped)
   implicit none

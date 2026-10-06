@@ -55,15 +55,18 @@ and 295, the path length 112 cm, and the fibre radius at the collector
 the nozzle with a local half-angle growing from about 8 to 12 degrees.  Four
 more CPU seeds give mean active counts between 267.8 and 268.4 and the same
 path length, so the stationary regime does not depend on the noise
-realization.  One NVIDIA A30 runs the same 5 million steps in about 690 s
+realization.  One NVIDIA A30 runs the same 5 million steps in about 660 s
 against 5893 s for the CPU build; it reads the same Gaussian pool, stays on the CPU
 trajectory until about 3 million steps, and gives the same stationary
 values.
 Compared with an NVFORTRAN CPU run of Test Case 24 over the same interval
 (3.8 cm, 27 degrees),
 evaporation and the stiffening it causes make the bending loops smaller, as
-reported in Ref.~\cite{yarin2001bending}.  A full-length reference does not
-yet exist.
+reported in Ref.~\cite{yarin2001bending}.  On one A30 the full 100 million
+steps take about four hours: from 10 to 100 million steps the jet keeps 268
+active beads on average (241 to 297), a path length of 112 cm, an off-axis
+distance of 2.8 cm and a cone angle of 19.7 degrees, the values of the window
+between 4 and 5 million steps.
 
 The A30 run has two phases.  Until the jet holds 100 beads (step 1,446,413
 with seed 317, right after an accepted refinement event) the whole step runs
@@ -75,8 +78,8 @@ process bound to the NUMA node of its GPU, the first phase takes 156 s, the
 time of the CPU build; until 2026-10-05 the three Coulomb sums of each step
 were offloaded, each call copying 13 arrays to the device and 2 back, and the
 phase took 430 s, 79\% of it in those calls.  The second phase takes about
-540 s, about 150~$\mu$s per step from 120 to 300 beads against 0.5 to 1.8 ms
-for the CPU build: its kernels, 15 to 18 per step after fusing the small
+500 s, 120 to 145~$\mu$s per step from 120 to 300 beads against 0.5 to 1.8 ms
+for the CPU build: its kernels, 12 to 15 per step after fusing the small
 ones, run on one asynchronous queue and the host waits once per step, for
 the topology record.  With a synchronization after
 every kernel, as until 2026-10-05, the phase took 1418 s and the device was

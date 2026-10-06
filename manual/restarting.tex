@@ -45,9 +45,17 @@ just such an emergency. We stress that the procedure is not foolproof
 in the last event, since the job could be crash while the \texttt{save.dat}
 file is being written.
 
-The restart file stores the physical state and the accumulated statistics,
-but not the state of the random-number generator. A restarted stochastic
-simulation (noise, air drag with the Platen integrator, or nozzle
-perturbations) therefore continues from the saved configuration with a
-statistically equivalent, but not identical, random sequence; bit-for-bit
-reproduction of an uninterrupted run is not guaranteed.
+Since 2026-10-06 the restart file stores the bead state in double precision,
+followed by the state of the run that the beads do not carry: the position in
+the pre-generated Gaussian pool (Sec.~\ref{sec:Noise-pool}), the state of the
+random-number generator, and the counters of the dynamic refinement and of the
+anchor tagging. With the same \texttt{input.dat} and the same executable, a
+restarted simulation therefore continues the uninterrupted one exactly, with
+or without evaporation; the script \texttt{tests/restart/run.sh} checks this
+for Tests 24 and 25. The statistics accumulated since the last print are not
+restored, so that every printed row is reproduced when the restart interval
+is a multiple of the print interval; the directive ``\textit{restart reset}''
+has no further effect. Restart files written before that date are still
+read, in single precision and without the state of the run, so that the
+random sequence restarts from the beginning; a simulation with evaporation
+could not be restarted before.

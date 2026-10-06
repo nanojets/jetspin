@@ -115,10 +115,14 @@ removes the remap that capacity growth used to force.
 
 A step in the persistent branch runs entirely on the device: three charge
 smoothings, Coulomb sums, and EOM stages, the Platen predictor, velocity, and
-position updates, a fourth EOM stage for the stress derivative at the new
-state, and the stress statistics, with no per-step host transfer; since
-2026-10-05 the small kernels are fused as in the evaporative step. The host is
-reached only for topology events and output.
+position updates, the stress derivative at the new state, and the stress
+statistics, with no per-step host transfer; since 2026-10-05 the small
+kernels are fused as in the evaporative step. Since 2026-10-06 the velocity
+and position updates share one kernel (`accelerator_platen_update`, also used
+by the evaporative step), and the stress derivative at the new state is
+evaluated inside the end-of-step kernel: a fourth EOM stage computed all the
+derivatives for that one alone. The host is reached only for
+topology events and output.
 
 A single-bead run using `input-24` physics without evaporation engaged at step
 1,379,105 and passed four capacity-growth, reset, and re-engage cycles at
@@ -140,8 +144,22 @@ per-step gate keeps `dynamic_evaporative_platen_eligible` with its size
 thresholds: a single-bead Test 25 engages the persistent path when it first
 exceeds 100 beads (step 1,446,413, 120 beads, in the reference run). The
 decision does not depend on `JETSPIN_OPENACC_DISABLE_PERSISTENT`, so CPU,
-persistent and non-persistent runs read the same noise. `rk4sys_ev` has not
-been examined for the same defect.
+persistent and non-persistent runs read the same noise.
+
+The evaporative Euler, RK2 and RK4 integrators (`eulsys_ev`, `rk2sys_ev`,
+`rk4sys_ev`, system 3) do not share the defect: they draw no Gaussian pool,
+and their gate, `evaporative_dynamic_accelerator_eligible`, had no size
+threshold at all, so a jet grown from one bead ran on the device from the
+first step, at about 430 us per step with a few beads against 7 us on the
+host (checked on 2026-10-06). Since then the gate requires 100 beads, as the
+Platen gates, and stays open once it has opened, because these integrators
+test it at every step and `reallocate_jet` can lower `npjet`. Below the gate
+`rk4sys_ev` now runs the CPU build's code: until then its host path also
+recomputed the Maxwell evaporative stress and the stage updates on the
+device, copying the arrays at every call (600 us per step). A single-bead
+evaporative RK4 run is byte-identical to the CPU build up to the
+engagement. Tests 16-19 start with at least 100 beads and engage at the
+first step, as before.
 
 ## Persistent Coulomb mapping reset
 
@@ -601,11 +619,13 @@ insertions and 282 active beads against 88 and 276.
 
 ## Next porting stages
 
-1. For the dynamic evaporative Platen path: the four per-bead updates after
-   the last force evaluation (velocity, final evaporative stress, positions,
-   Maxwell stress) could join the single-gang end-of-step kernel, about
-   10 us per step; NVHPC 24.3 did not compile that kernel correctly
-   (`docs/STATE.md`). Beyond that the step time is in the Coulomb and force
+1. For the dynamic Platen paths the tail of the step is two kernels since
+   2026-10-06: the per-bead updates and the single-gang end of the step,
+   which also evaluates the final stress. Merging them would need the
+   device routines of the end of the step with explicit-shape arrays (NVHPC
+   24.3 and 25.5 both fail otherwise, `docs/STATE.md`), would save one
+   launch, and would make the updates grow with the bead count on one
+   multiprocessor. Beyond that the step time is in the Coulomb and force
    kernels themselves.
 2. Investigate packing the maximum stress and bead index into one deterministic
    reduction so that its two follow-up kernels can also be removed.

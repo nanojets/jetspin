@@ -56,5 +56,6 @@ need about 3~GiB on each side). Whether the period is adequate is a choice
 left to the user. The run log reports the pool once, as
 \texttt{Gaussian history pool: values=}$N_{\mathrm{pool}}$ \texttt{covers}
 $N$ \texttt{steps at} $n$ \texttt{beads}; for a dynamic topology $n$ is the
-initial capacity rather than the active count. The pool position is not saved in the restart file, so a
-restarted run starts again from the beginning of a newly generated pool.
+initial capacity rather than the active count. Since 2026-10-06 the pool position is saved in the restart
+file: a restarted run regenerates the pool from the seed of the input file and
+continues from the saved position (Sec.~\ref{sec:Restarting-JETSPIN}).

@@ -46,11 +46,18 @@ That iteration visits every other active bead and writes only its target
 force. This target-centric formulation is race-free and needs no atomics. It
 evaluates each physical pair twice instead of sharing a pair contribution as
 the CPU implementation does, so its floating-point accumulation order is
-different. The evaporative 3D kernel (`accelerator_coulomb_evap_3d`)
-additionally spreads the sources of each target over the vector lanes of one
-gang and combines them with a reduction, for the pair and the mirror terms
-alike; the previous one-thread-per-target layout left the device almost idle
-for jets of a few hundred beads.
+different. The three-dimensional kernels, evaporative
+(`accelerator_coulomb_evap_3d`, since 2026-09-30) and non-evaporative
+(`compute_coulomelec_openacc_3d`, since 2026-10-05), additionally spread the
+sources of each target over the vector lanes of one gang and combine them with
+a reduction, for the pair and the mirror terms alike; the previous
+one-thread-per-target layout left the device almost idle for jets of a few
+hundred beads. The non-evaporative kernel also takes its arrays as
+assumed-shape dummies; before, a data region around allocatable dummies made
+the runtime upload nine array descriptors, and wait, at every call. With both
+changes the fixed 1,000-bead Tests 9--12 and the dynamic Tests 13 and 14 run
+4.2 to 4.8 times faster on an A30 and still pass their recorded
+comparisons.
 
 The implementation preserves the existing model conventions, including:
 
@@ -70,7 +77,21 @@ transferred. Disabling fused multiply-add preserves the accepted trajectory
 for the initially straight geometry. Configurations outside the explicitly
 validated gates use the original CPU EOM path.
 
-## Dynamic-topology Platen fork
+## Non-evaporative dynamic Platen (Test 24)
+
+Since 2026-10-05 the non-evaporative stochastic Platen run growing from a
+single bead (Test 24) follows the evaporative one (Test 25) in every build.
+`dynamic_platen_configured` (size-independent) decides once, before the loop,
+that the run reads the sequential Gaussian pool, on the CPU as on the GPU;
+`dynamic_platen_eligible` adds `npjet >= 100`, `mxnpjet > npjet`, and
+`JETSPIN_OPENACC_DISABLE_PERSISTENT` and opens the persistent device path in
+`platen()`. The step then runs on one asynchronous queue with the same fused
+small kernels as the evaporative step. Until then this path existed only as
+the `nvfortran-openacc-dynamic-platen` build option (macro
+`JETSPIN_GPU_DYNAMIC_PLATEN`, module `openacc_dynamic_platen_mod.f90`, both
+removed); the standard builds drew Test 24's noise step by step and
+integrated it on the host with only the Coulomb sums on the GPU. The history
+below describes that option.
 
 The persistent gates listed above all require a bead count that a realistic
 run does not have when the decision is taken. `prepare_integrator_random_history`
@@ -82,22 +103,21 @@ engage for the rest of the run however large the jet grows. This was confirmed
 by profiling: on `examples/input-24`, the only kernel `nsys` recorded on the
 device was the Coulomb summation, with the integrator running on the host.
 
-The `nvfortran-openacc-dynamic-platen` target (see
-[compiling](compiling.md)) addresses this for the non-evaporative Platen
-integrator only. Its eligibility logic lives in
-[`openacc_dynamic_platen_mod.f90`](../../source/openacc_dynamic_platen_mod.f90),
-which splits the decision in two: `dynamic_platen_accelerator_configured` tests
-only size-independent model configuration and is what the one-shot history
-allocation consults, while `dynamic_platen_accelerator_eligible` adds the
-`npjet >= 100` and `mxnpjet > npjet` thresholds and gates the per-step
-activation. The history is the sequential pool described in
-[random numbers](random-numbers.md), the default layout for every build since
-2026-09-30, which removes the remap that capacity growth used to force.
+The `nvfortran-openacc-dynamic-platen` target addressed this for the non-
+evaporative Platen integrator only. Its eligibility logic, now in
+`integrator_mod.f90`, splits the decision in two: `dynamic_platen_configured`
+tests only size-independent model configuration and is what the one-shot
+history allocation consults, while `dynamic_platen_eligible` adds the `npjet
+>= 100` and `mxnpjet > npjet` thresholds and gates the per-step activation.
+The history is the sequential pool described in [random numbers](random-
+numbers.md), the default layout for every build since 2026-09-30, which
+removes the remap that capacity growth used to force.
 
-With the macro on, a step in the persistent branch runs entirely on the
-device: charge smoothing and the Coulomb/electric driver four times, four EOM
-stages, then the Platen predictor, velocity, position, stress-statistics, and
-non-inserted-position kernels, with no per-step host transfer. The host is
+A step in the persistent branch runs entirely on the device: three charge
+smoothings, Coulomb sums, and EOM stages, the Platen predictor, velocity, and
+position updates, a fourth EOM stage for the stress derivative at the new
+state, and the stress statistics, with no per-step host transfer; since
+2026-10-05 the small kernels are fused as in the evaporative step. The host is
 reached only for topology events and output.
 
 A single-bead run using `input-24` physics without evaporation engaged at step

@@ -53,8 +53,9 @@ once. No random number is drawn inside the loop, and CPU and GPU runs read the
 same values. The pool is used by:
 
 - the fixed 1,000-bead Platen benchmarks, Tests 12 and 20;
-- the dynamic evaporative Platen path (insertion, collector removal, dynamic
-  refinement), Tests 21--23 and 25, whatever the initial bead count.
+- the dynamic Platen path (insertion, collector removal, dynamic
+  refinement), evaporative (Tests 21--23 and 25) and, since 2026-10-05,
+  non-evaporative (Test 24), whatever the initial bead count.
 
 The pool is one flat sequence, allocated once and never remapped. Each
 timestep reserves `(active beads) * 6` consecutive values:

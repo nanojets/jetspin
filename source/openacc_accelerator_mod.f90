@@ -23,7 +23,7 @@ module accelerator_mod
 ! bead added, capacity exhausted, bead removed), read back in one transfer
 ! by accelerator_topology_check.
  integer, save :: accelerator_topology_flags(5)=0
-! Set when accelerator_platen_evap_end_step has already made this step's
+! Set when accelerator_platen_end_step has already made this step's
 ! topology decisions and statistics update on the device: the following
 ! accelerator_topology_check only reads the flags back, and
 ! accelerator_store_statistics does nothing.
@@ -38,9 +38,9 @@ module accelerator_mod
 ! transfer (accelerator_wait).  -1 (acc_async_sync) is synchronous, the
 ! setting of every other path.
 #ifdef _OPENACC
- integer, save :: accelerator_queue=acc_async_sync
+ integer, save, public :: accelerator_queue=acc_async_sync
 #else
- integer, save :: accelerator_queue=-1
+ integer, save, public :: accelerator_queue=-1
 #endif
 #ifdef _OPENACC
 !$acc declare create(accelerator_smoothed_charge)
@@ -112,7 +112,7 @@ module accelerator_mod
  public :: accelerator_platen_evap_positions
  public :: accelerator_platen_stress_statistics
  public :: accelerator_platen_stage_prep
- public :: accelerator_platen_evap_end_step
+ public :: accelerator_platen_end_step
 
  ! The RK state algebra is common to both evaporation rheologies.  Preserve
  ! the historical specific procedure names while exposing neutral interfaces
@@ -567,7 +567,7 @@ contains
  subroutine accelerator_platen_stage_prep(npjet,restore,thresolution, &
    dresolution,resolution,yxx,yyy,yzz,jetch)
 ! One serial kernel before a force evaluation of the fused persistent Platen
-! step (accelerator_platen_evap_end_step): restore the charge smoothed for
+! step (accelerator_platen_end_step): restore the charge smoothed for
 ! the previous evaluation when restore is set, smooth it for this one, and
 ! place the inserting bead; three kernels before 2026-10-05.  The kernels in
 ! between do not read jetch.  Only for a blocked nozzle bead.
@@ -1355,7 +1355,7 @@ contains
   double precision :: dsqrh,stoc
   dsqrh=dsqrt(dabs(h))
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetms,jetxx,jetyy,jetzz,jetst, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetms,jetxx,jetyy,jetzz,jetst, &
 !$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
 !$acc& y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st, &
 !$acc& y2vx,y2vy,y2vz,jetfr) private(j,stoc)
@@ -1473,7 +1473,7 @@ contains
   hbase=historybase; hstride=historywindow; hvalues=historyvalues
   hfirst=firstpoint
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetms,gaussianhistory,jetvx,jetvy, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetms,gaussianhistory,jetvx,jetvy, &
 !$acc& jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz,jetfr) &
 !$acc& private(j,component,index1,index2,stoc,u1,u2,ww,zz)
 #endif
@@ -1585,7 +1585,7 @@ contains
   integer :: ipoint,j
   double precision :: f2x,f2y,f2z,y1y,y1z
 #ifdef _OPENACC
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
+!$acc parallel loop async(accelerator_queue) gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
 !$acc& jetvz,f1xx,f1yy,f1zz,jetfr) private(j,f2x,f2y,f2z,y1y,y1z)
 #endif
   do ipoint=firstpoint,lastpoint
@@ -1703,13 +1703,13 @@ contains
 ! persistent Platen run was half the host value (fixed 2026-09-30).
  end subroutine accelerator_platen_stress_statistics
 
- subroutine accelerator_platen_evap_end_step(firstpoint,lastpoint,dt, &
+ subroutine accelerator_platen_end_step(firstpoint,lastpoint,dt, &
    npjet,mxnpjet,inpjet,linserted,lremove,h,resolution,dresolution, &
    thresolution,ivelocity,istress,imassa,icharge,ivolume,jetxx,jetyy,jetzz, &
    jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr,f1st,f2st,counterlpath, &
    ncounterlpath,maxstress,maxstressposx)
-! The end of a fused persistent dynamic evaporative Platen step in one
-! single-gang kernel, which a few hundred beads keep busy: restore the
+! The end of a fused persistent dynamic Platen step, evaporative or not, in
+! one single-gang kernel, which a few hundred beads keep busy: restore the
 ! smoothed nozzle charge, update the stress with the path-length and maximum
 ! statistics (accelerator_platen_stress_statistics), place the inserting
 ! bead, decide the topology and freeze beads at the collector
@@ -1803,7 +1803,7 @@ contains
 #endif
   accelerator_topology_decided=.true.
   accelerator_statistics_stored=.true.
- end subroutine accelerator_platen_evap_end_step
+ end subroutine accelerator_platen_end_step
 
  subroutine accelerator_euler_final_statistics(firstpoint,lastpoint,h, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
@@ -2166,7 +2166,7 @@ contains
   logical, intent(inout) :: jetfr(0:)
   integer :: ipoint,lastpoint
 
-! accelerator_platen_evap_end_step may already have decided this step on
+! accelerator_platen_end_step may already have decided this step on
 ! the device; then only the readback below remains.
   if(accelerator_topology_decided)then
     accelerator_topology_decided=.false.
@@ -2408,7 +2408,7 @@ contains
   integer :: ipoint
 
   if(accelerator_statistics_stored)then
-! Already done on the device by accelerator_platen_evap_end_step.
+! Already done on the device by accelerator_platen_end_step.
     accelerator_statistics_stored=.false.
     return
   endif

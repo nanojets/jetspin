@@ -22,7 +22,7 @@
                              accelerator_coulomb_evap_compare, &
                              accelerator_smooth_charge_3d, &
                              accelerator_restore_charge, &
-                             accelerator_wait
+                             accelerator_wait,accelerator_queue
 #endif
  use profiling_mod,         only : profiling_start,profiling_stop, &
                              prof_coulomb
@@ -681,17 +681,34 @@ end subroutine reset_coulomb_accelerator
   double precision, allocatable, intent(in) :: yxx(:),yyy(:),yzz(:)
   double precision, allocatable, intent(in) :: yvl(:)
 
+! The kernels receive every array as an assumed-shape dummy, as
+! accelerator_coulomb_evap_3d does.  Until 2026-10-05 they used these
+! allocatable dummies and the module arrays inside a data region, and the
+! runtime uploaded a descriptor for each of the nine arrays, then waited,
+! at every call.
+  call compute_coulomelec_openacc_3d_kernels(ycf,yxx,yyy,yzz,yvl,jetch, &
+   jetms,jetfr,coulcrossec)
+
+ end subroutine compute_coulomelec_openacc_3d
+
+ subroutine compute_coulomelec_openacc_3d_kernels(ycf,yxx,yyy,yzz,yvl,dch, &
+   dms,dfr,dcross)
+
+  implicit none
+
+  double precision, intent(inout) :: ycf(0:,1:)
+  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yvl(0:)
+  double precision, intent(in) :: dch(0:),dms(0:)
+  logical, intent(in) :: dfr(0:)
+  double precision, intent(inout) :: dcross(0:)
+
   integer :: ipoint,jpoint,ihigh
   double precision :: dx,dy,dz,distance,denominator,coefficient
   double precision :: forcex,forcey,forcez,xmirror
 
-!$acc data present_or_copyin(yxx(0:ncoulforce),yyy(0:ncoulforce), &
-!$acc& yzz(0:ncoulforce),jetch(0:ncoulforce),jetms(0:ncoulforce), &
-!$acc& jetfr(0:ncoulforce),yvl(0:ncoulforce), &
-!$acc& coulcrossec(0:ncoulforce)) &
-!$acc& present_or_copy(ycf(0:ncoulforce,1:3))
   if(accelerator_persistent_mode)then
-!$acc parallel loop gang vector
+!$acc parallel loop async(accelerator_queue) gang vector &
+!$acc& present(yxx,yyy,yzz,yvl,dcross)
     do ipoint=inpjet,npjet
       if((.not.linserting .and. ipoint<npjet) .or. &
        (linserting .and. linserted .and. ipoint<npjet-1) .or. &
@@ -699,52 +716,61 @@ end subroutine reset_coulomb_accelerator
         distance=dsqrt((yxx(ipoint)-yxx(ipoint+1))**2.d0+ &
          (yyy(ipoint)-yyy(ipoint+1))**2.d0+ &
          (yzz(ipoint)-yzz(ipoint+1))**2.d0)
-        coulcrossec(ipoint)=dsqrt(yvl(ipoint)/(distance*Pi))
+        dcross(ipoint)=dsqrt(yvl(ipoint)/(distance*Pi))
       else
-        coulcrossec(ipoint)=icrossec
+        dcross(ipoint)=icrossec
       endif
     enddo
 !$acc end parallel loop
   endif
-!$acc parallel loop gang vector private(dx,dy,dz,distance,denominator, &
-!$acc& coefficient,forcex,forcey,forcez,ihigh,xmirror)
+! One gang per target bead and a vector reduction over the sources, as
+! accelerator_coulomb_evap_3d since 2026-09-30 (2026-10-05 here): with one
+! thread per target, a jet of a few hundred beads left the device almost
+! idle.  Only the summation order changes, at roundoff.
+!$acc parallel loop async(accelerator_queue) gang private(forcex,forcey,forcez) &
+!$acc& present_or_copyin(yxx,yyy,yzz,dch,dms,dfr,dcross) present_or_copy(ycf)
   do ipoint=inpjet,npjet
     forcex=0.d0
     forcey=0.d0
     forcez=0.d0
-    if(.not.jetfr(ipoint))then
+    if(.not.dfr(ipoint))then
+!$acc loop vector reduction(+:forcex,forcey,forcez) &
+!$acc& private(dx,dy,dz,distance,denominator,coefficient,ihigh)
       do jpoint=inpjet,npjet
-        if(jpoint==ipoint .or. jetfr(jpoint))cycle
-        dx=yxx(ipoint)-yxx(jpoint)
-        dy=yyy(ipoint)-yyy(jpoint)
-        dz=yzz(ipoint)-yzz(jpoint)
-        distance=dsqrt(dx*dx+dy*dy+dz*dz)
-        if(distance>1.d-30)then
-          ihigh=max(ipoint,jpoint)
-          denominator=(distance+coulcrossec(ihigh))**2.d0
-          coefficient=jetch(ipoint)*jetch(jpoint)*Q/ &
-           (jetms(ipoint)*denominator*distance)
-          forcex=forcex+coefficient*dx
-          forcey=forcey+coefficient*dy
-          forcez=forcez+coefficient*dz
-        endif
-      enddo
-      if(lmirror)then
-        do jpoint=inpjet,npjet
-          if(jetfr(jpoint))cycle
-          xmirror=dabs(yxx(jpoint)-h)+h
-          dx=yxx(ipoint)-xmirror
+        if(jpoint/=ipoint .and. .not.dfr(jpoint))then
+          dx=yxx(ipoint)-yxx(jpoint)
           dy=yyy(ipoint)-yyy(jpoint)
           dz=yzz(ipoint)-yzz(jpoint)
           distance=dsqrt(dx*dx+dy*dy+dz*dz)
-          if(ldcutoff .and. distance>dcutoff)cycle
           if(distance>1.d-30)then
-            denominator=(distance+coulcrossec(jpoint))**2.d0
-            coefficient=-jetch(ipoint)*jetch(jpoint)*Q/ &
-             (jetms(ipoint)*denominator*distance)
+            ihigh=max(ipoint,jpoint)
+            denominator=(distance+dcross(ihigh))**2.d0
+            coefficient=dch(ipoint)*dch(jpoint)*Q/ &
+             (dms(ipoint)*denominator*distance)
             forcex=forcex+coefficient*dx
             forcey=forcey+coefficient*dy
             forcez=forcez+coefficient*dz
+          endif
+        endif
+      enddo
+      if(lmirror)then
+!$acc loop vector reduction(+:forcex,forcey,forcez) &
+!$acc& private(dx,dy,dz,distance,denominator,coefficient,xmirror)
+        do jpoint=inpjet,npjet
+          if(.not.dfr(jpoint))then
+            xmirror=dabs(yxx(jpoint)-h)+h
+            dx=yxx(ipoint)-xmirror
+            dy=yyy(ipoint)-yyy(jpoint)
+            dz=yzz(ipoint)-yzz(jpoint)
+            distance=dsqrt(dx*dx+dy*dy+dz*dz)
+            if(distance>1.d-30 .and. .not.(ldcutoff .and. distance>dcutoff))then
+              denominator=(distance+dcross(jpoint))**2.d0
+              coefficient=-dch(ipoint)*dch(jpoint)*Q/ &
+               (dms(ipoint)*denominator*distance)
+              forcex=forcex+coefficient*dx
+              forcey=forcey+coefficient*dy
+              forcez=forcez+coefficient*dz
+            endif
           endif
         enddo
       endif
@@ -754,9 +780,8 @@ end subroutine reset_coulomb_accelerator
     ycf(ipoint,3)=forcez
   enddo
 !$acc end parallel loop
-!$acc end data
 
- end subroutine compute_coulomelec_openacc_3d
+ end subroutine compute_coulomelec_openacc_3d_kernels
 #endif
  
  subroutine compute_coulomelec_multistep(nstep,timesub,ycf,yxx,yyy,yzz)

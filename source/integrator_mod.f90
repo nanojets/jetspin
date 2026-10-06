@@ -68,13 +68,9 @@ module integrator_mod
                          accelerator_platen_evap_positions, &
                          accelerator_platen_stress_statistics, &
                          accelerator_platen_stage_prep, &
-                         accelerator_platen_evap_end_step
+                         accelerator_platen_end_step
  use statistic_mod, only : counterlpath,ncounterlpath,maxstress, &
                          maxstressposx
-#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
- use openacc_dynamic_platen_mod, only : dynamic_platen_accelerator_eligible, &
-                         dynamic_platen_accelerator_configured
-#endif
 #endif
  use electric_field_mod, only : nfieldtype
  use coulomb_force_mod, only : smooth_charge,restore_charge, &
@@ -143,17 +139,12 @@ contains
 ! used dynamic_evaporative_platen_eligible(), which is never true for a
 ! single-bead start, so the history was never built and platen_ev always
 ! fell back to the non-persistent path.
-  dynamic_history=dynamic_evaporative_platen_configured()
-#if defined(_OPENACC) && defined(JETSPIN_GPU_DYNAMIC_PLATEN)
-! The non-evaporative dynamic Platen fork needs the same indexed noise
-! history as its evaporative sibling, otherwise it silently falls back to
-! prepare_gaussian_buffer and allocated(gaussianhistory) never becomes
-! true, so the persistent gate in platen() (which requires it) never
-! fires. Deliberately checked via the size-independent "configured" test,
-! not dynamic_platen_accelerator_eligible: this runs once, before the loop
-! starts, while the jet may still be a single bead.
-  dynamic_history=dynamic_history .or. dynamic_platen_accelerator_configured()
-#endif
+! The non-evaporative dynamic Platen run (Test 24) uses the same pool as the
+! evaporative one (Test 25), on CPU and GPU alike, since 2026-10-05; before,
+! only the JETSPIN_GPU_DYNAMIC_PLATEN build option drew it, and the other
+! builds drew the noise step by step.
+  dynamic_history=dynamic_evaporative_platen_configured() .or. &
+   dynamic_platen_configured()
   if(.not.(fixed_history .or. dynamic_history))return
   nsteps=nint((endtime-initime)/h)
   history_last=npjet
@@ -214,6 +205,38 @@ contains
    typemass.eq.0 .and. .not.ltrackbeads .and. ltagbeads .and. &
    .not.lbreakup .and. lrefinement
  end function dynamic_evaporative_platen_eligible
+
+ logical function dynamic_platen_configured()
+! The non-evaporative counterpart of dynamic_evaporative_platen_configured:
+! every condition of dynamic_platen_eligible except the bead count, for the
+! one-shot Gaussian-pool decision.  Until 2026-10-05 the non-evaporative
+! path lived in openacc_dynamic_platen_mod.f90, compiled only with
+! JETSPIN_GPU_DYNAMIC_PLATEN.
+  implicit none
+  dynamic_platen_configured=systype.eq.4 .and. .not.levaporation .and. &
+   .not.lKVfluid .and. integrator.eq.4 .and. mxrank.eq.1 .and. &
+   mystart.eq.inpjet .and. myend.eq.npjet .and. linserting .and. &
+   .not.lmultiplestep .and. lairdrag .and. .not.lflorentz .and. &
+   .not.luppot .and. nfieldtype.eq.0 .and. .not.ldragvel .and. &
+   typemass.eq.0 .and. .not.ltrackbeads .and. ltagbeads .and. &
+   .not.lbreakup .and. lrefinement
+ end function dynamic_platen_configured
+
+ logical function dynamic_platen_eligible()
+! Per-step gate of the persistent non-evaporative dynamic Platen path, as
+! dynamic_evaporative_platen_eligible for the evaporative one.
+  implicit none
+  character(len=16) :: disable_persistent
+  disable_persistent=''
+  call get_environment_variable('JETSPIN_OPENACC_DISABLE_PERSISTENT', &
+   disable_persistent)
+  if(trim(disable_persistent)=='1')then
+    dynamic_platen_eligible=.false.
+    return
+  endif
+  dynamic_platen_eligible=dynamic_platen_configured() .and. npjet>=100 .and. &
+   mxnpjet>npjet
+ end function dynamic_platen_eligible
 
  logical function dynamic_evaporative_platen_configured()
 ! Size-independent part of dynamic_evaporative_platen_eligible: every
@@ -1779,6 +1802,7 @@ contains
   
   logical, save :: lfirstsub=.true.
   logical, save :: persistent_acc=.false.
+  logical :: fusedstep
   logical :: used_acc_eom
   
   double precision ::  fxx
@@ -1803,12 +1827,13 @@ contains
   double precision ::  f3stocvy
   double precision ::  f3stocvz
 
-#if defined(_OPENACC) && defined(JETSPIN_GPU_DYNAMIC_PLATEN)
+#ifdef _OPENACC
 ! A refinement-driven capacity increase occurs before this integrator call,
 ! unlike nozzle insertion which requests the reset from the main loop. In
 ! either case, detach the old scratch arrays before reallocating them, as
 ! already done for rk4sys/rk4sys_ev/platen_ev.
   if((persistent_reset_requested .or. doallocate) .and. persistent_acc)then
+    call accelerator_set_async(.false.)
 !$acc exit data delete(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
 !$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,d3xx,d3yy,d3zz,d3st, &
 !$acc& d3vx,d3vy,d3vz,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
@@ -1935,10 +1960,8 @@ contains
   endif
 
 #ifdef _OPENACC
-#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
   if(.not.persistent_acc .and. systype==4 .and. &
-   (fixed_accelerator_geometry() .or. &
-   dynamic_platen_accelerator_eligible()) .and. &
+   (fixed_accelerator_geometry() .or. dynamic_platen_eligible()) .and. &
    allocated(gaussianhistory))then
 ! A capacity rebind performed by the topology driver already owns the new
 ! jet mapping; entering the jet arrays again would leave a second OpenACC
@@ -1956,26 +1979,14 @@ contains
 !$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
     call set_coulomb_accelerator_persistent(.true.)
     call accelerator_set_persistent(.true.)
-    if(dynamic_platen_accelerator_eligible()) &
+    if(dynamic_platen_eligible()) &
      call accelerator_set_topology_enabled(.true.)
-    persistent_acc=.true.
-  endif
-#else
-  if(.not.persistent_acc .and. systype==4 .and. &
-   fixed_accelerator_geometry() .and. allocated(gaussianhistory))then
-!$acc enter data copyin(jetxx(0:mxnpjet),jetyy(0:mxnpjet), &
-!$acc& jetzz(0:mxnpjet),jetst(0:mxnpjet),jetvx(0:mxnpjet), &
-!$acc& jetvy(0:mxnpjet),jetvz(0:mxnpjet),jetvl(0:mxnpjet), &
-!$acc& jetms(0:mxnpjet),jetch(0:mxnpjet),jetfr(0:mxnpjet))
-!$acc enter data create(f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,d3xx,d3yy,d3zz,d3st, &
-!$acc& d3vx,d3vy,d3vz,y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
-!$acc& y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz)
-    call set_coulomb_accelerator_persistent(.true.)
-    call accelerator_set_persistent(.true.)
-    persistent_acc=.true.
-  endif
+#if !defined(JETSPIN_DEV_HOST_FORCE_ORACLE) && !defined(JETSPIN_DEV_HOST_COULOMB_ORACLE) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+! As in platen_ev: one asynchronous queue and one wait per step.
+    if(dynamic_platen_eligible())call accelerator_set_async(.true.)
 #endif
+    persistent_acc=.true.
+  endif
 #endif
 
   dsqrh=dsqrt(dabs(h))
@@ -2123,9 +2134,23 @@ contains
 ! evaluations the inserting nozzle bead is placed and its charge smoothed on
 ! the device copy, and the charge is restored afterwards (until 2026-10-01
 ! the charge was smoothed once, on the stale host copy, and the bead was
-! placed only at the end of the step).
-        call smooth_charge(jetxx,jetyy,jetzz)
-        call place_inserting_bead(jetxx,jetyy,jetzz,.true.)
+! placed only at the end of the step).  A dynamic step fuses the small
+! kernels as platen_ev does (2026-10-05): one preparation kernel per force
+! evaluation, which also restores the charge smoothed for the previous one,
+! and one single-gang kernel for the end of the step and the topology
+! decisions.  The oracles keep the separate kernels.
+#if defined(JETSPIN_DEV_HOST_FORCE_ORACLE) || defined(JETSPIN_DEV_HOST_COULOMB_ORACLE) || defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+        fusedstep=.false.
+#else
+        fusedstep=linserting
+#endif
+        if(.not.fusedstep)then
+          call smooth_charge(jetxx,jetyy,jetzz)
+          call place_inserting_bead(jetxx,jetyy,jetzz,.true.)
+        elseif(.not.linserted)then
+          call accelerator_platen_stage_prep(npjet,.false.,thresolution, &
+           dresolution,resolution,jetxx,jetyy,jetzz,jetch)
+        endif
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,jetxx,jetyy,jetzz)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         used_acc_eom=non_evap_host_force_oracle(timesub,k,jetxx,jetyy,jetzz, &
@@ -2141,13 +2166,18 @@ contains
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
          collector_curvature=.true.)
 #endif
-        call restore_charge()
+        if(.not.fusedstep)call restore_charge()
         call accelerator_platen_predict(mystart,myend,h,airdragamp(1), &
          noisediff,jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
          f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,y1xx,y1yy,y1zz,y1st, &
          y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,linserted,jetfr)
-        call smooth_charge(y1xx,y1yy,y1zz)
-        call place_inserting_bead(y1xx,y1yy,y1zz,.true.)
+        if(.not.fusedstep)then
+          call smooth_charge(y1xx,y1yy,y1zz)
+          call place_inserting_bead(y1xx,y1yy,y1zz,.true.)
+        elseif(.not.linserted)then
+          call accelerator_platen_stage_prep(npjet,.true.,thresolution, &
+           dresolution,resolution,y1xx,y1yy,y1zz,jetch)
+        endif
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y1xx,y1yy,y1zz)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         used_acc_eom=non_evap_host_force_oracle(timesub,k,y1xx,y1yy,y1zz, &
@@ -2163,9 +2193,14 @@ contains
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
          collector_curvature=.true.)
 #endif
-        call restore_charge()
-        call smooth_charge(y2xx,y2yy,y2zz)
-        call place_inserting_bead(y2xx,y2yy,y2zz,.true.)
+        if(.not.fusedstep)then
+          call restore_charge()
+          call smooth_charge(y2xx,y2yy,y2zz)
+          call place_inserting_bead(y2xx,y2yy,y2zz,.true.)
+        elseif(.not.linserted)then
+          call accelerator_platen_stage_prep(npjet,.true.,thresolution, &
+           dresolution,resolution,y2xx,y2yy,y2zz,jetch)
+        endif
         call compute_coulomelec_driver(k,timesub,coulforce,jetvl,y2xx,y2yy,y2zz)
 #ifdef JETSPIN_DEV_HOST_FORCE_ORACLE
         used_acc_eom=non_evap_host_force_oracle(timesub,k,y2xx,y2yy,y2zz, &
@@ -2181,7 +2216,7 @@ contains
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
          collector_curvature=.true.)
 #endif
-        call restore_charge()
+        if(.not.fusedstep)call restore_charge()
         call accelerator_platen_velocity(mystart,myend,mxnpjet, &
          gaussianhistorysteps,k,h, &
          airdragamp(1),noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
@@ -2206,12 +2241,23 @@ contains
          yieldstress,att,fve,gr,ks,li,v,velext,.true.,noisefric, &
          collector_curvature=.true.)
 #endif
-        call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
-         jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
-         maxstressposx)
-#ifdef JETSPIN_GPU_DYNAMIC_PLATEN
-        call accelerator_mark_device_state(.true.)
-#endif
+! The restore of the last smoothing waits for the end-of-step kernel in a
+! fused step: the stress derivative above does not depend on jetch.
+        if(fusedstep)then
+          call accelerator_platen_end_step(mystart,myend,h,npjet, &
+           mxnpjet,inpjet,linserted,lremove,collector_h,resolution, &
+           dresolution,thresolution,ivelocity,istress,imassa,icharge, &
+           ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch, &
+           jetvl,jetfr,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
+           maxstressposx)
+        else
+          call accelerator_platen_stress_statistics(mystart,myend,h,jetxx, &
+           jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath,maxstress, &
+           maxstressposx)
+        endif
+! The dynamic path keeps the authoritative state on the device; the fixed
+! 1,000-bead geometry never marked it.
+        if(linserting)call accelerator_mark_device_state(.true.)
         timesub=timesub+h
         return
       endif
@@ -5860,7 +5906,7 @@ contains
          cp0,Bev,mev,tev,consistency,findex,yieldstress)
 #endif
         if(fusedstep)then
-          call accelerator_platen_evap_end_step(mystart,myend,h,npjet, &
+          call accelerator_platen_end_step(mystart,myend,h,npjet, &
            mxnpjet,inpjet,linserted,lremove,collector_h,resolution, &
            dresolution,thresolution,ivelocity,istress,imassa,icharge, &
            ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch, &

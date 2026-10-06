@@ -1,5 +1,90 @@
 # JETSPIN development state and handoff log
 
+## Test 24 aligned with Test 25: non-evaporative dynamic Platen path promoted (2026-10-05)
+
+### Change
+
+- `dynamic_platen_configured` / `dynamic_platen_eligible` in
+  `integrator_mod.f90` (the former fork module
+  `openacc_dynamic_platen_mod.f90`, macro `JETSPIN_GPU_DYNAMIC_PLATEN`, and
+  Make target `nvfortran-openacc-dynamic-platen` are removed). As for the
+  evaporative path: the size-independent test decides once that a
+  non-evaporative dynamic Platen run reads the sequential Gaussian pool, in
+  every build (CPU included); the per-step gate (`npjet>=100`,
+  `mxnpjet>npjet`, `JETSPIN_OPENACC_DISABLE_PERSISTENT`) opens the persistent
+  device path of `platen()` in every OpenACC build.
+- The persistent dynamic step of `platen()` runs on the asynchronous queue
+  with the fused kernels of `platen_ev`: `accelerator_platen_stage_prep`
+  before each force evaluation and the single-gang end-of-step kernel,
+  renamed `accelerator_platen_end_step` since it serves both paths. Its
+  Platen predictor, velocity and position kernels and the non-evaporative
+  Coulomb kernels carry `async(accelerator_queue)` (now public).
+- `compute_coulomelec_openacc_3d` (every non-evaporative 3-D Coulomb sum on
+  the device): one gang per target and a vector reduction over the sources,
+  as `accelerator_coulomb_evap_3d` since 2026-09-30. Its kernels moved to
+  `compute_coulomelec_openacc_3d_kernels`, which takes every array as an
+  assumed-shape dummy with the data clauses on the loops: the former data
+  region around allocatable dummies and module arrays made the runtime
+  upload a 128-byte descriptor for each of nine arrays and wait, at every
+  call (27 uploads and 4 synchronizations per Platen step in Nsight
+  Systems at about 520 beads).
+
+### Evidence
+
+- Promoted path, before the queue and fusion: Test 24 to 2.1 million steps
+  byte-identical to the former fork binary.
+- Queue and fusion: trajectory, events and all printed observables but `lp`
+  byte-identical to the unfused path (asynchronous and synchronous runs
+  agree). `lp` differs from step 1,980,000 by `5e-5`: debug prints of the
+  path-length counters show the same sum and 20000 counted steps in the fused
+  run against 19999 in the unfused one. At a step whose insertion needs a
+  capacity reallocation, `accelerator_release_jet_capacity` clears the
+  persistent flag before `statistic_driver`, so the unfused path stores that
+  step's count and maximum stress on the host copy, which the next print
+  overwrites with the device values; the fused path has stored them on the
+  device already. One such step occurred in this run.
+- Coulomb kernel: phase 2 of the first 2.1 million steps of Test 24 at
+  175 us per step instead of 347 (575 before the queue and fusion), 119 us
+  after the descriptor change, which leaves every output byte-identical.
+  Tests 9-12 pass their CPU and A30 records (`compare.sh`, worst normalized
+  differences `8e-5`, `8e-7`, `9e-7`, `0`) and run 4.2-4.8 times faster
+  (Test 9 loop 0.51 s instead of 2.12 s, Test 13 0.54 s instead of 2.26 s);
+  Tests 13 and 14 keep their CPU event streams (26 and 37
+  events) and their comparison status (Test 13 `compare.sh` worst 0.94 of
+  the tolerance, Test 14 the same three rows outside `3e-4` as before);
+  Test 15 keeps its two known one-step shifts; Test 20 (evaporative)
+  byte-identical.
+- Test 24, 5 million steps, bound A30: loop 621 and 616 s (seeds 317 and
+  318; phase 1 114 s on the host, phase 2 507 s at 140 us per step, 113 to
+  152 us from 100 to 600 beads); the standard build took 4546 s that morning
+  (non-persistent, Coulomb only on the GPU). Seeds 317-321 (319-321 with the
+  build before the descriptor change, whose output equals the final build's
+  for seeds 317 and 318): 511.1-512.0
+  active beads, 211.3-211.4 cm, off-axis 3.78-3.79 cm, 26.6-26.7 degrees,
+  1963-1964 cm/s between 4 and 5 million steps. Nsight Systems at about 540
+  beads: 15 launches, one stream synchronization, one 20-byte download and
+  no upload per step; kernels 122 us (Coulomb sums 60 us).
+- CPU references with the pool (seeds 317-321, 5 million steps, about
+  14,000 s each): 511.3-512.0 active beads (471-553), 211.3-211.4 cm,
+  off-axis 3.79 cm, 26.6-26.7 degrees, 1963-1964 cm/s between 4 and 5
+  million steps; 219 additions and 1,041-1,045 removals; first removal at
+  step 2,541,113 (seed 317). Their printed loop times (e.g. 14,021 s for
+  356.6 steps/s) confirm the 64-bit timer. The A30 run reproduces the CPU
+  run of the same seed byte for byte up to the engagement (step 1,379,105)
+  and follows it afterwards: same bead count up to 2.66 million steps for
+  seed 317 and 2.18 million for seed 318.
+- Unchanged: Tests 21-23 `statout.dat`, regression openacc 1-8 (Example 4
+  is not a dynamic-refinement run and keeps its noise), Tests 16/17, Test 25
+  to 2.1 million steps byte-identical; `JETSPIN_OPENACC_SYNC=1` reproduces
+  the asynchronous Test 24 run byte for byte.
+
+### Next
+
+- The fourth EOM stage of the non-evaporative step computes all derivatives
+  only to use the stress one; a stress-only device routine would save a
+  kernel per step.
+- Full-length (1e8-step) references of Tests 24 and 25.
+
 ## Fused small kernels in the persistent evaporative Platen step (2026-10-05)
 
 ### Change

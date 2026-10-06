@@ -63,31 +63,88 @@ choice above; they are recorded in
 
 ## Reference results
 
-The longest clean run is 6,000,000 steps on an NVIDIA A30,
-`Program closed correctly`, zero NaN and zero device errors, ending with
-x = 16.00 cm, collector velocity 1986.5 cm/s, `yz` = 4.09 cm, 28.7 degrees,
-571 active beads, 291 topology additions and 1,616 removals. The bead count
-oscillates around 570 over the last two million steps rather than drifting, so
-this run does demonstrate the balanced insertion/removal regime the case was
-designed to reach — at 6% of the target duration, not over the full run.
+Since 2026-10-05 Test 24 follows Test 25: CPU and GPU builds read the same
+sequential Gaussian pool, and the GPU runs the persistent device path once the
+jet holds 100 beads. The values below come from these builds (NVFORTRAN 24.3,
+5,000,000 steps, `final time 2.5d-2` and `print time 1.d-4` in a copy of the
+input, 5 % of the target duration).
 
-That run used the `nvfortran-openacc-dynamic-platen` development build. It
-printed a path length of 111.4 cm, but the persistent Platen path then counted
-every timestep twice in the path-length average, halving `lp` (fixed on
-2026-09-30). The build also lacked, until 2026-10-01, the device-side charge
-smoothing and placement of the bead being inserted at the nozzle (see
-[OpenACC](../introduction/openacc.md)); in Test 25 the same defect made the
-A30 jet about 10 percent longer and denser than the CPU one. That A30 run is
-therefore not a reference. With the fix, the fork follows its own
-non-persistent run (same Gaussian pool) within `7e-7` in path length over
-2 million steps. An NVFORTRAN CPU run of
-5,000,000 steps gives, between steps 4 and 5 million, a path length of
-212 cm, collector velocity 1962 cm/s, `yz` = 3.8 cm, 26.8 degrees, and about
-512 active beads.
+NVFORTRAN CPU build, seed 317, `Program closed correctly`:
 
-A full-length reference does not yet exist. The developed bending instability
-carries several hundred active beads, so the direct Coulomb cost per step is
-substantial and a 100-million-step run is correspondingly expensive.
+- the first bead reaches the collector at step 2,541,113;
+- between steps 4 and 5 million: collector velocity 1963 cm/s, off-axis
+  distance of the leading bead 3.79 cm, cone angle `angl` 26.6°, 471 – 553
+  active beads (mean 511.4), path length 211.4 cm, radius at the collector
+  (`rc`) 3.1 µm;
+- 219 topology additions, 1,041 removals, one array reallocation.
+
+Four more CPU seeds (318 – 321) give mean active counts between 511.3 and
+512.0, a path length of 211.3 – 211.4 cm, and an off-axis distance of 3.79 cm
+over the same window: the stationary regime does not depend on the noise
+realization. Each CPU run takes about 14,000 s.
+
+One NVIDIA A30 runs the same 5 million steps in about 620 s. It reproduces the
+CPU run byte for byte up to step 1,379,105, where it engages the persistent
+path, and then follows the CPU trajectory: with seed 317 the active bead count
+first differs at step 2.66 million (2.18 million with seed 318). Between
+steps 4 and 5 million the five A30 seeds (317 – 321) give 511.1 – 512.0
+active beads (471 – 553), a path length of 211.3 – 211.4 cm, an off-axis
+distance of 3.78 – 3.79 cm, a cone angle of 26.6 – 26.7°, and a collector
+velocity of 1963 – 1964 cm/s, with 219 additions and 1,042 – 1,045 removals.
+
+Before 2026-10-05 the CPU and the standard GPU builds drew this case's noise
+step by step, and an earlier CPU run of the same seed gave, over the same
+window, a path length of 212 cm, collector velocity 1962 cm/s, `yz` = 3.8 cm,
+26.8 degrees, and about 512 active beads: the noise layout does not change
+the stationary regime. The persistent path then existed only in a
+development build; its longest run (6,000,000 steps, about 570 active beads at
+the end) predates the device-side charge smoothing and placement of the
+inserting bead (2026-10-01) and halved `lp`, and is not a reference.
+
+A full-length reference does not yet exist; at the current A30 speed it takes
+about 4 hours (see below).
+
+## Where the A30 run spends its time
+
+The A30 run has the two phases of Test 25, with the same split of work between
+CPU and GPU (see [Test 25](test-25.md#where-the-a30-run-spends-its-time)):
+until step 1,379,104 (up to 95 active beads) the CPU integrates the whole
+step, Coulomb sums included; from step 1,379,105, where an accepted refinement
+event takes the jet to 121 beads, the step runs on the
+device-resident state, on one asynchronous queue with the fused small
+kernels, and an ordinary step returns one 20-byte topology record. The
+non-evaporative step computes its stress derivative at the new state with a
+fourth EOM stage instead of the evaporative stress kernel.
+
+Seed 317, process bound to the GPU's NUMA node: the loop takes 621 s, 114 s
+in phase 1 (83 µs/step) and 507 s in phase 2 (140 µs/step); seed 318 takes
+616 s. The standard GPU build of the same morning, which kept this case on the
+host with only the Coulomb sums on the GPU, took 4546 s. Median time per step
+over the 20,000-step print intervals:
+
+| Active beads | CPU | A30, current | A30, before 2026-10-05 |
+| --- | ---: | ---: | ---: |
+| 1 – 30 | 19 µs | 21 µs | 27 µs |
+| 30 – 60 | 59 µs | 65 µs | 74 µs |
+| 60 – 100 | 148 µs | 159 µs | 245 µs |
+| 100 – 150 | 405 µs | 113 µs | 444 µs |
+| 150 – 200 | 689 µs | 116 µs | 602 µs |
+| 200 – 300 | 1156 µs | 123 µs | 737 µs |
+| 300 – 400 | 2515 µs | 132 µs | 1049 µs |
+| 400 – 500 | 4086 µs | 145 µs | 1373 µs |
+| 500 – 600 | 5037 µs | 152 µs | 1467 µs |
+
+Four changes of 2026-10-05 produce the difference: the persistent path
+itself (until then a development build), the asynchronous queue with the
+fused kernels shared with Test 25, the non-evaporative Coulomb kernel, which
+now gives each target bead one gang and reduces over the sources across its
+vector lanes, and the removal of the nine array-descriptor uploads that kernel
+made, with a wait, at every call. Over the first 2.1 million steps phase 2
+averaged 575, 347, 175, and 119 µs per step after each change in turn. With
+about 500 beads the A30 step costs about 150 µs against 4 – 5 ms on the
+CPU. Nsight Systems at about 540 beads counts per step 15 kernel launches, one
+stream synchronization, the 20-byte download, and no upload; the kernels take
+122 µs, half of it in the three Coulomb sums.
 
 ## Use
 

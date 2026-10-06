@@ -142,23 +142,13 @@ enables `JETSPIN_COMPARE_AKIMA`: it computes the trusted host result followed
 by the device result and reports field-wise maximum coefficient and value
 differences. These are numerical-validation builds, not performance builds.
 
-One further target opens the persistent device path to variable-topology
-Platen runs:
+The former `nvfortran-openacc-dynamic-platen` target, which opened the
+persistent device path to non-evaporative Platen runs growing from a single
+bead, was removed on 2026-10-05: `nvfortran-openacc` now does this itself
+(see [OpenACC](openacc.md)).
 
-```sh
-make -C source -f ../build/Makefile nvfortran-openacc-dynamic-platen GPUCC=80
-```
-
-`nvfortran-openacc-dynamic-platen` enables `JETSPIN_GPU_DYNAMIC_PLATEN`. It is
-a fork rather than a change of default: every edit it introduces is inside the
-macro. It applies to the non-evaporative Platen integrator only and adds a
-size-independent eligibility decision so that a jet growing from a single bead
-can build its Gaussian pool and use the persistent device path. The sequential
-pool itself ([random numbers](random-numbers.md)) is the default layout in
-every build since 2026-09-30. Unlike the akima and oracle targets it is a
-genuine execution path, not a validation harness.
-
-Two developer environment variables help when exercising it:
+Two developer environment variables help when exercising the dynamic
+persistent paths:
 `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` forces the non-persistent branch, and
 `JETSPIN_REFINEMENT_INITIAL_RESERVE=<n>` lowers the initial capacity reserve so
 that capacity-growth handling can be reached in minutes instead of hours.
@@ -186,7 +176,6 @@ that capacity-growth handling can be reached in minutes instead of hours.
 | `nvfortran-openacc-host-akima` | Development-only historical host-Akima oracle inside the OpenACC refinement path |
 | `nvfortran-openacc-compare-akima` | Development-only host/device Akima A/B comparison |
 | `nvfortran-openacc-compare-refinement` | Development-only host/device A/B comparison of the accepted-event volume, mass, and charge reconstruction (`JETSPIN_COMPARE_REFINEMENT_ASSEMBLY`) |
-| `nvfortran-openacc-dynamic-platen` | Macro-gated fork extending the persistent device path to variable-topology non-evaporative Platen runs |
 | `help` | Display available targets |
 | `clean` | Remove objects and module files from `source/` |
 

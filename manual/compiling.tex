@@ -113,17 +113,12 @@ evaporated volume, mass, and charge that follows the Akima interpolation
 (see Sec.~\ref{sec:Dynamic-refinement}). None of these targets is intended
 for performance measurements.
 
-Target \texttt{nvfortran-openacc-dynamic-platen} enables the
-\texttt{JETSPIN\_GPU\_DYNAMIC\_PLATEN} macro. Unlike the oracle and Akima
-targets it is an execution path rather than a validation aid: it extends the
-device-resident integration path to non-evaporative Platen runs whose bead
-count varies during the simulation, including runs started from a single bead.
-All of its changes are enclosed in the macro, so the behaviour of
-\texttt{nvfortran-openacc} is unchanged. It is not yet the default because its
-random-number consumption order differs from the standard build, so the two
-produce statistically equivalent but not identical trajectories, and because a
-restarted run does not resume the random sequence at the point where it was
-interrupted.
+Until 2026-10-05, the separate target
+\texttt{nvfortran-openacc-dynamic-platen} extended the device-resident path
+to non-evaporative Platen runs started from a single bead. It was removed:
+\texttt{nvfortran-openacc} now follows the evaporative case for these runs
+too, and both read the same pre-generated
+Gaussian pool as the CPU builds (Sec.~\ref{sec:Noise-pool}).
 
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
@@ -181,9 +176,6 @@ nvfortran-openacc-compare-akima & compare host and device Akima coefficients
 and interpolated values at every accepted refinement.\tabularnewline
 nvfortran-openacc-compare-refinement & compare host and device reconstruction of
 volume, mass, and charge at every accepted refinement.\tabularnewline
-nvfortran-openacc-dynamic-platen & extend the device-resident path to
-non-evaporative Platen runs whose bead count varies during the
-simulation.\tabularnewline
 help  & return the list of possible target choices\tabularnewline
 clean  & remove object and module files from the \textit{source} sub-directory.\tabularnewline
 \hline

@@ -31,6 +31,16 @@ with the fresh NVFORTRAN CPU output in all six rows and fourteen columns.
 These timings describe this development system and are not portable
 performance guarantees.
 
+Since 2026-10-05 the non-evaporative Coulomb kernel gives each target bead one
+gang, reduces over the sources across its vector lanes, and no longer uploads
+array descriptors at every call. On one A30 bound to its NUMA node, against the
+previous kernel on the same node, the loop times are `0.122 s` against
+`0.589 s` (Test 10), `0.223 s` against `1.078 s` (Test 11), and `0.354 s`
+against `1.659 s` (Test 12); Test 20 uses the
+evaporative kernel and is unchanged. All three still pass `compare.sh`
+against the CPU records (worst normalized differences `8e-7`, `9e-7`, and
+`0`).
+
 The development-only `nvfortran-openacc-force-oracle` and
 `nvfortran-openacc-coulomb-oracle` targets use the same interfaces here as in
 the evaporation tests. For Euler their worst normalized differences from the

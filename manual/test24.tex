@@ -48,24 +48,26 @@ resolution.  It is informational and not enforced: Example 5 and Test Cases
 21--23 are themselves below that ratio and remain valid short-window
 references.
 
-The longest clean run covers 6,000,000 steps on an
-NVIDIA A30, closing correctly with no NaN and no device errors, and ending
-with 571 active beads, an off-axis distance of 4.09 cm, and a bending angle
-of 28.7 degrees.  That run used the development dynamic-Platen build.  Its
-printed path length, 111.4 cm, was halved by a defect of the persistent
-Platen statistics, since fixed, that counted each timestep twice, and until
-1 October 2026 the build lacked the device-side charge smoothing and placement
-of the bead being inserted at the nozzle, which in Test Case~25 made the GPU
-jet about ten percent longer and denser; it is therefore not a reference.
-With the fix the fork follows its own non-persistent run, which reads the same
-Gaussian pool, within $7\times10^{-7}$ in path length over 2 million steps.  An NVFORTRAN CPU run gives
-212 cm and about 512 active beads between steps 4 and 5 million.  The
-bead count oscillates around
-570 over the last two million steps rather than drifting, so the balanced
-insertion and removal regime is reached, although at 6\% of the target
-duration rather than over the full run.  A full-length reference does
-not yet exist, and since the developed bending instability carries several
-hundred active beads, the direct Coulomb cost per step is substantial.
+Since 5 October 2026 the case follows Test Case 25: CPU and GPU builds read
+the same pre-generated Gaussian pool (Sec.~\ref{sec:Noise-pool}), and the GPU
+runs the device-resident path once the jet holds 100 beads.  The reference
+run uses the NVFORTRAN 24.3 CPU build and is truncated at 5,000,000 steps, 5\%
+of the target duration; it closes correctly.  The first bead reaches the
+collector at step 2,541,113.  Between 4 and 5 million steps the collector
+velocity is 1963 cm/s, the off-axis distance of the leading bead 3.8 cm, the
+cone angle 26.6 degrees, the active-bead count between 471 and 553 around a
+mean of 511, and the path length 211 cm, so the balanced insertion and removal
+regime is reached; four more CPU seeds give mean active counts between 511.3
+and 512.0.  One NVIDIA
+A30 runs the same 5 million steps in about 620 s: it reproduces the CPU run
+exactly until step 1,379,105, where it engages the device-resident path,
+follows the CPU trajectory afterwards, and five seeds give between 511 and 512
+active beads and a path length of 211 cm over the same window.  The A30 step
+then costs between about 110 and 150~$\mu$s from 100 to 600 beads, against 4
+to 5 ms for the CPU build with about 500 beads; the standard GPU build of the
+same day, which kept this case on the host with only the Coulomb sums on the
+GPU, needed 4546 s.  A full-length reference does not yet exist; on one A30 it
+would take about four hours.
 
 Track the printed \texttt{n} column over time to observe the stationary
 oscillation.  The input is stored in

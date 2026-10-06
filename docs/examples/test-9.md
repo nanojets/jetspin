@@ -259,6 +259,18 @@ to complete snapshots at the requested XYZ cadence and produced a valid
 trajectory file. The standard numerical comparison retained the worst
 normalized difference of `7.97e-5`.
 
+## Coulomb kernel with one gang per target (2026-10-05)
+
+The non-evaporative three-dimensional Coulomb kernel now spreads the sources
+of each target bead over the vector lanes of one gang and combines them with a
+reduction, as the evaporative kernel does since 2026-09-30, instead of giving
+each target one thread, and takes its arrays as assumed-shape dummies, which
+removes nine descriptor uploads and a wait per call. On one A30, with the
+process bound to the GPU's NUMA node, the Test 9 loop takes `0.508 s` against
+`2.121 s` with the previous kernel on the same node (NVFORTRAN CPU
+`24.94 s`). Only the summation order changes: the output still passes the CPU
+and A30 records with a worst normalized difference of `7.99e-5`.
+
 ## Versioned numerical records
 
 The CPU and A30 OpenACC `statout.dat` files from this initial measurement are

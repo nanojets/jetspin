@@ -27,7 +27,6 @@ OBJ_MOD = serial_version_mod.o parallel_version_mod.o host_accelerator_mod.o \
 	profiling_mod.o utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	openacc_dynamic_platen_mod.o \
 	integrator_mod.o integrator_kv_ev_mod.o statistic_mod.o io_mod.o
 
 OBJ_SRC = main.o
@@ -54,7 +53,6 @@ all:
 	@echo "nvfortran-openacc-host-akima       "
 	@echo "nvfortran-openacc-compare-akima    "
 	@echo "nvfortran-openacc-compare-refinement"
-	@echo "nvfortran-openacc-dynamic-platen "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -85,7 +83,6 @@ help:
 	@echo "nvfortran-openacc-host-akima       "
 	@echo "nvfortran-openacc-compare-akima    "
 	@echo "nvfortran-openacc-compare-refinement"
-	@echo "nvfortran-openacc-dynamic-platen "
 	@echo "                                   "
 	@echo "Possible choices for debugging are:"
 	@echo "                                   "
@@ -209,20 +206,6 @@ nvfortran-openacc-host:
 	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
 	EX=$(EX) BINROOT=$(BINROOT) seq
 
-# Fork build: widens the Platen (integrator 4, system 4, no evaporation)
-# persistent OpenACC path from the fixed 1,000-bead benchmark geometry to
-# dynamic topologies (ongoing nozzle insertion + dynamic mesh refinement),
-# via openacc_dynamic_platen_mod.f90. With this macro undefined (plain
-# nvfortran-openacc), platen()'s persistent path is byte-for-byte the
-# original fixed-geometry-only code.
-nvfortran-openacc-dynamic-platen:
-	$(MAKE) -f $(MAKEFILE_PATH) FC=$(NVFORTRAN) \
-	FFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -Minfo=accel -c" \
-	FPPFLAGS="-Mpreprocess -DJETSPIN_GPU_DYNAMIC_PLATEN $(FPPFLAGS_EXTRA)" \
-	LDFLAGS="-O3 -acc=gpu $(OPENACC_GPU_FLAGS) -o" \
-	ACCOBJ=openacc_accelerator_mod.o TYPE=seq \
-	EX=$(EX) BINROOT=$(BINROOT) seq
-
 gfortran-mpidebugger:
 	$(MAKE) -f $(MAKEFILE_PATH) FC=$(MPIFC) \
 	FFLAGS="-O0 -g -fcheck=all $(MPI_COMPAT_FLAG) -c" \
@@ -281,13 +264,13 @@ seq:serial_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o utili
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	openacc_dynamic_platen_mod.o integrator_mod.o \
+	integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) serial_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	openacc_dynamic_platen_mod.o integrator_mod.o \
+	integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 
@@ -295,13 +278,13 @@ mpi:parallel_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o uti
 	nanojet_mod.o fit_mod.o support_functions_mod.o breaking_mod.o \
 	dynamic_refinement_mod.o viscoelastic_force_mod.o coulomb_force_mod.o \
 	electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	openacc_dynamic_platen_mod.o integrator_mod.o \
+	integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	$(FC) $(LDFLAGS) $(EX) parallel_version_mod.o $(ACCOBJ) profiling_mod.o parse_mod.o error_mod.o \
 	utility_mod.o nanojet_mod.o fit_mod.o support_functions_mod.o \
 	breaking_mod.o dynamic_refinement_mod.o viscoelastic_force_mod.o \
 	coulomb_force_mod.o electric_field_mod.o eom_mod.o eom_ev_mod.o driver_eom_mod.o \
-	openacc_dynamic_platen_mod.o integrator_mod.o \
+	integrator_mod.o \
 	integrator_kv_ev_mod.o statistic_mod.o io_mod.o main.o
 	mv $(EX) $(EXE)
 
@@ -362,14 +345,7 @@ eom_ev_mod.o: eom_ev_mod.f90
 driver_eom_mod.o: driver_eom_mod.f90
 	$(FC) $(FFLAGS) driver_eom_mod.f90
 
-# Fork target for extending the Platen persistent OpenACC path to dynamic
-# (variable-N) topologies. Empty/inert unless JETSPIN_GPU_DYNAMIC_PLATEN is
-# defined; see nvfortran-openacc-dynamic-platen below.
-openacc_dynamic_platen_mod.o: openacc_dynamic_platen_mod.f90 nanojet_mod.o \
-	electric_field_mod.o dynamic_refinement_mod.o
-	$(FC) $(FFLAGS) $(FPPFLAGS) openacc_dynamic_platen_mod.f90
-
-integrator_mod.o:integrator_mod.f90 statistic_mod.o openacc_dynamic_platen_mod.o
+integrator_mod.o:integrator_mod.f90 statistic_mod.o
 	$(FC) $(FFLAGS) $(FPPFLAGS) integrator_mod.f90
 
 integrator_kv_ev_mod.o:integrator_kv_ev_mod.f90 statistic_mod.o

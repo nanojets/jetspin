@@ -38,8 +38,9 @@ The native GPU trajectory is compared through refinement invariants rather
 than binary identity because target-centric Coulomb accumulation changes the
 floating-point summation order. The force oracle is for diagnosis only.
 
-The test takes roughly half a minute on the development host. Set
-`JETSPIN_REFINEMENT_KEEP=1` to retain its temporary build and output directory.
+The test takes roughly half a minute; its run is limited to 90 seconds,
+which `JETSPIN_REFINEMENT_TIMEOUT` changes. Set `JETSPIN_REFINEMENT_KEEP=1`
+to retain its temporary build and output directory.
 
 ## Repeated-refinement stress test
 
@@ -70,7 +71,7 @@ three `OpenACC refinement capacity rebind` diagnostics. Its default timeout is
 
 `run_test23.sh` extends the repeated-growth workload to the collector. It
 requires exactly three accepted remeshes and capacity changes, plus at least
-one device topology removal before and after the final remesh. The same
+one collector removal before and after the final remesh. The same
 anchor, conservation, ordering, Gaussian-history, and finite-output checks
 are applied at every refinement event.
 
@@ -80,17 +81,22 @@ tests/refinement/run_test23.sh openacc
 tests/refinement/run_test23.sh force-oracle
 tests/refinement/run_test23.sh host-akima
 tests/refinement/run_test23.sh akima-compare
+tests/refinement/run_test23.sh refinement-compare
 ```
 
-This is also a same-compiler NVFORTRAN CPU/GPU test. The exact later removal
-schedule is intentionally not compared because the different direct-Coulomb
-summation order is amplified by the stochastic bending trajectory near the
-collector. The runner's default timeout is 240 seconds to accommodate the
-development force oracle.
+This is also a same-compiler NVFORTRAN CPU/GPU test. The runner does not
+compare the removal schedule with a reference; the native OpenACC path and the
+force oracle reproduce the CPU's step for step (see
+`docs/examples/test-23.md`). The runner's default timeout is 240 seconds to
+accommodate the development force oracle.
 
 The `host-akima` backend keeps the historical CPU spline as an oracle while
 the rest of the accelerator lifecycle remains enabled. The `akima-compare`
 backend evaluates both spline implementations for every field at every event.
 It requires 33 comparison records (11 fields times 3 events), finite metrics,
 coefficient relative error at most `1e-12`, interpolated absolute error at
-most `1e-9`, and interpolated relative error at most `1e-12`.
+most `1e-9`, and interpolated relative error at most `1e-12`. The
+`refinement-compare` backend evaluates the host and device assembly of the
+remeshed state (volume, mass and charge, and the evaporated volume) at every
+event. It requires three assembly and three evaporation comparison records,
+one per event; their differences are printed, not bounded.

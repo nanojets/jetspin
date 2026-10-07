@@ -22,6 +22,10 @@ tests/refinement/run_test22.sh openacc
 tests/refinement/run_test22.sh force-oracle
 ```
 
-In the OpenACC build, Akima coefficient construction and interpolation run on
-the GPU. Target-mesh preparation, conservation, host reallocation, and the
-persistent-data rebind remain rare event-level host work.
+In the OpenACC build, Akima coefficient construction and interpolation, the
+volume reconstruction with its conservation rescale, and the conversion of
+mass and charge densities run on the GPU. The mass-boundary walk and
+target-mesh preparation, the anchor bookkeeping and final assembly, the
+conservative radius-floor and evaporation-limit corrections, the invariant
+checks, host reallocation, and the persistent-data rebind remain rare
+event-level host work.

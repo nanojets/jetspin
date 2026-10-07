@@ -4,23 +4,118 @@ JETSPIN's NVIDIA GPU port is being developed incrementally with explicit
 OpenACC data regions. The normal GFortran, Intel, and MPI targets continue to
 select the original CPU implementation.
 
+## Device strategy and its coverage
+
+Tests 24 and 25 set the strategy that every run is to follow (work plan in
+`docs/STATE.md`, from 2026-10-06):
+
+1. a size-independent configuration test decides once, before the loop,
+   whether the run can use the device path (and whether it reads the
+   Gaussian pool); a per-step gate opens the device path when `npjet`, the
+   index of the nozzle bead, reaches 100 and keeps it open (`npjet` counts
+   the beads in the arrays, collected ones included until a compaction
+   removes them, not the active ones);
+2. below the gate the OpenACC build runs the CPU build's code, Coulomb sums
+   included, and reproduces the CPU build byte for byte;
+3. above it the state stays on the device and an ordinary step returns one
+   20-byte topology record;
+4. one asynchronous queue, one wait per step, small kernels fused;
+5. stochastic forcing from the sequential Gaussian pool;
+6. exact restart.
+
+Euler, RK2, RK4 and Platen runs follow it through one device step
+(`source/device_step_mod.f90`, milestones M1-M3): one set of model
+conditions (`device_step_supported`, which for the Platen scheme also
+decides the Gaussian pool, in every build and for any number of ranks), one
+configuration test that adds the data layout (`device_step_configured`),
+one sticky gate at `npjet` = 100 (`device_step_eligible`), one engagement
+routine that maps the state and prints `OpenACC device step engaged
+(scheme, model) at step N with M active beads` (`resumed`, after a restart
+from a state on which the gate had opened: the restart file records it,
+restart state version 2, since a compaction can leave fewer than 100 beads
+in the arrays of an engaged run), and one stage evaluator for
+the Maxwell and Kelvin-Voigt models, each with or without evaporation, with
+or without air drag. The RK schemes combine its stages with their update
+kernels (`device_rk_step`); the Platen scheme (`device_platen_step`) adds the
+stochastic terms, one fused preparation kernel per force evaluation and the
+two-kernel tail (`accelerator_platen_update`, `accelerator_platen_end_step`),
+with or without insertion. The integrators of `integrator_mod` and
+`integrator_kv_ev_mod` contain only the CPU build's code and dispatch to it
+above the gate. Still outside it (`device_step_supported`,
+`device_step_configured`): multiple-step Coulomb, refinement and the other
+options that tag beads with the RK schemes, time-dependent external fields,
+Lorentz force, upper potential, drag velocity, breakup, bead tracking
+(`print binary ... style 4`), a fixed bead set with `removing yes`, 1D
+systems and MPI runs; they run the CPU code in the OpenACC build. The RK
+schemes take the device step on system 3, the Platen scheme on system 4.
+
+Coverage measured on 2026-10-06 (A30, NVHPC 24.3, `NVCOMPILER_ACC_NOTIFY`;
+launches and transfers per step over the test input, or over the first 200
+steps of the examples):
+
+| Case | Model | Device path | Launches / step | Transfers / step |
+| --- | --- | --- | ---: | ---: |
+| Ex 1, 2 | 1D, RK2 / RK4 | host, identical to the CPU build (the 1D Coulomb sum ran on the device at every step until M1) | 0 | 0 |
+| Ex 3, 5, 6, 7 | 3D, from one bead | host below 100 beads, identical to the CPU build; Example 3 takes the device step above it, Examples 5 and 6 need multiple-step Coulomb, Example 7 a time-dependent field | 0 | 0 |
+| Ex 4 | Platen, no refinement | host below 100 beads, identical to the CPU build, both reading the Gaussian pool since M3 (regression baselines regenerated); the device step above it | 0 | 0 |
+| Ex 8 | RK4 with evaporation, no air drag | host, then the device step from step 13,699 (`npjet` 100, 89 active beads); identical to the CPU build up to it | 0 (first 200 steps) | 0 |
+| Test 9 / 10 / 11 | RK4 / Euler / RK2, fixed 1000 beads | device step from step 1; one more launch since 2026-10-07 (freezing at the collector) | 22 / 10 / 14 | 0.2 |
+| Test 12 | Platen, fixed 1000 beads | device step from step 1, fused tail (18 launches before M3), freezing at the collector (since 2026-10-07) | 13 | 0.2 |
+| Tests 13-15 | RK4 with insertion | device step from step 1 | 28-30 | 1.5-1.6 |
+| Tests 16, 18 | RK4 with evaporation | device step from step 1 | 29 / 30 | 4.3 / 22 |
+| Tests 17, 19 | RK4 Kelvin-Voigt with evaporation | device step from step 1 | 33 / 34 | 4.3 / 4.2 |
+| Test 20 | Platen with evaporation, fixed 1000 beads | device step from step 1, fused tail (19 launches before M3), freezing at the collector (since 2026-10-07) | 13 | 1.8 |
+| Tests 21-25 | Platen with refinement | device step, asynchronous queue | 12-14 | about 2 |
+
+The RK steps and the fixed-geometry Platen step are still synchronous, and
+the RK steps are not fused (one launch per kernel): milestone M4.
+
+Since 2026-10-07 a bead whose insertion needs larger arrays is inserted in
+the step that grows them, as in the CPU build. Before, the device topology
+path grew the arrays and inserted the bead one step later. A jet started
+from one bead fills its initial arrays (100 beads) just when the gate opens,
+so such runs left the CPU trajectory at their first insertion on the device
+(Examples 3, 4, 6, 8), the others at their first reallocation (Tests 15-19,
+24); now they separate only through roundoff, much later (`docs/STATE.md`,
+item 3 of the pre-merge checks).
+
 ## Implemented milestones
 
-The `nvfortran-openacc` target currently accelerates the direct Coulomb
-summation when all of these conditions hold:
+Inside the device step the whole step runs on the GPU, the Coulomb sums
+included. Outside it the `nvfortran-openacc` target runs the CPU build's
+code and offloads only the direct Coulomb summation, when all of these
+conditions hold:
 
-- execution is serial (`mxrank == 1`);
 - multiple-step Coulomb summation is disabled;
-- evaporation is enabled for the serial 3D path;
-- the system is either one- or three-dimensional.
+- the sum is the non-evaporative one-dimensional one (since 2026-10-06) or a
+  three-dimensional one, with or without evaporation;
+- the jet has at least 128 active beads
+  (`JETSPIN_OPENACC_COULOMB_MIN_BEADS`; 0 offloads every call, as before
+  2026-10-05).
 
-A three-dimensional run that has not engaged a persistent device path
-offloads the Coulomb sum only while the jet has at least 128 active beads
-(`JETSPIN_OPENACC_COULOMB_MIN_BEADS`; 0 offloads every call, as before
-2026-10-05). Such a call copies the jet to the device and the forces back,
-which costs more than the host sum on a shorter jet; the
+Such a call copies the jet to the device and the forces back, which costs
+more than the host sum on a shorter jet; the
 [Test 25 time budget](../examples/test-25.md#phase-1-the-coulomb-sum-on-the-host)
-gives the measured crossover. A persistent run always sums on the device.
+gives the measured crossover.
+
+Runtime switches (all of them, with the developer ones, in
+[Compiling](compiling.md#runtime-environment-variables)):
+
+- `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` keeps the device step closed for
+  every run, fixed bead sets included: the OpenACC build runs the CPU
+  build's code, offloading only the Coulomb sums above; the Gaussian-pool
+  decision does not change.
+- `JETSPIN_OPENACC_DISABLE_EOM=1` does the same since 2026-10-07. Before, it
+  made the device stage skip the equations of motion and integrate stale
+  derivatives. A device EOM kernel that refuses a stage now stops the run
+  with error 22 (`the OpenACC device step cannot evaluate the equations of
+  motion of this run`); `device_step_supported` admits only what the
+  kernels evaluate, so this is a guard, not an expected outcome.
+- `JETSPIN_OPENACC_DISABLE_COULOMB=1` keeps the one-dimensional sum on the
+  host; it has never affected the three-dimensional sums.
+- `JETSPIN_OPENACC_SYNC=1` runs the Platen device step of a run with
+  insertion synchronously; the RK device steps and fixed bead sets are
+  always synchronous (milestone M4).
 
 The build defaults to `GPUCC=80` and `CUDA_VERSION=12.3`, producing
 `-gpu=cc80,cuda12.3,nofma`. This covers the NVIDIA A30 and A100. `nofma`
@@ -35,7 +130,7 @@ make -C source -f ../build/Makefile nvfortran-openacc \
 
 The GPU and OpenACC-host targets make the standard `_OPENACC` preprocessing
 macro available. Accelerator imports, initialization, Coulomb dispatch, and
-EOM dispatch are compiled only when this macro is present. Normal CPU and MPI
+device-step dispatch are compiled only when this macro is present. Normal CPU and MPI
 targets do not contain references to those accelerator entry points.
 
 Unsupported configurations retain the existing CPU path. In particular, MPI
@@ -67,17 +162,31 @@ The implementation preserves the existing model conventions, including:
 - the one-dimensional distance cutoff;
 - mirror-charge contributions and their three-dimensional cutoff.
 
-The three-dimensional equation-of-motion force assembly is offloaded for the
-fixed Tests 9--12 and 20 configurations and for the bounded dynamic
-evaporation paths in Tests 16 and 17. One kernel is launched per integrator
-stage. Its local
+The three-dimensional equation-of-motion force assembly runs on the device
+only inside the device step: one kernel per force evaluation
+(`accelerator_eom3_stage`, which for an evaporating Maxwell jet also
+computes the stress and the evaporation rate), followed for the
+Kelvin-Voigt model by its stress kernel (`accelerator_kv_stress_3d`). Its local
 three-point curvature calculation is device-side: an iteration reads the
 current bead and its two neighbours. No host curvature array is built or
 transferred. Disabling fused multiply-add preserves the accepted trajectory
-for the initially straight geometry. Configurations outside the explicitly
-validated gates use the original CPU EOM path.
+for the initially straight geometry. Outside the device step the CPU
+build's EOM code runs. Until milestones M1-M3 (2026-10-06) separate gates
+shaped on the tests offloaded it (fixed Tests 9--12 and 20, dynamic Tests
+13--25), and the non-evaporative Euler, RK2 and RK4 host paths offloaded
+the EOM stage whenever air drag was on.
 
 ## Non-evaporative dynamic Platen (Test 24)
+
+Since 2026-10-06 (milestone M3) the gates and persistent branches described
+in this section and the next ones (`dynamic_platen_configured`,
+`dynamic_platen_eligible`, `dynamic_evaporative_platen_configured`,
+`dynamic_evaporative_platen_eligible`, `fixed_accelerator_geometry`,
+`fixed_evaporative_platen_eligible`) are replaced by the device step above;
+the step itself is unchanged (Tests 24 and 25 byte-identical over 2.1
+million steps), and it now also serves runs without refinement (Example 4)
+and the fixed bead sets of Tests 12 and 20, which lost their separate,
+unfused kernels. The text below is the history of the Platen paths.
 
 Since 2026-10-05 the non-evaporative stochastic Platen run growing from a
 single bead (Test 24) follows the evaporative one (Test 25) in every build.
@@ -109,8 +218,8 @@ evaporative Platen integrator only. Its eligibility logic, now in
 tests only size-independent model configuration and is what the one-shot
 history allocation consults, while `dynamic_platen_eligible` adds the `npjet
 >= 100` and `mxnpjet > npjet` thresholds and gates the per-step activation.
-The history is the sequential pool described in [random numbers](random-
-numbers.md), the default layout for every build since 2026-09-30, which
+The history is the sequential pool described in
+[random numbers](random-numbers.md), the default layout for every build since 2026-09-30, which
 removes the remap that capacity growth used to force.
 
 A step in the persistent branch runs entirely on the device: three charge
@@ -184,8 +293,9 @@ one caller that omitted it, in `rk4sys`, was corrected to pass it. This is a
 defect of the shipped `nvfortran-openacc` target, not of any development fork:
 `examples/input-15` on the previous commit produced NaN from its first printed
 line with the bead count frozen at 103, against `x = 35.99` and 211 beads on
-CPU; after the fix the GPU result matches the CPU one to eight significant
-digits. `examples/input-13` and `input-14` hide it at their shipped 1,000-step
+CPU; after the fix the GPU result matched the CPU one to about eight
+significant digits (every row is identical since the collector rule of
+2026-10-07). `examples/input-13` and `input-14` hide it at their shipped 1,000-step
 length, which performs no reallocation at all, and reproduce it when extended
 to 25,000 steps.
 
@@ -199,13 +309,17 @@ Coordinates, bead properties, cross sections, and the Coulomb force array are
 named explicitly in each OpenACC data region. No managed/unified-memory build
 mode is used.
 
-Configurations outside the explicitly validated persistent gates in Tests
-9--13, 16, 17, 20, and 21 continue to use separate call-scoped Coulomb and EOM
-data regions.
+Outside the device step no jet array stays on the device: a Coulomb sum
+offloaded there (at least 128 active beads) maps the jet and the force
+array for that call only. Until milestones M1-M3 (2026-10-06) the runs
+outside the per-test persistent gates of Tests 9--13, 16, 17, 20 and 21 used
+such call-scoped Coulomb and EOM data regions.
 
-Test 13 now records the bounded persistent dynamic-topology milestone. It
-preallocates 1,280 slots, keeps RK4 and force data resident as `inpjet` and
-`npjet` change, and performs collector detection and clamping on the device.
+Test 13 recorded the first persistent dynamic-topology path, behind a gate
+shaped on its geometry (at least 1,000 beads and 1,280 slots) until M1. Its
+mechanisms are those of the device step with insertion today: the RK and
+force data stay resident as `inpjet` and `npjet` change, and collector
+detection and clamping run on the device.
 Nozzle insertion, including threshold checks, blocked-bead release, record
 initialization, and `npjet` update, also runs on the device, and so do the
 placement and the charge smoothing of the blocked bead before every force
@@ -214,16 +328,19 @@ exhaustion, and removal; the outcome returns to the host as one 20-byte
 record per step. On an actual insertion the host downloads only the injected
 mass and charge required by the host statistics, and on a removal only the
 removed record. Test 15 additionally exercises small-capacity teardown, host
-reallocation, and device remapping. General device-side compaction remains
-outside this path.
+reallocation, and device remapping. Compaction and capacity growth remain
+host operations, after which the device step rebuilds its workspace
+(`device_step_request_reset`).
 
-The persistent A30 run reproduces all 26 CPU topology events step for step.
+The A30 run of Test 13 reproduces all 26 CPU topology events step for step.
 Until 2026-10-01 its insertions fell progressively earlier (step 593 instead
 of 600 for the seventh): the device placed the blocked bead only when it was
 created and never smoothed its charge, so the device Coulomb sum saw a full
 charge at the nozzle. That drift had been attributed to GPU RK4 rounding.
-`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` still restores the call-scoped path.
-An optional full-state snapshot at every topology event verifies bead
+`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` keeps the device step closed, so the
+run executes the CPU build's code with Coulomb sums of at least 128 active
+beads offloaded. `JETSPIN_TOPOLOGY_SNAPSHOT=1` writes the full active state
+at every insertion and removal to `topology-state.dat`, to verify bead
 metadata and properties. See the [Test 13 record](../examples/test-13.md).
 
 Tests 16 and 17 complete the Maxwell and Kelvin--Voigt evaporation paths for
@@ -233,10 +350,13 @@ rebinding use the same persistent-data strategy. CPU and A30 executions of all
 three integrators and both rheologies report 111 additions, 122 removals, two
 reallocations, and 89 active beads. Three-step pre-event CPU/GPU comparisons
 are identical at `rtol=1e-12` and `atol=1e-13`; Maxwell XYZ geometry is also
-byte-identical at written precision. The first insertion threshold occurs at
-step 4 on the CPU and step 5 on the GPU, so aggregate topology and transfer
-behaviour, rather than pointwise trajectory identity, form the dynamic
-acceptance criteria.
+byte-identical at written precision. Until 2026-10-07 the first insertion
+came at step 4 on the CPU and step 5 on the GPU: the device topology path
+inserted a bead one step late whenever the arrays had to grow for it. Since
+the fix Tests 15, 16, 17 and 19 give the CPU's events step for step and
+Test 18 its totals; pointwise trajectories still separate at roundoff
+level, so events, pre-event agreement and transfer behaviour form the
+dynamic acceptance criteria.
 
 Tests 9--12 use an explicit persistent-data path. The primary jet state,
 static bead properties, Coulomb force, EOM derivatives, and integrator scratch
@@ -348,8 +468,8 @@ restart events request a complete state explicitly. With the standard Test 9
 input, the five scheduled samples transfer 420 bytes in total and the final
 restart performs the only 56,056-byte full-state download. The accelerator
 records the last synchronized timestep so coincident output and restart events
-never duplicate a transfer. Test 13 uses its separate bounded dynamic transfer
-policy described above.
+never duplicate a transfer. Since M1-M3 the runs with insertion take the
+same device step and add the 20-byte topology record described above.
 
 ## Numerical validation
 
@@ -357,6 +477,15 @@ Compare the OpenACC path with a CPU reference built by the same `nvfortran`
 version. Different Fortran compilers may use different pseudo-random-number
 sequences, so a GFortran trajectory is not a suitable direct reference for a
 stochastic NVIDIA build.
+
+NVHPC 25.5, built with `CUDA_VERSION=12.9`, passes the same checks as 24.3
+(2026-10-07: regression, restart, evaporation and refinement suites, every
+oracle, Examples 1-8 and Tests 9-25), and its OpenACC runs give the events of
+its own CPU build. Its results differ from 24.3's in the last digits, since
+24.3 at `-O3` divides by multiplying with the reciprocal; trajectories that
+amplify roundoff separate (Example 8, Tests 18, 19). Tests 24 and 25 take
+about 6 % longer on the A30 with 25.5 (host phase 9-16 %, device phase 3-5 %
+per step), so 24.3 remains the reference compiler.
 
 The direct CPU algorithm accumulates one pair into both beads, whereas the
 race-free accelerator algorithm accumulates independently by target bead.
@@ -370,7 +499,13 @@ tests/regression/run.sh openacc
 
 The standard 1,000-step regression validation on an NVIDIA A30 passed all
 eight normal regression cases; the written observables matched the NVFORTRAN
-CPU results at their output precision. The separate 1,000-bead RK4, Euler,
+CPU results at their output precision. These cases never exceed 25 beads, so
+since 2026-10-06 the OpenACC build runs the CPU build's code on them (below
+the device-step gate and the 128-bead Coulomb threshold): the comparison
+checks the OpenACC build's host path. The GPU kernels are validated by
+Tests 9--25, `tests/performance/dynamic/validate_evaporation.sh` (Tests 16
+and 17, Euler, RK2 and RK4), the refinement runners in `tests/refinement/`
+and the restart check (`tests/restart/run.sh openacc`). The separate 1,000-bead RK4, Euler,
 RK2, and Platen trajectories also pass their A30 baselines with `rtol=1e-6` and
 `atol=1e-9`; see the [benchmark index](../examples/README.md) for their records.
 
@@ -385,12 +520,16 @@ make -C source -f ../build/Makefile nvfortran-openacc-force-oracle GPUCC=80
 ```
 
 This enables the single `JETSPIN_DEV_HOST_FORCE_ORACLE` interface. At every
-supported Euler, RK2, RK4, or fixed-topology Platen force evaluation, with or
-without evaporation, the current state is downloaded, the complete trusted
-CPU force equations (including direct Coulomb) are evaluated, and the
-derivatives are uploaded. Maxwell and Kelvin--Voigt deterministic evaporation,
-non-evaporative Platen, and Maxwell evaporative Platen share this interface.
-Integration updates and dynamic topology remain on the GPU. The target is a
+force evaluation of the device step (Euler, RK2, RK4 and Platen; Maxwell and
+Kelvin--Voigt, with or without evaporation; fixed bead sets and jets with
+insertion, with or without refinement) the current stage is downloaded, the
+complete trusted CPU force equations (including direct Coulomb) are
+evaluated, and the derivatives are uploaded. Integration updates, dynamic
+topology and the two-kernel tail of the Platen step
+(`accelerator_platen_update`, `accelerator_platen_end_step`, final stress
+derivative included) remain on the GPU: since M3 the tail is not oracled
+(the oracle builds evaluated the final stress derivative on the host
+before). The target is a
 correctness diagnostic only; it is unsuitable for performance measurements or
 production runs.
 
@@ -411,25 +550,32 @@ transfers. Additional preprocessor switches can be passed through
 `FPPFLAGS_EXTRA`.
 
 The unified oracle checks include the fixed 1,000-bead stochastic cases.
-Tests 12 and 20 match their NVFORTRAN CPU statistical outputs exactly in all
+Tests 12 and 20 matched their NVFORTRAN CPU statistical outputs exactly in all
 six rows and fourteen columns with both the complete-force oracle and the
-Coulomb-only oracle. These checks also cover the positive and negative Platen
-predictors and the partial Heun position, evaporation, and stress evaluations.
+Coulomb-only oracle. Before M3 these checks also covered parts of the
+Platen tail, the final stress evaluation among them, which the oracle builds
+then evaluated on the host; since M3 they cover the three force evaluations
+of the step (at the initial state and at the two predicted states), and the
+Platen force oracles of Tests 12 and 20--22 give the device step's events.
 
-The bounded dynamic-topology path is enabled for Maxwell Euler, RK2, and RK4
+The device step covers Maxwell Euler, RK2, and RK4
 evaporation (Test 16), including insertion, removal, and capacity rebinds.
 All three A30 runs reproduce the CPU event totals (111 insertions, 122 removals,
-two reallocations, 89 active beads). Runtime transfer audits of the standard
+two reallocations, 89 active beads), and since 2026-10-07 every event at the
+CPU's step. Runtime transfer audits of the standard
 build (no diagnostic macros) confirm that no state, force, stress, or
 derivative array crosses the PCIe boundary between stages. Each timestep
 returns only one 20-byte topology record. Insertion, removal, statistical
 output, capacity growth, and the final checkpoint transfer only the records
 required by those events. Full active-state transfers occur at the two
-reallocations and at the final checkpoint. CPU/GPU trajectories are not
-expected to be pointwise identical after the first topology threshold because
-target-centric Coulomb accumulation and the subsequent bending instability
-amplify floating-point ordering differences; topology totals, pre-event
-agreement, and transfer behaviour are the acceptance criteria.
+reallocations and at the final checkpoint. Until 2026-10-07 the device
+inserted one step late when the arrays grew (first insertion at step 5
+against 4), which was ascribed to the Coulomb summation order. CPU/GPU
+trajectories are still not pointwise identical, because target-centric
+Coulomb accumulation and the subsequent bending instability amplify
+floating-point ordering differences in the transverse components; event
+steps, pre-event agreement, and transfer behaviour are the acceptance
+criteria.
 
 Test 17 applies the same transfer policy to all deterministic Kelvin--Voigt
 evaporation integrators. Runtime transfer audits of Euler, RK2, and RK4 confirm
@@ -470,6 +616,46 @@ invariant by tens of percent before being fixed; this is the reason every new
 device stage in this project must be validated with an A/B oracle rather than
 trusted from inspection alone.
 
+### Development note: diagnostic strategies for new device kernels
+
+Three strategies have been used to check a device kernel against the trusted
+host code; a new kernel should get at least one of them.
+
+- **Substitution oracle** (`nvfortran-openacc-force-oracle`,
+  `nvfortran-openacc-coulomb-oracle`): the host result replaces the device
+  result at every call and the run goes on with it. A trajectory or event
+  difference between the oracle and the native run then isolates the
+  kernel. It changes the run and transfers data at every call.
+- **A/B comparison build** (`nvfortran-openacc-compare-akima`,
+  `nvfortran-openacc-compare-refinement`): both results are computed, the
+  device one stays authoritative, and the build prints the largest
+  difference at each call. The run is unchanged, so the difference measures
+  the kernel itself.
+- **In-line comparison at run time**: until 2026-10-07 the variable
+  `JETSPIN_COULOMB_DIAGNOSTIC=1` did an A/B comparison of the evaporative
+  three-dimensional Coulomb sum inside the standard build. After each device
+  sum it downloaded the state and the forces, recomputed the sum with a
+  plain host loop, and printed `COULOMB_DIAGNOSTIC maxdiff=` with the bead
+  and component of the largest difference (and both values above 1e-10). It
+  served while the evaporative kernel was written (2026-08) and was removed
+  because it covered one path only (no non-evaporative or one-dimensional
+  sum), its download assumed arrays mapped by the device step and stopped
+  the run outside it, and the environment lookup sat in the production path.
+  The removed in-line Maxwell stage comparisons of `rk4sys_ev`
+  (`JETSPIN_COMPARE_MAXWELL_*`, until M1) were of the same kind. The macro
+  `JETSPIN_DISABLE_COULOMB_EVAP` (until 2026-10-07) was a partial
+  substitution oracle: it kept the evaporative 3-D Coulomb sum on the host,
+  but without refreshing the host state from the device, so it gave wrong
+  results inside the device step; the Coulomb-oracle build replaces it.
+
+If such a check is needed again, write it as an A/B comparison build: a
+macro (as `JETSPIN_COMPARE_AKIMA`) and a Make target, so that the standard
+build does not carry it; cover every path of the quantity compared (for
+Coulomb: evaporative and non-evaporative, 1-D and 3-D, inside and outside the
+device step); download with `update self(...) if_present`, since outside
+the device step the data are already on the host; and print one summary per
+call or per output interval, not per bead.
+
 ## Dynamic evaporative Platen from a single bead (Test 25)
 
 Test 25 grows the jet from one bead, so the device sees tens to a few hundred
@@ -498,8 +684,8 @@ beads when `prepare_integrator_random_history` ran, which is never true for a
 single-bead start, so the persistent path never engaged and only the Coulomb
 kernel ran on the device. The path now engages at step 1,446,413 (120 beads),
 right after an accepted refinement event. Over the 5 million steps of the
-Test 25 reference the A30 takes about 690 s and the NVFORTRAN CPU build
-5893 s.
+Test 25 reference the time-integration loop takes about 690 s on the A30
+and 5863 s with the NVFORTRAN CPU build.
 
 Nsight Systems profiles of the current build explain the remaining cost:
 
@@ -526,26 +712,34 @@ Nsight Systems profiles of the current build explain the remaining cost:
 
 The queue (`accelerator_queue`) carries the charge smoothing and restoring,
 the placement of the inserting bead, the Coulomb, EOM, and stress kernels,
-the Platen updates, the statistics, and the topology check of a persistent
-dynamic evaporative Platen step. The topology record is read back on the
+the Platen updates, the statistics, and the topology check of the Platen
+device step of a run with insertion, evaporative or not (since 2026-10-05
+for the evaporative step, then for the non-evaporative one). The topology
+record is read back on the
 queue and is the only wait of an ordinary step; every routine that moves
 data between host and device waits on the queue first, so output, removals,
-refinement events, and capacity resets see the completed device state. Other
-paths, the oracle builds, and `JETSPIN_OPENACC_SYNC=1` stay synchronous. The
+refinement events, and capacity resets see the completed device state. The
+RK device steps and the fixed bead sets (Tests 12 and 20) are still
+synchronous (milestone M4), and so are the oracle builds and runs with
+`JETSPIN_OPENACC_SYNC=1`. The
 5-million-step Test 25 run and Tests 21--23 are byte-identical with and
 without the queue.
 
-The same step fuses its small kernels. Before each force evaluation one
+The Platen device step fuses its small kernels. Before each force evaluation one
 serial kernel (`accelerator_platen_stage_prep`) restores the charge smoothed
 for the previous evaluation, smooths it again, and places the inserting
 bead; `accelerator_eom3_stage` with `fev_evap` computes the evaporation rate
 and the Maxwell stress in its own loop instead of a second kernel; and one
-single-gang kernel (`accelerator_platen_evap_end_step`) does the stress
+single-gang kernel (`accelerator_platen_end_step`, after the per-bead
+`accelerator_platen_update`) does the stress
 update with its statistics, the placement, the topology decisions, the
 freezing, and the step's statistics, after which `accelerator_topology_check`
-only reads the record back. The serial and per-bead pieces are
-`!$acc routine seq` routines shared with the separate kernels, which the
-oracle builds and the other paths keep. The results do not change.
+only reads the record back. The serial pieces (`device_smooth_charge`,
+`device_place_inserting_bead`, `device_topology_decide`) are
+`!$acc routine seq` routines shared with the separate smoothing, placement
+and topology kernels of the RK device step, which the Platen step of the
+oracle builds also uses for smoothing and placement; the unfused Platen
+kernels were removed in M3. The results do not change.
 
 Below about 100 beads the CPU build is also faster than the persistent path;
 there the A30 run now does the same work on the host.
@@ -601,8 +795,12 @@ The non-evaporative dynamic device paths had the same omissions, fixed on
 blocked nozzle bead only on the stale host arrays, so on the device it stayed
 where it had been created; the persistent non-evaporative Platen branch
 smoothed the charge once per step on the host copy and placed the bead only
-at the end of the step. Placement (`place_inserting_bead`), smoothing, and
-restoring now bracket every force evaluation on the device, the
+at the end of the step. Placement, smoothing, and restoring now bracket
+every force evaluation on the device (placement by `place_inserting_bead`
+until M3; now by `device_place_inserting_bead`, called by
+`accelerator_compute_posnoinserted_3d` in the RK step and by
+`accelerator_platen_stage_prep` and `accelerator_platen_end_step` in the
+Platen step), the
 collector-curvature terms are requested, and the non-evaporative Platen
 kernels treat frozen and inserting beads as `eom4` does. Tests 13 and 14
 now reproduce the CPU topology stream step for step (Test 13 used to insert

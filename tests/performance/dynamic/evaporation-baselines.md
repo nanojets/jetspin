@@ -31,4 +31,8 @@ Because direct Coulomb accumulation order differs on the CPU and GPU and the
 bending instability amplifies tiny perturbations, a full pointwise CPU/GPU
 trajectory is not the Test 16 or Test 17 acceptance criterion. Use completion,
 topology totals, transfer audits, and comparison with a saved same-build GPU
-reference instead.
+reference instead. Since 2026-10-07 the events themselves are identical: every
+insertion and removal of the A30 runs falls at the CPU's step, for all three
+integrators of both tests. Before, the device path grew the full arrays and
+inserted one step later, so the first insertion came at step 5 against the
+CPU's step 4.

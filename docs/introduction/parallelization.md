@@ -42,6 +42,13 @@ complete updated jet state replicated on every rank
 This design makes the complete geometry immediately available for non-local
 interactions, especially the long-range Coulomb force.
 
+The OpenACC targets build the serial version only (one process, one GPU); an
+MPI run executes the CPU code. A stochastic Platen run that reads the
+sequential Gaussian pool (see [random numbers](random-numbers.md)) gets it
+from rank 0, which generates it and broadcasts it, and every rank reads the
+slice of the whole jet that a serial run reads: serial and parallel runs use
+the same noise. The pool is held on every rank.
+
 ## Contiguous bead chunks
 
 `set_chunk(inpjet, npjet)` normally divides the active bead interval into

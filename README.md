@@ -2,13 +2,16 @@
 
 JETSPIN is an open-source Fortran simulator for the dynamics of electrified
 viscoelastic jets in electrospinning. It represents a jet as a sequence of
-charged beads connected by viscoelastic elements and supports serial and MPI
-execution.
+charged beads connected by viscoelastic elements and supports serial, MPI,
+and single-GPU OpenACC execution (NVIDIA HPC SDK).
 
 The latest stable release is
 [**JETSPIN 1.22**](https://github.com/nanojets/jetspin/releases/tag/v1.22).
 Ongoing work is integrated on the `development` branch before it reaches
-`master`.
+`master`; its first pre-release,
+[**JETSPIN 2.0-beta.1**](https://github.com/nanojets/jetspin/releases/tag/v2.0-beta.1),
+adds the single-GPU OpenACC build, reproducible stochastic and restarted
+runs and the validation suites (see the [changelog](CHANGELOG.md)).
 
 ## Capabilities
 
@@ -52,6 +55,11 @@ The Markdown guide intentionally avoids reproducing the complete scientific
 manual. Operational guidance belongs in `docs/`; mathematical derivations
 and the formal reference belong in `manual/`.
 
+The Markdown documentation in `docs/`, the recent revisions of the LaTeX
+manual, and the development records were written with the assistance of an
+artificial-intelligence (AI) agent, working under the direction of the
+JETSPIN developers.
+
 ## Validation
 
 Run the local numerical smoke suite with:
@@ -70,64 +78,40 @@ tests/smoke/run.sh mpi
 The same modes run in GitHub Actions, together with compilation of the
 LaTeX manual.
 
-The longer [Test Cases 9--12](docs/examples/README.md) are intentionally
-excluded from the smoke and numerical-regression suites. They provide fixed
-1,000-bead RK4, Euler, RK2, and Platen workloads for CPU/GPU measurements
-and optional region-level profiling during OpenACC development. The current
-single-GPU milestone offloads direct Coulomb interactions and, for these fixed
-configurations, the three-dimensional equation-of-motion assembly including
-its local curvature calculation. State and integrator scratch data remain
-resident on the device across timesteps. See the
-[OpenACC porting status](docs/introduction/openacc.md) for supported
-configurations, numerical constraints, and remaining work.
+The [numerical regression suite](docs/introduction/numerical-regression.md)
+(`tests/regression/run.sh`) compares 1,000-step runs of Examples 1-8 with
+versioned baselines and two MPI ranks with one, and `tests/restart/run.sh`
+checks that a restarted run continues the uninterrupted one exactly.
 
-[Test Case 13](docs/examples/test-13.md) adds a 1,024-bead dynamic-topology
-benchmark with insertion and removal. Its bounded OpenACC path keeps RK4 and
-force data resident in a preallocated 1,280-slot mapping and performs both
-nozzle insertion and collector removal on the device. Its
-versioned event sequence guards subsequent dynamic-port changes.
+The OpenACC build is checked by further suites: the restart check
+(`tests/restart/run.sh openacc`), the refinement runners
+(`tests/refinement/`), the dynamic evaporation validation
+(`tests/performance/dynamic/validate_evaporation.sh`), and the CPU/GPU
+records of Test Cases 9-25. The regression suite's `openacc` mode stays below
+the device gate (at most 25 beads) and checks the OpenACC build's host path.
 
-[Test Case 16](docs/examples/test-16.md) and
-[Test Case 17](docs/examples/test-17.md) extend the persistent GPU path to
-dynamic Maxwell and Kelvin–Voigt evaporation. All three deterministic
-integrators (Euler, RK2, and RK4) keep their force, constitutive, state-update,
-topology, and statistics work device-resident for both rheologies; ordinary
-timesteps return only topology control scalars.
-The paired local validation is automated by
-[`tests/performance/dynamic/validate_evaporation.sh`](tests/performance/dynamic/validate_evaporation.sh).
+Every three-dimensional Euler, RK2 or RK4 run (Maxwell or Kelvin–Voigt) and
+every Platen run (Maxwell), with or without evaporation, air drag, insertion,
+removal and, for Platen, dynamic refinement, takes one device step once the
+nozzle bead index reaches 100: the state stays on the GPU and an ordinary
+step returns only a 20-byte topology record. Below that, and for the options
+not yet ported, the OpenACC build runs the CPU code and reproduces the CPU
+build byte for byte. See the
+[OpenACC porting status](docs/introduction/openacc.md) for the coverage, the
+numerical constraints, and the remaining work.
 
-[Test Case 20](docs/examples/test-20.md) covers fixed-topology stochastic
-Platen integration with Maxwell evaporation. Its Gaussian history and complete
-integration sequence remain device-resident. The development-only complete
-force and Coulomb-only oracle builds use the same interfaces for Euler, RK2,
-RK4, and Platen, with or without evaporation.
-
-[Test Case 21](docs/examples/test-21.md) validates the OpenACC path for
-dynamic Akima refinement with Maxwell evaporation, stochastic Platen air drag,
-insertion, and ordinary numerical anchor beads. Integration and threshold
-reductions remain device-resident. At an accepted event, target-mesh
-construction and conservation remain on the host, while Akima slopes,
-coefficients, and the 11 field interpolations execute on the GPU. If that event
-increases capacity, the persistent jet, Platen workspace, evaporation state,
-and Gaussian history are released and rebound around the same event rather
-than transferred on later ordinary timesteps.
-
-[Test Case 22](docs/examples/test-22.md) stresses the same path with three
-successive Akima events and three forced capacity increases. It verifies that
-anchors, reference and evaporated volumes, mass, charge, Gaussian indexing,
-and persistent OpenACC mappings survive repeated release/rebind cycles.
-
-[Test Case 23](docs/examples/test-23.md) adds collector removal to that
-workload. It verifies that the device lower-bound update and bead clearing can
-be interleaved with repeated device Akima events and capacity replacement
-without introducing a full-state transfer on an ordinary removal timestep.
-
-[Test Case 24](docs/examples/test-24.md) is a long production run rather than
-a validation case. It grows a jet from a single nozzle bead until the bending
-instability is fully developed and nozzle insertion balances collector
-removal, giving a stationary active-bead count.
+The test cases cover the device step from fixed 1,000-bead workloads to
+growing jets:
+[Test Cases 9-12](docs/examples/test-9.md) (RK4, Euler, RK2 and Platen with a
+fixed bead set), [13-15](docs/examples/test-13.md) (insertion, removal and
+capacity growth), [16-19](docs/examples/test-16.md) (Maxwell and
+Kelvin–Voigt evaporation), [20](docs/examples/test-20.md) (stochastic Platen
+with evaporation), [21-23](docs/examples/test-21.md) (dynamic Akima
+refinement, capacity growth and collector removal). [Test Case
+24](docs/examples/test-24.md) is a long production run that grows a jet from
+a single nozzle bead until nozzle insertion balances collector removal, and
 [Test Case 25](docs/examples/test-25.md) is the same input with Yarin
-evaporation enabled and a 50 % initial polymer fraction; its page explains why
+evaporation and a 50 % initial polymer fraction; its page explains why
 Yarin's 6 % makes the dried jet unstable in this configuration.
 
 ## Citation
@@ -135,9 +119,21 @@ Yarin's 6 % makes the dried jet unstable in this configuration.
 If JETSPIN contributes to published work, please cite:
 
 > M. Lauricella, G. Pontrelli, I. Coluzza, D. Pisignano, and S. Succi,
-> “JETSPIN: A specific-purpose open-source software for electrospinning
-> simulations of nanofibers,” *Computer Physics Communications* **197**
+> “JETSPIN: A specific-purpose open-source software for simulations of
+> nanofiber electrospinning,” *Computer Physics Communications* **197**
 > (2015), 227–238.
+
+The models implemented in JETSPIN are reviewed, in the broader context of
+electrospinning and solution blowing, in the following works, which may
+also be cited:
+
+> M. Lauricella, S. Succi, E. Zussman, D. Pisignano, and A. L. Yarin,
+> “Models of polymer solutions in electrified jets and solution blowing,”
+> *Reviews of Modern Physics* **92** (2020), 035004.
+
+> A. L. Yarin, F. Pierini, E. Zussman, and M. Lauricella, “Modelling of
+> nanofiber formation processes,” in *Materials and Electro-mechanical and
+> Biomedical Devices Based on Nanofibers*, Springer (2024), 237–326.
 
 The evaporation implementation follows A. L. Yarin, S. Koombhongse, and
 D. H. Reneker, *Journal of Applied Physics* **89** (2001), 3018–3026.

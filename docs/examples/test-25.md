@@ -12,10 +12,12 @@ Everything else is shared: canonical JETSPIN electrostatics
 (`density charge 44000`, `collector distance 16`,
 `external potential 30.02076857`), Maxwell rheology (`viscosity 20`,
 `elastic modulus 50000`), stochastic Platen air drag, nozzle insertion and
-collector removal from Test 23, a single-nozzle-bead start from Example 3,
-integration to `final time 0.5d0` s at `timestep 5.d-9` s, and Example 5's
-refinement cadence (`dynamic refinement threshold 0.4` cm,
-`dynamic refinement every 1.d-3` s).
+collector removal from Test 23 with its anchor spacing
+(`dynamic refinement anchor 0.10` cm), a single-nozzle-bead start from
+Example 3, integration to `final time 0.5d0` s at `timestep 5.d-9` s,
+Example 5's refinement cadence (`dynamic refinement threshold 0.4` cm,
+`dynamic refinement every 1.d-3` s), and `dynamic refinement start 2.5d-4`,
+which allows no refinement during the first 50,000 steps.
 
 The evaporation law is Yarin's (2001) unchanged: `bconstant 7`,
 `mconstant 0.1`, `tconstant 1`, relative humidity 0.165 at 293.15 K. Only the
@@ -40,9 +42,14 @@ law gives
 ## Why the polymer fraction is 0.50
 
 With Yarin's own 6 % polymer fraction this configuration does not survive.
-It stops on the code's numerical instability check at step 1,078,685 on an
-NVIDIA A30 (bead 30, `x = 12.68` cm) and at step 1,067,695 with the
-NVFORTRAN CPU build. The cause is the parameter regime, not the numerics:
+A build of 2026-09-29, which still drew this case's noise step by step (the
+Gaussian pool reached single-bead runs on 2026-09-30) and, on the GPU,
+integrated on the host with only the Coulomb sums offloaded, stopped it on
+the code's numerical instability check at step 1,078,685 on an NVIDIA A30
+(bead 30, `x = 12.68` cm) and at step 1,067,695 with the NVFORTRAN CPU
+build. These runs, and the variants below, were not repeated with the
+current build, in which the CPU and the A30 give identical results below
+100 beads. The cause is the parameter regime, not the numerics:
 
 - In the model an evaporating element keeps its charge while its mass and
   cross-section fall with its volume. With `cp0 = 0.06` the cutoff is
@@ -57,8 +64,8 @@ NVFORTRAN CPU build. The cause is the parameter regime, not the numerics:
   accepted refinement event inserts over 160 beads with segments of about
   `1e-5` cm, and a stress NaN follows within a few thousand steps.
 
-Diagnostic variants of the same input (1.5 million steps, NVFORTRAN CPU)
-confirm that the outcome follows the elastic resistance of the dried jet, not
+Diagnostic variants of the same input (build of 2026-09-29, 1.5 million
+steps, NVFORTRAN CPU) confirm that the outcome follows the elastic resistance of the dried jet, not
 the viscosity increase alone:
 
 | Variant, `cp0 = 0.06` | Viscosity, modulus at cutoff | `G·A` at cutoff | Outcome |
@@ -119,8 +126,10 @@ The noise realization hardly matters: four more CPU seeds (318 – 321) give
 mean active counts between 267.8 and 268.4, a path length of 111.8 cm, and an
 off-axis distance of 2.78 cm over the same window.
 
-One NVIDIA A30 runs the same 5 million steps in about 660 s (690 s with the
-build of 2026-10-05), against 5893 s for the CPU build (see [where the time goes](#where-the-a30-run-spends-its-time)).
+On one NVIDIA A30 the time-integration loop of the same 5 million steps takes
+666 s (process bound to the GPU's NUMA node; about 690 s with the build of
+2026-10-05), against 5863 s for the CPU build (see
+[where the time goes](#where-the-a30-run-spends-its-time)).
 It reads the same Gaussian pool and reproduces the CPU run byte for byte up
 to step 1,446,413, where it engages the persistent path; afterwards it stays
 on the CPU trajectory, and with seed 317 the active bead count first differs
@@ -136,6 +145,13 @@ persistent-path defects found on 2026-09-30 were fixed (see
 [OpenACC](../introduction/openacc.md)), the A30 gave 297 active beads and a
 123 cm path length on every seed.
 
+NVHPC 25.5 (2026-10-07, A30, seed 317) agrees with the 24.3 build within
+1.7e-7 up to 2.1 million steps; every insertion and removal falls at the same
+step up to step 2,437,171 (then one step apart), with the same totals (221
+insertions, 922 removals), and gives 267.5 active beads between 4 and 5
+million steps (267.9 with 24.3). The two compilers round divisions
+differently; the reference values are those of NVHPC 24.3.
+
 An NVFORTRAN CPU run of Test 24 over the same interval has a 3.8 cm off-axis
 distance and a 27° cone:
 evaporation and the stiffening it causes make the bending loops smaller, as
@@ -150,17 +166,22 @@ refinement events, and no reallocation. From 10 to 100 million steps:
 collector velocity 2534 cm/s, off-axis distance 2.78 cm, 19.7°, 268 active
 beads (241 – 297), path length 111.9 cm, and fibre radius 2.77 µm; every
 10-million-step block agrees within 0.3 beads, and the window between 4 and
-5 million steps above is already stationary.
+5 million steps above is already stationary. As for Test 24, these
+statistics rest on periodically repeating noise: the default pool of
+100,000,000 values repeats every `1e8 / (6 * active beads)` steps
+([random numbers](../introduction/random-numbers.md)), about 62,000 steps at
+268 beads, so the 100 million steps go through the pool about 1,600 times.
 
 ## Where the A30 run spends its time
 
-An A30 run of Test 25 has two phases. The persistent device path of
-`platen_ev` needs at least 100 beads (`npjet>=100`), so it stays closed while
-the jet grows from the single nozzle bead. With seed 317 it opens at step
-1,446,413, when an accepted refinement event takes the jet from 95 to 120
-active beads. The next refinement event that grows the capacity (step
-2,046,413, from 222 to 375 beads) resets the device state, and the path
-engages again in the same step.
+An A30 run of Test 25 has two phases. The device step (`device_platen_step`
+in `source/device_step_mod.f90`, gate `device_step_eligible`) needs
+`npjet>=100`, so it stays closed while the jet grows from the single nozzle
+bead. With seed 317 it opens at step 1,446,413, when an accepted refinement
+event takes the jet from 95 to 120 active beads, and stays open. The
+refinement event that grows the capacity (step 2,046,413, from 222 to 375
+beads) rebuilds the device mapping and workspace in that step; the
+engagement line is printed only once.
 
 | Work in each timestep | Phase 1: steps 1 – 1,446,412, 1 – 95 active beads | Phase 2: steps 1,446,413 – 5,000,000, 120 – 300 active beads |
 | --- | --- | --- |
@@ -172,7 +193,7 @@ engages again in the same step.
 | Removal bookkeeping (counters, collected-bead statistics) | CPU | CPU; the removed bead is downloaded and its entries uploaded again |
 | Path-length and maximum-stress statistics | CPU | accumulated on the GPU, downloaded at print steps |
 | Refinement threshold scan, from `1.d-3` s after the last accepted event until the next one | CPU | GPU; three values return to the CPU |
-| Accepted refinement event (3 in phase 1, 17 in phase 2) | CPU | Akima interpolation and reconstruction on the GPU; mass-boundary walk, target mesh, and conservation on the CPU, then one upload |
+| Accepted refinement event (3 in phase 1, 17 in phase 2) | CPU | Akima interpolation, volume reconstruction with the conservation rescale, and mass and charge conversion on the GPU; mass-boundary walk, target mesh, anchor bookkeeping and final assembly, conservative radius-floor and evaporation-limit corrections, and invariant checks on the CPU, then one upload |
 | `statout.dat`, `traj.xyz`, and `save.dat` every 20,000 steps | CPU | CPU, after one download of the full state |
 | Waiting for the device | — | once per step, for the topology record: the kernels of the step run on one asynchronous queue |
 
@@ -192,7 +213,7 @@ phase 1 and one unbound full run:
 
 | Build | Phase 1 | Phase 2 | Time-integration loop |
 | --- | ---: | ---: | ---: |
-| A30, current (2026-10-06, two-kernel tail) | 154 s (106 µs/step) | 500 s (141 µs/step) | 653 s |
+| A30, 2026-10-06 (two-kernel tail, 9d7ba36) | 154 s (106 µs/step) | 500 s (141 µs/step) | 653 s |
 | A30, 2026-10-05 (fused small kernels) | 155 s, 154 s, 154 s (107 µs/step) | 530 s, 544 s, 536 s (151 µs/step) | 685 s, 699 s, 691 s |
 | A30, one queue, kernels not fused | 154 s, 155 s (107 µs/step) | 612 s, 613 s (172 µs/step) | 766 s, 768 s |
 | A30, synchronous phase 2 | 156 s (108 µs/step) | 1418 s (399 µs/step) | 1574 s |
@@ -204,6 +225,11 @@ The CPU loop time comes from the timestamps: with NVFORTRAN the code's own
 `Time-integration loop wall time` wrapped after 2147 s until the 64-bit fix of
 2026-10-05 and reported 1568 s for that run.
 
+The common device step (milestone M3 of `docs/STATE.md`, 2026-10-06) gives
+the same output byte for byte and takes 666 s, against 658 s for 9d7ba36 in
+the same session (phase 2 142.4 against 140.6 µs per step). NVHPC 25.5 takes
+706 s, against 664 s for 24.3 in the same session (2026-10-07).
+
 The builds of 2026-09-30 and 2026-10-01 run the same code in phase 1 and give
 byte-identical `traj.xyz`. On this path they differ only in the topology
 check, which now returns one 20-byte record instead of two uploads and five
@@ -213,7 +239,7 @@ downloads per step, and in the refinement scan: the 2026-10-01 build saves
 Median time per step over the 20,000-step print intervals, by active-bead
 count:
 
-| Active beads | CPU | A30, current | A30, 2026-10-05 | A30, kernels not fused | A30, synchronous phase 2 | A30, 2026-10-01 | A30, before 2026-10-01 |
+| Active beads | CPU | A30, 2026-10-06 | A30, 2026-10-05 | A30, kernels not fused | A30, synchronous phase 2 | A30, 2026-10-01 | A30, before 2026-10-01 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1 – 30 | 31 µs | 30 µs | 30 µs | 30 µs | 30 µs | 247 µs | 249 µs |
 | 30 – 60 | 91 µs | 91 µs | 91 µs | 91 µs | 92 µs | 293 µs | 294 µs |
@@ -262,8 +288,8 @@ offloaded call:
 Offloading pays above about 110 beads with evaporation and 150 without; 128
 lies between the two crossovers. With it, phase 1 of Test 25 takes 156 s
 instead of 430 s, the time of the CPU build, and the first 2.1 million steps
-of Test 24, which never engages a persistent path, take 586 s instead of
-854 s.
+of Test 24, which then never engaged a persistent path, took 586 s instead
+of 854 s.
 
 ### Phase 2: one asynchronous queue, fused kernels
 

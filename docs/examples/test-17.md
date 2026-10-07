@@ -19,12 +19,15 @@ necessarily synchronize and rebind the active state.
 For Euler, RK2, and RK4, the accepted 1,000-step CPU and NVIDIA A30 runs all
 produce 111 additions, 122 removals, two reallocations, and 89 active beads.
 Three-step pre-event CPU/GPU comparisons are identical at `rtol=1e-12` and
-`atol=1e-13`. The first insertion threshold is crossed at step 4 on the CPU
-and step 5 on the GPU. Pointwise trajectories then diverge because the
-race-free target-centric GPU Coulomb sum uses a different accumulation order
-and the bending instability amplifies the roundoff-level perturbation. Equal
-topology totals, pre-event agreement, clean completion, and the absence of
-per-stage array transfers are therefore the acceptance criteria.
+`atol=1e-13`. Since 2026-10-07 the 111 insertions and 122 removals occur at
+the same 222 steps on both, for each integrator, and the RK4 statistics rows
+agree within `1e-4`;
+before, the first insertion came at step 5 on the GPU against 4 on the CPU,
+because the device path grew the full arrays and inserted one step later.
+Pointwise trajectories still separate at roundoff level (target-centric GPU
+Coulomb sum, bending instability). Equal topology totals, pre-event
+agreement, clean completion, and the absence of per-stage array transfers
+are therefore the acceptance criteria.
 
 For numerical isolation only, the rheology-independent
 `nvfortran-openacc-force-oracle` target evaluates every Kelvin–Voigt force stage

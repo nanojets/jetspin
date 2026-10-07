@@ -12,7 +12,7 @@ regenerating these files.
 
 - source state: the repository state committed together with these records;
 - source parent before the benchmark work: `53463bb4d05259da9c81bc11b79154be0ab263c9`;
-- date: 2026-08-09;
+- date: 2026-08-09 (records regenerated on 2026-10-07, see below);
 - input: `examples/input-9/input.dat`;
 - input SHA-256: `ec46d68f7850c03b28b0d1ae28f0d13d1621a103cf655f9c667f8e3e25fd5953`;
 - compiler: NVFORTRAN 24.3-0, target `x86-64 Linux -tp znver3`;
@@ -26,12 +26,15 @@ The files are full sampled trajectories, not merely their final rows:
 - `baseline-nvfortran-cpu.statout`;
 - `baseline-openacc-a30.statout`.
 
-They retain the small CPU/GPU floating-point differences observed during the
-original run. Their SHA-256 values are:
+The original files (2026-08-09) retained small CPU/GPU floating-point
+differences. They were regenerated on 2026-10-07, when the leading bead,
+which starts on the collector, became frozen there (see
+`../BUILD-PROVENANCE.md`): the CPU (`nvfortran` target) and A30 records are
+now identical. Their SHA-256 values are:
 
 ```text
-3bdabb84358fb271e93fe8e390bd83a38dde387d8be38abc0caf41d4a56a298b  baseline-nvfortran-cpu.statout
-9b816b30c28740af9c35449b8ff19c96668d2e37230355d4f994195c96b6036b  baseline-openacc-a30.statout
+d48ec723d6735e38cc2883dccf8cc522c5fd635b32c4db69f63945da9d260284  baseline-nvfortran-cpu.statout
+d48ec723d6735e38cc2883dccf8cc522c5fd635b32c4db69f63945da9d260284  baseline-openacc-a30.statout
 ```
 
 ## Comparing future results

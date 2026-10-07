@@ -10,7 +10,7 @@ It combines three sources:
 
 - Canonical JETSPIN electrostatics: `density charge 44000`,
   `collector distance 16`, `external potential 30.02076857`. This is the
-  parameter set used by Examples 3 and 6 and by Test Cases 10, 15 and 16-20.
+  parameter set used by Examples 3, 4 and 5 and by Test Cases 9-20.
 - Rheology, air drag, insertion and removal from Test Case 23: Maxwell
   rheology, stochastic Platen air drag, nozzle insertion, collector removal.
 - Initialization and print directives from Example 3: the jet starts from a
@@ -28,7 +28,7 @@ differs from this one by two lines: `evaporation yes` and
 `evaporation polymer frac 0.50d0`.
 
 With Yarin's 6 % polymer fraction the evaporative configuration stops on a
-stress NaN near step 1.07 million: the dried jet keeps its charge while losing
+stress NaN near step 1.07 million (build of 2026-09-29): the dried jet keeps its charge while losing
 fifteen times its mass and cross-section, and its head is ejected laterally.
 With 50 % it runs stably. See `docs/examples/test-25.md`.
 
@@ -37,15 +37,19 @@ With 50 % it runs stably. See `docs/examples/test-25.md`.
 The dynamic-refinement cadence is Example 5's (`dynamic refinement threshold
 0.4` cm, `dynamic refinement every 1.d-3` s), not Test Case 23's tighter
 `0.10` cm / `1.d-5` s. The anchor spacing (`dynamic refinement anchor 0.10`
-cm) is unchanged from Test 23. This choice is deliberate and load-bearing:
-with the tighter cadence, growing this jet from a single bead accumulates
+cm) is unchanged from Test 23. The cadence choice is deliberate and
+load-bearing: with the tighter cadence, growing this jet from a single bead accumulates
 dozens of accepted refinement events in under 200,000 steps, each re-fitting
 the cross-section radius from the previous event's own output, which compounds
 a nonphysical thinning far beyond anything electrospinning genuinely produces
 and eventually crashes the integrator. See
 `docs/refinement-robustness-investigation.md` for the full investigation, and
 `error_mod.f90` warning 108, emitted automatically when a refinement threshold
-is set below twenty times the base discretization resolution.
+is set below twenty times the base discretization resolution (Example 5 and
+this case sit exactly at twenty and raise no warning).
+
+The input also sets `dynamic refinement start 2.5d-4`, which neither source
+sets: no refinement is attempted during the first 50,000 steps.
 
 ## Running it
 

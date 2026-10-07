@@ -30,9 +30,12 @@ are:
 - `topology-events-persistent-host-insertion-a30.txt`: historical
   intermediate stream of persistent RK4 with host-side insertion.
 
-Setting `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` restores the call-scoped path.
-The device-insertion persistent path took `2.623558 s` (`381.162 steps/s`)
-before the 2026-10-01 changes, against `2.829376 s` with host-side insertion.
+Since 2026-10-06 one OpenACC device step (`source/device_step_mod.f90`)
+replaces the persistent and call-scoped paths and gives the same stream;
+`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` no longer selects a call-scoped path
+(see the switches below). The device-insertion persistent path took
+`2.623558 s` (`381.162 steps/s`) before the 2026-10-01 changes, against
+`2.829376 s` with host-side insertion.
 
 A paired NVFORTRAN 24.3/A30 run measured `40.659696 s` on CPU and `3.834931 s`
 with OpenACC. The topology event streams were identical. Dynamic curvature
@@ -43,8 +46,11 @@ normal `1e-6` regression criterion.
 ## Full-state diagnosis
 
 Set `JETSPIN_TOPOLOGY_SNAPSHOT=1` to write `topology-state.dat`. At every
-event it records every active bead's index, frozen flag, position, stress,
-velocity, mass, charge, and volume. Compare two files with:
+event it writes a line with the step, `inpjet`, `npjet`, the active count
+and the insertion flag, then every active bead's index, frozen flag, and ten
+values: position, stress, velocity, mass, charge, and volume. With
+evaporation each row has twelve values, the evaporated volume `jetve` and
+the evaporation radius `jetce` last. Compare two files with:
 
 ```sh
 tests/performance/dynamic/compare_state.py CPU/topology-state.dat \
@@ -59,10 +65,15 @@ of only about `3e-16`, which rules out a material algorithm mismatch in the
 accelerator EOM. Runtime isolation also showed that GPU EOM/curvature is the
 main source; GPU Coulomb with CPU EOM diverges later and much less.
 
-For diagnosis, `JETSPIN_OPENACC_DISABLE_EOM=1` and
-`JETSPIN_OPENACC_DISABLE_COULOMB=1` independently force those components back
-to their CPU implementations. `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` restores
-the call-scoped Test 13 control path. These switches are disabled by default.
+That isolation used the per-component paths in place before 2026-10-06. For
+diagnosis now, `JETSPIN_OPENACC_DISABLE_PERSISTENT=1` keeps the device step
+closed: the OpenACC build runs the CPU build's code and offloads only the
+Coulomb sums of at least 128 active beads (`JETSPIN_OPENACC_COULOMB_MIN_BEADS`
+sets the threshold, so Test 13's sums stay on the GPU unless it is raised).
+Since 2026-10-07 `JETSPIN_OPENACC_DISABLE_EOM=1` does the same; before, it
+made the device step skip the equations of motion and integrate stale
+derivatives. `JETSPIN_OPENACC_DISABLE_COULOMB=1` affects only the 1-D Coulomb
+sum (`system 1`). These switches are disabled by default.
 
 Compare a new paired run with:
 
@@ -90,9 +101,11 @@ Coulomb-only oracle targets are diagnostic exceptions and deliberately copy
 their required stage data.
 
 Three-step CPU/GPU `statout.dat` and XYZ geometry comparisons for Euler, RK2,
-and RK4 are identical before the first topology event. The CPU crosses the
-first insertion threshold at step 4 and both standard GPU and oracle paths
-at step 5. The bending instability then amplifies roundoff, so aggregate
+and RK4 are identical before the first topology event. Since 2026-10-07 every
+insertion and removal of the A30 run falls at the CPU's step; before, the
+first insertion came at step 5 on the GPU against step 4 on the CPU, because
+the device path grew the full arrays and inserted one step later. The
+bending instability still amplifies roundoff in the trajectory, so aggregate
 topology, pre-event agreement, and the transfer audit are the acceptance
 criteria.
 
@@ -114,12 +127,13 @@ evaluate the trusted CPU equations for either rheology.
 `nvfortran-openacc-coulomb-oracle` transfers only the state needed by the host
 direct sum and uploads its force array. Both are numerical-isolation tools.
 
-Three-step CPU/GPU trajectories for Euler and RK2 are identical at
-`rtol=1e-12`, `atol=1e-13` before the first topology event, but their insertion
-threshold occurs at step 4 on the CPU and step 5 on the GPU.
-The bending instability then amplifies the roundoff difference, so topology
-totals and the transfer audit are the acceptance criteria rather than a strict
-pointwise trajectory comparison.
+Three-step CPU/GPU trajectories for Euler, RK2, and RK4 are identical at
+`rtol=1e-12`, `atol=1e-13` before the first topology event. Since 2026-10-07
+every insertion and removal falls at the CPU's step, as for Test 16; before,
+the GPU inserted first at step 5 against the CPU's step 4. The bending
+instability still amplifies the roundoff difference, so topology totals and
+the transfer audit are the acceptance criteria rather than a strict pointwise
+trajectory comparison.
 
 ## Reproducible Maxwell/Kelvin--Voigt validation
 
@@ -137,6 +151,9 @@ then runs Tests 16 and 17 with Euler, RK2, and RK4. It checks the accepted
 comparisons. Test 16 additionally requires byte-identical XYZ geometry. The
 standard GPU target is built without either diagnostic oracle macro.
 
-Set `GPUCC` and `CUDA_VERSION` to select another NVIDIA target. Set
+Set `GPUCC` and `CUDA_VERSION` (defaults `80` and `12.3`) to select another
+NVIDIA target; with NVHPC 25.5 set `CUDA_VERSION=12.9`. Each run is limited
+to 60 seconds; `JETSPIN_DYNAMIC_EVAP_TIMEOUT` changes the limit. Set
 `JETSPIN_DYNAMIC_EVAP_KEEP=1` to retain build logs, inputs, and outputs in the
-reported temporary directory.
+reported temporary directory. The script checks topology totals, not the
+event steps.

@@ -18,7 +18,7 @@ reallocation in
 | `inpjet` | Index of the first active bead |
 | `npjet` | Index of the last active bead/current active upper endpoint |
 | `mxnpjet` | Allocated upper bound of the fundamental jet arrays |
-| `incnpjet` | Capacity-growth increment; `dynamic refinement capacity <i>` input directive, default 100 beads |
+| `incnpjet` | Minimum initial capacity and refinement/neighbour-list growth increment; `dynamic refinement capacity <i>` input directive, default 100 beads |
 | `reallocation_increment` | Capacity increase applied by `reallocate_jet`; currently 100 beads |
 | `mxchunk` | Maximum size of a rank-local MPI work chunk |
 | `doallocate` | Signals that capacity-dependent work arrays may need resizing |
@@ -38,10 +38,23 @@ are included by the operation in question.
 
 ## Initial allocation
 
-`allocate_jet` establishes the problem dimension, initializes capacity in
-blocks of `incnpjet`, updates `mxchunk`, and allocates the fundamental state.
-Coordinates, velocities, stress, mass, charge, radius, reference volume, and
-related bead data all follow the same zero-based capacity.
+`allocate_jet` establishes the problem dimension, sets the capacity,
+updates `mxchunk`, and allocates the fundamental state. Coordinates,
+velocities, stress, mass, charge, radius, reference volume, and related bead
+data all follow the same zero-based capacity.
+
+The capacity `mxnpjet` is `max(incnpjet, npjet)`, with two reserves for an
+inserting jet:
+
+- with tagged beads (`dynamic refinement yes`) and at least 100 beads, it is
+  at least `npjet + incnpjet`, so that the first accepted refinement event
+  normally needs no reallocation;
+- with at least 1000 beads, it is at least `max(1280, npjet + 256)`, so that
+  a large dynamic jet is not reallocated while its arrays are mapped on the
+  device.
+
+A restart calls `allocate_jet(.true.)`, which starts from the capacity read
+from `save.dat` instead of `incnpjet` and applies the same rules.
 
 Several arrays exist only when their corresponding feature is active:
 
@@ -56,9 +69,15 @@ symmetric for these optional fields.
 
 ## Insertion, removal, and compaction
 
-Bead removal normally does not shift arrays or shrink their capacity. A bead
-is marked as collected, its state is cleared where appropriate, and `inpjet`
-advances. This leaves reusable storage before the active interval.
+A bead that reaches the collector is frozen there in every run
+(`remove_jetbead`): it is moved onto the collector plane and leaves the
+motion and the Coulomb sums. With `removing yes` the leading frozen bead is
+then removed once the next one is frozen too: `inpjet` advances, without
+shifting arrays or shrinking their capacity, and the storage left before the
+active interval is reused at the next compaction. Without removal the frozen
+beads stay in the active interval as deposited fiber, `inpjet` does not
+advance, and compaction recovers no space. Until 2026-10-07 a run without
+removal froze nothing.
 
 Bead insertion advances `npjet`. If it passes `mxnpjet`, `reallocate_jet` is
 called. Despite its name, this routine performs two related operations:
@@ -66,8 +85,9 @@ called. Despite its name, this routine performs two related operations:
 1. it compacts and rebases the active data toward index zero, normally
    retaining one bead immediately before `inpjet` for neighbour-dependent
    calculations;
-2. it increases `mxnpjet` by `incnpjet` only when compaction does not recover
-   enough space.
+2. it increases `mxnpjet` by `reallocation_increment` (100 beads,
+   independent of `incnpjet`) when compaction shifts the jet by fewer than
+   that many slots.
 
 Therefore `reallocate_jet` can reorder every bead-aligned array without
 increasing the physical allocation. It copies data through shared service
@@ -88,11 +108,17 @@ bead cannot be identified permanently by its current array index.
 Dynamic refinement is a separate topology-changing path. It estimates the
 new remeshed upper bound and, when necessary, sets capacity to that bound plus
 `incnpjet`. Akima interpolation then reconstructs the bead-aligned fields in
-a rebased interval.
+a rebased interval, moved down to index 0. Without removal the refined jet
+instead keeps its indices behind the deposited fiber (`lkeepprefix` in
+`define_akima_bounds`), and the deposited beads are saved before the arrays
+are rebuilt and put back after.
 
 Production runs set `incnpjet` with the `dynamic refinement capacity <i>`
-input directive (positive integer, default 100 beads if omitted); it applies
-uniformly to the initial reserve and every later growth increment. Test Case
+input directive (positive integer, default 100 beads if omitted; a value
+below 1 prints warning 107 and falls back to 100). It sets the minimum
+initial capacity, the refinement growth and the neighbour-list growth of the
+multiple-step Coulomb algorithm; insertion overflow grows by
+`reallocation_increment` instead. Test Case
 22 additionally overrides only the refinement growth increment through the
 developer environment variable `JETSPIN_REFINEMENT_GROWTH_INCREMENT`,
 independently of the input value, to stress-test several release/rebind

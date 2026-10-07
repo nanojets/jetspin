@@ -54,9 +54,13 @@ trajectory identity.
 The GPU removal primitive updates the active lower bound and clears only the
 removed bead. It does not download the full jet. Full-state communication is
 reserved for accepted refinement events and final shutdown. At each accepted
-event the host constructs the normalized target mesh, the GPU computes Akima
-coefficients and all 11 field interpolations, and the host applies conservation
-and anchor rules before the persistent state is rebound.
+event the host walks the mass boundaries and constructs the normalized target
+mesh; the GPU computes Akima coefficients and all 11 field interpolations,
+reconstructs bead and evaporated volumes, applies the reference-volume
+conservation rescale, and converts mass and charge densities back to
+per-bead quantities; the host keeps the anchor bookkeeping and final
+assembly, the conservative radius-floor and evaporation-limit corrections,
+and the invariant checks before the persistent state is rebound.
 
 An A30 transfer audit records four complete state downloads: the three
 accepted Akima events and final shutdown. It also records exactly three
@@ -76,6 +80,12 @@ error is `1.82e-12`, and the largest interpolated relative error is
 independent normal-device run and host-Akima-oracle run produce byte-identical
 `statout.dat` files and the same event/removal topology.
 
+The `refinement-compare` backend (target
+`nvfortran-openacc-compare-refinement`) evaluates the host and device
+reconstruction of volume, mass, charge, and evaporated volume at every event;
+all three events agree at roundoff (worst absolute `8.9e-16`, worst relative
+`1.4e-16`).
+
 Run:
 
 ```sh
@@ -84,6 +94,7 @@ tests/refinement/run_test23.sh openacc
 tests/refinement/run_test23.sh force-oracle
 tests/refinement/run_test23.sh host-akima
 tests/refinement/run_test23.sh akima-compare
+tests/refinement/run_test23.sh refinement-compare
 ```
 
 - [Input file](../../examples/input-23/input.dat)

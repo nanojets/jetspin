@@ -8,6 +8,11 @@ polymer fraction is 0.025 and `evaporation tconstant 1` selects the Yarin
 It is a coupled JETSPIN regression example, not a quantitative reproduction
 of the original 6 wt% aqueous-PEO calculation.
 
+The OpenACC build runs this case with the CPU build's code, since its device
+step does not cover time-dependent external fields; the three-dimensional
+Coulomb sums go to the GPU, with copies at every call, only while the jet has
+at least 128 active beads ([OpenACC](../introduction/openacc.md)).
+
 - [Input file](../../examples/input-7/input.dat)
 - [LaTeX manual section](../../manual/test7.tex)
 - [Evaporation model](../../manual/evaporation.tex)

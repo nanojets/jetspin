@@ -15,7 +15,8 @@ Everything else is shared with Test 24:
 - Single-nozzle-bead start (`points 1`), integration to `final time 0.5d0` s
   at `timestep 5.d-9` s, and print directives from Example 3.
 - Example 5's refinement cadence: `dynamic refinement threshold 0.4` cm and
-  `dynamic refinement every 1.d-3` s.
+  `dynamic refinement every 1.d-3` s, with `dynamic refinement start 2.5d-4`
+  (no refinement during the first 50,000 steps).
 
 ## Evaporation parameters
 
@@ -28,7 +29,7 @@ the elastic modulus 1.38 times.
 
 With the 6 % fraction the dried jet keeps its charge while losing fifteen
 times its mass and cross-section; its head is ejected laterally and the run
-stops with a stress NaN near step 1.07 million. The analysis, the diagnostic
+stops with a stress NaN near step 1.07 million (build of 2026-09-29). The analysis, the diagnostic
 variants, and the choice of 0.50 are in `docs/examples/test-25.md`.
 
 ## Running it

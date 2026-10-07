@@ -43,7 +43,11 @@ topology; all 80 statistics rows agree with the CPU within `8.0e-10` and
 native events moved to steps 14,256, 14,976, and 15,785.
 
 The normal OpenACC path computes Akima coefficients and spline interpolation
-on the GPU. An A30 transfer audit found four complete state downloads: the
+on the GPU, together with the volume reconstruction, its conservation
+rescale, and the conversion of mass and charge densities; the host walks the
+mass boundaries, builds the target mesh, keeps the anchor bookkeeping and
+final assembly, applies the conservative radius-floor and evaporation-limit
+corrections, and checks the invariants. An A30 transfer audit found four complete state downloads: the
 three accepted refinement events and final shutdown. The event path performs
 exactly three topology rebinds and three evaporation-state rebinds; the
 Gaussian pool is uploaded once at startup and never transferred again.

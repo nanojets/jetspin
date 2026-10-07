@@ -30,11 +30,16 @@ and the repeated refinement-threshold scan on the GPU. Each eligible scan
 reduces only three values and returns them to the host in one transfer: the
 last over-threshold segment index, total path length, and the nozzle
 correction used to estimate the target mesh size. When the complete historical acceptance criterion can be satisfied, the
-active state is downloaded once. The host prepares normalized source and
-target coordinates; Akima slopes, tangents, cubic coefficients, and all 11
-field interpolations then execute on the GPU. Conservation, anchor checks, and
-the final state assembly remain on the host. The remeshed state is uploaded
-once and persistent device integration resumes.
+active state is downloaded once. The host walks the mass boundaries and
+prepares normalized source and target coordinates; Akima slopes, tangents,
+cubic coefficients, and all 11 field interpolations then execute on the GPU,
+which also reconstructs bead and evaporated volumes, applies the
+reference-volume conservation rescale, and converts mass and charge densities
+back to per-bead quantities. The anchor bookkeeping and final state assembly,
+the conservative radius-floor and evaporation-limit corrections
+(`enforce_radius_floor_conservative`, `enforce_evlim_conservative`), and the
+invariant checks remain on the host. The remeshed state is uploaded once and
+persistent device integration resumes.
 
 The initial 400-element allocation reserves 100 additional slots. The current
 single refinement therefore changes active bounds without reallocating a

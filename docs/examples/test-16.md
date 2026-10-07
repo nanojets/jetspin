@@ -12,17 +12,23 @@ one force/stress stage, RK2 executes two, and RK4 executes four. Their
 intermediate and final state updates, direct Coulomb summation, evaporation,
 charge smoothing/restoration, and statistics run on the GPU. The normal build
 performs no host/device state, force, or derivative-array transfer between
-stages.
+stages. The run takes the common device step (`source/device_step_mod.f90`)
+from step 1, since it starts with 100 beads (sticky gate at `npjet` = 100);
+the step is still synchronous and not yet fused (milestone M4 of
+`docs/STATE.md`). Tests 17-19 take it from step 1 too.
 
 For Euler, RK2, and RK4, NVIDIA A30 and CPU runs reproduce the same topology
 totals: 111 additions, 122 removals, two reallocations, and 89 active beads
 after 1,000 steps. Three-step pre-event `statout.dat` comparisons have zero
 difference at `rtol=1e-12`, `atol=1e-13`; the complete written XYZ geometry is
-also byte-identical. The first insertion occurs at step 4 on the CPU and step
-5 on the GPU. A full pointwise trajectory comparison after that threshold is
-intentionally not the acceptance criterion: the different direct-Coulomb
-accumulation order creates roundoff-level changes that are amplified by the
-physical bending instability and later topology crossings.
+also byte-identical. Since 2026-10-07 the 111 insertions and 122 removals
+occur at the same 222 steps on both, for each integrator; before, the first insertion came at step
+5 on the GPU against 4 on the CPU, and so did the insertion at the second
+reallocation. The arrays are full at those insertions, and the device path
+grew them and inserted one step later (not, as first assumed, an effect of
+the Coulomb summation order). A full pointwise trajectory comparison is not
+the acceptance criterion: the transverse components, of order `1e-12` cm,
+differ by up to their own size, while `vx` agrees within `1e-5`.
 
 A transfer audit with all development macros disabled shows only topology
 decision scalars on ordinary timesteps; since 2026-10-01 they return as one

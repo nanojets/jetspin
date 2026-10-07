@@ -81,18 +81,23 @@ make -C source -f ../build/Makefile nvfortran-openacc \
   GPUCC=90 CUDA_VERSION=12.3
 ```
 
+HPC SDK 25.5 ships the CUDA 11.8 and 12.9 toolkits, not 12.3: build with
+`CUDA_VERSION=12.9`. Such a build also runs with a driver of the CUDA 12.3
+generation (checked on A30 GPUs, driver 545). NVFORTRAN 24.3 at `-O3`
+rewrites a division `x/y` as `x*(1/y)` (`-Mrecip-div`; `-Mno-recip-div`
+turns it off), while 25.5, like GFortran, rounds divisions exactly. The two
+compilers therefore give results that differ in the last digits, and
+trajectories that are sensitive to them (insertion and removal thresholds,
+bending instability) separate. Compare an OpenACC run with a CPU build of
+the same compiler version.
+
 Use `nvaccelinfo` and `nvidia-smi` to check that the compiler runtime can see
 the selected GPU before running the resulting executable.
 
-`JETSPIN_OPENACC_COULOMB_MIN_BEADS=<n>` sets the fewest active beads for which
-a three-dimensional run that has not engaged a persistent device path
-offloads the Coulomb sum (default 128; 0 offloads every call).
-`JETSPIN_OPENACC_SYNC=1` runs the persistent dynamic evaporative Platen step
-synchronously instead of on one asynchronous queue. When timing a
-GPU run, bind it to the NUMA node of its GPU (`nvidia-smi topo -m` lists the
-affinity), for example `numactl --cpunodebind=3 --membind=3 ./main.x`:
-placement of the host process alone changes latency-bound runs by up to
-8 %.
+When timing a GPU run, bind it to the NUMA node of its GPU (`nvidia-smi topo
+-m` lists the affinity), for example `numactl --cpunodebind=N --membind=N
+./main.x` with `N` that node: placement of the host process alone changes
+latency-bound runs by up to 8 %.
 
 For compiler and numerical validation without an accessible NVIDIA device:
 
@@ -105,8 +110,9 @@ performance. See [OpenACC porting status](openacc.md) for the implemented
 kernel, data movement, limitations, and validation expectations.
 
 Two model-independent development targets isolate force-kernel numerical
-differences in the supported serial three-dimensional Euler, RK2, RK4, and
-fixed-topology stochastic Platen paths, with or without evaporation:
+differences in the device step: Euler, RK2, RK4, and stochastic Platen,
+Maxwell and Kelvin–Voigt, with or without evaporation, fixed bead sets and
+jets with insertion and refinement:
 
 ```sh
 make -C source -f ../build/Makefile nvfortran-openacc-force-oracle GPUCC=80
@@ -114,11 +120,13 @@ make -C source -f ../build/Makefile nvfortran-openacc-coulomb-oracle GPUCC=80
 ```
 
 `nvfortran-openacc-force-oracle` enables
-`JETSPIN_DEV_HOST_FORCE_ORACLE`. It downloads the current RK stage, evaluates
-the complete trusted CPU force equations, uploads the derivatives, and leaves
-integration updates and dynamic topology on the GPU. The same interface
-covers non-evaporative simulations, Maxwell and Kelvin–Voigt deterministic
-evaporation, and Maxwell stochastic Platen evaporation.
+`JETSPIN_DEV_HOST_FORCE_ORACLE`. At every force evaluation of the device
+step it downloads the current stage, evaluates the complete trusted CPU
+force equations, and uploads the derivatives. Integration updates, dynamic
+topology and the tail of the Platen step (`accelerator_platen_update`,
+`accelerator_platen_end_step`, with the final stress derivative) stay on
+the GPU; since milestone M3 (2026-10-06) the tail is not oracled, while the
+oracle builds evaluated the final stress derivative on the host before.
 
 `nvfortran-openacc-coulomb-oracle` enables only
 `JETSPIN_DEV_HOST_COULOMB_ORACLE`. It downloads the state required by the direct
@@ -147,11 +155,52 @@ persistent device path to non-evaporative Platen runs growing from a single
 bead, was removed on 2026-10-05: `nvfortran-openacc` now does this itself
 (see [OpenACC](openacc.md)).
 
-Two developer environment variables help when exercising the dynamic
-persistent paths:
-`JETSPIN_OPENACC_DISABLE_PERSISTENT=1` forces the non-persistent branch, and
-`JETSPIN_REFINEMENT_INITIAL_RESERVE=<n>` lowers the initial capacity reserve so
-that capacity-growth handling can be reached in minutes instead of hours.
+## Runtime environment variables
+
+The OpenACC build reads these variables at run time (see
+[OpenACC](openacc.md) for the device step they refer to); the last four
+also act in the CPU builds. A switch is on when its value is `1`.
+
+| Variable | Effect |
+| --- | --- |
+| `JETSPIN_OPENACC_COULOMB_MIN_BEADS=<n>` | Fewest active beads for which a run outside the device step offloads a Coulomb sum, one-dimensional (non-evaporative) or three-dimensional; default 128, 0 offloads every call. Inside the device step every sum runs on the GPU. |
+| `JETSPIN_OPENACC_SYNC` | Runs the Platen device step of a run with insertion synchronously instead of on one asynchronous queue. The RK device steps and fixed bead sets are always synchronous. |
+| `JETSPIN_OPENACC_DISABLE_PERSISTENT` | Keeps the device step closed for every run, fixed bead sets included: the OpenACC build runs the CPU build's code, offloading only Coulomb sums of at least `JETSPIN_OPENACC_COULOMB_MIN_BEADS` beads. The Gaussian-pool decision is unchanged. |
+| `JETSPIN_OPENACC_DISABLE_EOM` | Keeps the device step closed, as the previous one, since 2026-10-07; before, the device stage skipped the equations of motion and integrated stale derivatives. A device EOM kernel that refuses a stage now stops the run with error 22. |
+| `JETSPIN_OPENACC_DISABLE_COULOMB` | Keeps the one-dimensional Coulomb sum on the host; no effect on the three-dimensional sums. |
+| `JETSPIN_PROFILE` | Prints at the end of the run the wall time and number of calls of the timed parts of the loop (integrator, Coulomb sums, insertion, removal, statistics, output, restart). Also `yes`, `true`, `on`. |
+| `JETSPIN_TOPOLOGY_SNAPSHOT` | Writes the active state at every insertion and removal to `topology-state.dat` (downloaded from the device first in the OpenACC build). |
+| `JETSPIN_REFINEMENT_INITIAL_RESERVE=<n>` | Spare capacity allocated at the start of a run with insertion and tagged beads (refinement) that starts with at least 100 beads; default the allocation increment, 100. A small value reaches capacity growth in minutes instead of hours. |
+| `JETSPIN_REFINEMENT_GROWTH_INCREMENT=<n>` | Capacity added when an accepted refinement event outgrows the arrays; default the allocation increment. |
+
+Development macros are passed through `FPPFLAGS_EXTRA` ([below](#make-variables));
+the oracle and comparison targets set theirs. To compute the Coulomb sums on
+the host while the rest of the step stays on the device, use the
+`nvfortran-openacc-coulomb-oracle` target (the macro
+`JETSPIN_DISABLE_COULOMB_EVAP`, which did this for the evaporative 3-D sum
+only and read a stale host state inside the device step, was removed on
+2026-10-07).
+
+## Make variables
+
+Pass these on the `make` command line, as `GPUCC` above. Make also reads
+those with a default set by `?=` (all but `EX` and `BINROOT`) from the
+environment, so an unrelated `CUDA_VERSION` exported by another tool
+reaches the build.
+
+| Variable | Default | Used by |
+| --- | --- | --- |
+| `EX` | `main.x` | every target: name of the executable |
+| `BINROOT` | `../execute`, relative to `source/` | every target: directory that receives the executable |
+| `MPIFC` | `mpif90` | `gfortran-mpi`, `gfortran-mpidebugger`, `nvfortran-mpi`: MPI compiler wrapper |
+| `MPI_COMPAT_FLAG` | `-fallow-argument-mismatch` | `gfortran-mpi`, `gfortran-mpidebugger`; a GFortran older than 10 needs `-Wno-argument-mismatch` instead, as `tests/regression/run.sh` selects |
+| `NVFORTRAN` | `nvfortran` | `nvfortran` and the `nvfortran-openacc*` targets |
+| `GPUCC` | `80` | the OpenACC GPU targets (not `nvfortran-openacc-host`): compute capability without `cc` |
+| `CUDA_VERSION` | `12.3` | the OpenACC GPU targets; `12.9` with HPC SDK 25.5 |
+| `FPPFLAGS_EXTRA` | empty | `nvfortran`, `nvfortran-mpi` and the `nvfortran-openacc*` targets only: extra preprocessor flags (development macros) |
+
+The `gfortran`, `gfortran-debugger`, `intel*` and `cygwin*` targets name
+their compilers directly.
 
 ## Other targets
 

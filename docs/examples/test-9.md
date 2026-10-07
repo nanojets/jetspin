@@ -13,7 +13,12 @@ from Test Case 7. Two coupled features are deliberately removed:
   integration paths.
 
 Insertion, removal, multiple-step Coulomb summation, and dynamic refinement
-are disabled, keeping the workload fixed at 1,000 beads. This makes the case
+are disabled, keeping the workload fixed at 1,000 beads. The leading bead
+starts on the collector; since 2026-10-07 it is frozen there, like any bead
+that reaches the collector, with or without removal (before, it crossed the
+collector plane by about 6e-4 cm over the 1,000 steps). The leading bead of
+Tests 10-12, 15 and 20 also starts on the collector and is frozen in the same
+way. The fixed workload makes the case
 suitable for comparing the direct O(N²) Coulomb implementations without
 topology or evaporation coupling.
 
@@ -80,8 +85,8 @@ make -C source -f ../build/Makefile nvfortran-openacc-coulomb-oracle GPUCC=80
 
 The complete-force oracle evaluates all four RK4 force stages through the
 trusted CPU equations and uploads their derivatives. The Coulomb-only oracle
-moves only the four direct sums to the host. In the current A30 check against
-the versioned NVFORTRAN CPU output, the standard GPU path, complete-force
+moves only the four direct sums to the host. In an A30 check made before
+2026-10-07 against the versioned NVFORTRAN CPU output, the standard GPU path, complete-force
 oracle, and Coulomb-only oracle had worst normalized differences of
 `7.97e-5`, `3.00e-7`, and `8.52e-5`, respectively. This shows that the Test 9
 RK4 discrepancy is not dominated by Coulomb accumulation order. Both oracle
@@ -95,11 +100,20 @@ Enable the optional internal profiler without rebuilding:
 JETSPIN_PROFILE=1 ./main.x
 ```
 
-The terminal report separates the integrator, Coulomb calculation, bead
-topology operations, statistics, scheduled output, and restart output. The
-Coulomb timer is nested inside `Integrator total`; it must not be added to the
-integrator time. Profiling is disabled by default to avoid adding clock calls
-to production runs.
+The terminal report lists `Integrator total`, `Coulomb (nested)`, the bead
+topology operations (`Add bead`, `Remove bead`, `Erase bead`, `Breakup
+check`), `Statistics`, `Scheduled output`, `Restart output`, `EOM evaluation
+(nested)`, and `RK update (nested)` (`source/profiling_mod.f90`). The three
+nested timers are inside `Integrator total`; they must not be added to the
+integrator time. The EOM and RK update regions (`prof_eom`,
+`prof_rk_update`) are instrumented only in the CPU code of `eulsys`, `rk2sys`
+and `rk4sys` (`source/integrator_mod.f90`); the OpenACC device step
+(`source/device_step_mod.f90`) has no such regions, so a run that takes it,
+as Test 9 does from its first step, reports zero for them and, within the
+integrator, times only `Coulomb (nested)`. The EOM and RK figures below were
+measured with the accelerator paths of the porting milestones, which ran
+inside those integrators. Profiling is disabled by default to avoid adding
+clock calls to production runs.
 
 The report is printed on the terminal only and contains cumulative time,
 percentage of the complete temporal loop, and call count for each selected
@@ -143,6 +157,11 @@ the versioned A30 baseline exactly at the saved output precision.
 
 ## Device EOM and curvature milestone
 
+This section and the following ones up to the selective-output milestone
+record the porting milestones of August 2026, which the common device step
+(below) has superseded; their normalized differences refer to the records of
+that time.
+
 The first equation-of-motion port uses one explicit OpenACC kernel per RK4
 stage. The Test 9 force assembly and its local three-point curvature
 construction execute entirely on the device. Each bead reads only its own
@@ -178,7 +197,7 @@ The full six-snapshot, fourteen-column trajectory passed against the A30
 baseline with `rtol=1e-6` and `atol=1e-9`; its worst normalized difference was
 `7.82e-5`. That initial EOM kernel was deliberately limited to the fixed Test 9
 configuration and used call-scoped data transfers. Unsupported configurations
-retain the CPU EOM path. Absolute timings vary with system load; preserve the
+retained the CPU EOM path. Absolute timings vary with system load; preserve the
 compiler, profiler setting, and execution order when repeating the comparison.
 
 ## Persistent-data milestone
@@ -188,10 +207,10 @@ derivatives, and RK4 scratch arrays on the A30 across timesteps. Cross-section
 calculation and all four RK updates also execute on the device. Coulomb output
 is consumed directly by EOM and never crosses back to the host.
 
-The existing CPU statistics require the primary state after every timestep,
-so the final RK stage still updates seven arrays on the host once per step.
-This is about 56 kB per step for 1,001 beads; no stage intermediate is
-transferred. A representative profiled run produced:
+The CPU statistics of that time required the primary state after every
+timestep, so the final RK stage still updated seven arrays on the host once
+per step. This is 56,056 bytes per step for the 1,001 array entries (indices
+0-1,000) of the 1,000-bead jet; no stage intermediate was transferred. A representative profiled run produced:
 
 | Region | Call-scoped A30 | Persistent A30 | Change |
 | --- | ---: | ---: | ---: |
@@ -271,10 +290,26 @@ process bound to the GPU's NUMA node, the Test 9 loop takes `0.508 s` against
 `24.94 s`). Only the summation order changes: the output still passes the CPU
 and A30 records with a worst normalized difference of `7.99e-5`.
 
+## One device step and the collector rule (2026-10-06/07)
+
+Since 2026-10-06 Tests 9-11 run the common device step (`device_rk_step` in
+`source/device_step_mod.f90`) from the first step, synchronous and not fused
+yet (milestone M4 of `docs/STATE.md`): 22, 10 and 14 kernel launches per
+step for RK4, Euler and RK2 since 2026-10-07, one of which,
+`accelerator_freeze_at_collector`, freezes the beads that reach the
+collector (21, 9 and 13 on 2026-10-06). Since 2026-10-07 a bead that reaches the
+collector is frozen there: the leading bead of this jet, which starts on the
+collector, stays at 16 cm (before, it crossed the plane by 6e-4 cm in 1,000
+steps, `x = 16.00064` cm at the last row). With it the A30 `statout.dat` rows
+equal the CPU's in every printed row; the normalized differences quoted in
+the sections above predate this change.
+
 ## Versioned numerical records
 
-The CPU and A30 OpenACC `statout.dat` files from this initial measurement are
-stored under [`tests/performance/test9/`](../../tests/performance/test9/).
-That directory records their provenance and provides a comparison command for
-future porting milestones. It remains separate from the automatic regression
-matrix so that the 1,000-bead benchmark does not slow routine validation.
+The CPU and A30 OpenACC `statout.dat` records are stored under
+[`tests/performance/test9/`](../../tests/performance/test9/). That directory
+records their provenance and provides a comparison command for future porting
+milestones. It remains separate from the automatic regression matrix so that
+the 1,000-bead benchmark does not slow routine validation. The records were
+regenerated on 2026-10-07 for the collector rule (NVFORTRAN 24.3, CPU and A30
+rows identical; NVFORTRAN 25.5 gives the same rows).

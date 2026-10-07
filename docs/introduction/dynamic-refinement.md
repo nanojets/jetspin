@@ -30,7 +30,7 @@ The supported controls are:
 | `dynamic refinement threshold <length>` | Maximum target element length |
 | `dynamic refinement start <time>` | Do not refine before this time |
 | `dynamic refinement anchor <length>` | Spacing used to preserve anchor beads as interpolation knots |
-| `dynamic refinement capacity <i>` | Bead-count capacity reserve/growth increment `incnpjet` (positive integer, default 100) |
+| `dynamic refinement capacity <i>` | Capacity increment `incnpjet` in beads (positive integer, default 100; see below) |
 
 Times and lengths use the normal input units: seconds and centimetres before
 internal nondimensionalization. Both `every` and `threshold` are required
@@ -46,15 +46,27 @@ floor value used for the default, just reached from an invalid explicit
 input instead. There is no upper bound: an anchor spacing coarser than the
 refinement threshold is accepted without warning.
 
+`capacity` sets `incnpjet`, which every run uses, with or without
+refinement: the initial allocation holds at least `incnpjet` beads
+(`allocate_jet`), an accepted event that outgrows the arrays reallocates
+them to its new upper bound plus `incnpjet` (`define_akima_bounds`), and a
+full neighbour list of the multiple-step Coulomb algorithm grows by
+`incnpjet` entries (`reallocate_neighlist`). Insertion overflow instead
+grows by the fixed `reallocation_increment` of 100 beads (see
+[dynamic allocation](dynamic-allocation.md)). A value below 1 prints
+warning 107 and falls back to 100; the run continues.
+
 A threshold below twenty times the base resolution triggers a further
 advisory (warning 108): combined with a short `every` interval on a case
 that accumulates many consecutive accepted events (e.g. a jet growing from a
 single bead over a long run), this cadence was found to compound a
 nonphysical cross-section thinning across events -- see [Numerical
 robustness of the cross-section fit](#numerical-robustness-of-the-cross-section-fit)
-below. The warning is advisory only: the historical Example 5 and Tests
-21-23 references all use thresholds below this recommendation and remain
-validated short-window cases.
+below. The warning is advisory only: the Tests 21-23 references use a
+threshold below this recommendation (0.10 cm, five times the 0.02 cm
+resolution) and remain validated short-window cases, while Example 5 and
+Tests 24 and 25 use exactly twenty times the resolution (0.4 cm) and raise no
+warning.
 
 [`examples/input-5/input.dat`](../../examples/input-5/input.dat) is the
 historical refinement case. [Test Case 21](../examples/test-21.md) combines
@@ -107,8 +119,10 @@ refinement is accepted.
 The remesher uses this coordinate, rather than an individual Cartesian axis,
 so the same algorithm works for one- and three-dimensional trajectories.
 
-The refined region extends from the collected/nozzle side through
-`irefbeadstart`, the last element found above the threshold. Beads marked in
+The refined region extends from the leading bead (or the contact bead at
+the collector) through `irefbeadstart`, the collector-side bead of the
+element nearest to the nozzle found above the threshold; that element and
+the beads on its nozzle side are not remeshed. Beads marked in
 `jetbd` divide it into anchored segments. Each segment receives a number of
 new intervals equal to the ceiling of its arc length divided by the requested
 `dynamic refinement threshold`. The base insertion `resolution` does not
@@ -142,7 +156,27 @@ mesh, including:
 Stress, mass, charge, and radii are forced non-negative after interpolation.
 Discrete flags such as bead anchors and breakup markers are mapped separately
 rather than treated as continuous scalar data. Collected-bead flags are
-rebuilt from the remeshed coordinates.
+rebuilt from the remeshed coordinates with the rule of the timestep
+(`remove_jetbead`) and of the restart: a bead at or past the collector is
+frozen there and moved onto it, with or without `removing yes`. Until
+2026-10-07 the timestep froze beads only with removal, so that in a run
+without removal a jet could cross the collector plane between two events
+and be pulled back at the next one; a remesh of such a jet could make the
+run fail a few hundred steps later.
+
+The refinement does not see the deposited fiber. Without removal the beads
+that reached the collector stay in the arrays, frozen; the refinement then
+starts at the contact bead (the last of them, joined to the free jet):
+`driver_dynamic_refinement` moves `inpjet` there while the event is tested
+and performed, `define_akima_bounds` keeps the refined jet at its indices
+instead of moving it down to index 0, and the deposited beads are saved
+before the arrays are rebuilt and put back after (`save_deposited_prefix`,
+`restore_deposited_prefix`). On the device state the contact bead comes from
+one reduction (`accelerator_contact_bead`). A run with removal deletes those
+beads and starts at most at the contact bead already. With this rule Test 23
+without removal accepts the same refinement events, at the same steps and
+with the same free-jet counts, as Test 23 itself, and inserts its beads at
+the same steps, on the CPU and the A30.
 
 Before interpolation, mass and charge are converted to densities using the
 reference material volume. After remeshing they are converted back to bead
@@ -154,6 +188,17 @@ belonged unchanged to a new bead volume.
 Reference volume `jetvl` is reconstructed from the refined element length
 and interpolated cross section. The refined portion is then renormalized so
 its total reference volume equals the pre-refinement total.
+
+Each bead takes the length of the segment that follows it. When the refined
+segment ends at the jet endpoint, with no unrefined tail, its last bead has
+no following segment and takes the preceding segment length instead, or the
+base resolution when the segment holds a single bead. The host
+(`reconstruct_refinement_state_host`) and device
+(`accelerator_reconstruct_refinement_state`) reconstructions apply the rule
+to `jetvl` and `jetve` alike. The case arises once the whole active jet lies
+in the refinement zone, as for a jet growing from a single nozzle bead;
+until 2026-08-16 that bead read the path coordinate one index past the last
+active bead.
 
 With evaporation, instantaneous post-evaporation volume `jetve` follows the
 same procedure independently, using the evaporation radius `jetce`. Thus the
@@ -363,8 +408,8 @@ integration resumes.
 
 The normal Test 21 allocation reserves one `incnpjet` block and does not need
 to grow. `incnpjet` is set by the `dynamic refinement capacity <i>` input
-directive (positive integer, default 100 if omitted) and applies uniformly to
-the initial reserve and every later growth increment. The capacity-growth
+directive (positive integer, default 100 if omitted) and sets both the
+initial reserve and every refinement growth increment. The capacity-growth
 validation instead uses the developer-only `JETSPIN_REFINEMENT_INITIAL_RESERVE`
 environment override to reduce that reserve to 50 entries, independently of
 the input value. When the accepted mesh exceeds the old capacity, JETSPIN detaches
@@ -465,7 +510,11 @@ Changes to refinement should preserve these rules:
 - inactive array entries are cleared before collective summation;
 - capacity growth updates MPI chunk sizing and all cached workspaces;
 - code never assumes `inpjet == 0` or stable bead array indices;
-- restart and backup formats are updated when new persistent state is added.
+- restart and backup formats are updated when new persistent state is added;
+- a bead that reaches the collector is frozen there, with or without
+  removal, at the timestep, at an accepted event and on restart alike;
+- the deposited fiber (frozen beads before the contact bead) is neither
+  refined nor counted by the acceptance test, and keeps its indices.
 
 ## Validation
 

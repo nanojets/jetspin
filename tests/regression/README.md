@@ -9,8 +9,12 @@ Each case retains its original timestep. The generated final time is exactly
 including the initial state.
 
 Regression Case 4 starts with 25 beads. This deliberately exceeds the
-10-bead minimum MPI chunk on two ranks and exercises stochastic Platen draws
-on both ranks rather than merely launching an idle second process.
+10-bead minimum MPI chunk on two ranks and exercises stochastic Platen
+integration on both ranks rather than merely launching an idle second
+process. Since 2026-10-06 the case reads the sequential Gaussian pool, in
+every build and with any number of ranks, and its baselines were regenerated
+for both compilers; the two ranks read the serial run's values, so the
+two-rank comparison also checks that the pool is rank-independent.
 
 The inputs retain their model-specific directives, but use a common
 `statout.dat` schema without CPU timings. `nstep`, bead count `n`, and
@@ -37,7 +41,10 @@ tests/regression/run.sh nvfortran
 This uses compiler-specific baselines under `baselines/nvfortran/` and then
 compares the two-rank NVFORTRAN/MPI result with the matching serial result.
 The compiler-specific baseline is necessary because Fortran compilers may
-provide different `random_number` sequences.
+provide different `random_number` sequences. The NVFORTRAN baselines were
+made with NVHPC 24.3. NVHPC 25.5 rounds divisions exactly where 24.3 at `-O3`
+multiplies by the reciprocal, yet its serial runs pass them: cases 1-3 and
+5-7 with no difference, cases 4 and 8 at 0.0065 and 0.16 of the tolerance.
 
 Compare the OpenACC executable with the matching NVFORTRAN CPU trajectory on
 an accessible NVIDIA GPU with:
@@ -45,6 +52,15 @@ an accessible NVIDIA GPU with:
 ```sh
 tests/regression/run.sh openacc
 ```
+
+The regression cases have at most 25 beads, below the 100-bead gate of the
+OpenACC device step and the 128-bead threshold for offloading a Coulomb sum:
+the OpenACC build runs the CPU build's code, so this mode checks its host
+path against the CPU build. The GPU path is covered by
+`tests/performance/dynamic/validate_evaporation.sh`, `tests/restart/` and
+`tests/refinement/`. The script takes `GPUCC` (default `80`) and
+`CUDA_VERSION` (default `12.3`) from the environment; with NVHPC 25.5 set
+`CUDA_VERSION=12.9`.
 
 | Comparison | Relative tolerance | Absolute tolerance |
 | --- | ---: | ---: |
@@ -65,22 +81,18 @@ JETSPIN_OPENACC_REGRESSION_ATOL=1e-10 \
 tests/regression/run.sh nvfortran
 ```
 
-Case 8 has a separate default because the evaporating Maxwell trajectory is
-chaotic to floating-point perturbations caused by the GPU Coulomb reduction
-order. Override it independently when tighter or looser acceptance is needed:
+Case 8 has a separate default, and the dynamic event counters `n`, `curn`,
+and `curc` are omitted from its OpenACC comparison (continuous observables
+remain checked). Both are historical: until 2026-10-05 the OpenACC build
+offloaded every Coulomb sum, and the evaporating Maxwell trajectory amplified
+the different GPU reduction order. Override the tolerance independently when
+tighter or looser acceptance is needed:
 
 ```sh
 JETSPIN_OPENACC_EVAPORATION_RTOL=3e-2 \
 JETSPIN_OPENACC_EVAPORATION_ATOL=1e-8 \
 tests/regression/run.sh openacc
 ```
-
-This is an intentional numerical tolerance, not a baseline update: the GPU
-and host Coulomb forces agree to approximately `1e-9` per component before
-trajectory-level error amplification. The dynamic event counters `n`, `curn`,
-and `curc` are omitted from the OpenACC case-8 comparison because a tiny
-floating-point perturbation can move an insertion/removal event by one output
-interval; continuous observables remain checked.
 
 Regenerate baselines intentionally after an accepted numerical change with:
 

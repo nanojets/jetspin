@@ -25,9 +25,16 @@ tests/refinement/run_test23.sh openacc
 tests/refinement/run_test23.sh force-oracle
 tests/refinement/run_test23.sh host-akima
 tests/refinement/run_test23.sh akima-compare
+tests/refinement/run_test23.sh refinement-compare
 ```
 
 The normal OpenACC path computes Akima coefficients and interpolation on the
-GPU. `host-akima` retains the historical host spline as an oracle, while
-`akima-compare` evaluates both implementations field by field at all three
-events. Target-mesh preparation and conservation remain on the host.
+GPU, together with the volume reconstruction, its conservation rescale, and
+the conversion of mass and charge densities. `host-akima` retains the
+historical host spline as an oracle, while `akima-compare` evaluates both
+implementations field by field at all three events, and
+`refinement-compare` compares the host and device reconstruction of volume,
+mass, charge, and evaporated volume. The mass-boundary walk
+and target-mesh preparation, the anchor bookkeeping and final assembly, the
+conservative radius-floor and evaporation-limit corrections, and the
+invariant checks remain on the host.

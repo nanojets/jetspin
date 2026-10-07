@@ -50,6 +50,17 @@ must not be used for the timing table above.
 The same two oracle interfaces cover Platen with and without evaporation;
 Tests 12 and 20 both have a maximum written-output difference of zero.
 
+On 2026-10-07 the records of Tests 10-12 were regenerated: a bead that
+reaches the collector is now frozen there, and the leading bead of these jets
+starts on the collector (before, it crossed the plane by about 6e-4 cm in
+1,000 steps). With the common device step (Euler 10, RK2 14, Platen 13 kernel
+launches per step) the A30 records equal the CPU records row for row, and
+NVFORTRAN 25.5 gives the same rows; provenance in
+[`../BUILD-PROVENANCE.md`](../BUILD-PROVENANCE.md). The timings and
+normalized differences above were measured with the earlier records. Test 20
+has no versioned record: its check compares the CPU and A30 outputs of the
+same build.
+
 Compare new outputs against the records and against each other with:
 
 ```sh

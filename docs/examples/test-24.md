@@ -12,7 +12,7 @@ It is assembled from three existing sources rather than invented from scratch:
 
 - **Canonical JETSPIN electrostatics** — `density charge 44000`,
   `collector distance 16`, `external potential 30.02076857`, the set shared
-  with Examples 3 and 6 and with Tests 10, 15 and 16--20.
+  with Examples 3, 4 and 5 and with Tests 9--20.
 - **Rheology, air drag and topology from Test Case 23** — Maxwell rheology,
   stochastic Platen air drag, nozzle insertion, collector removal, and the
   same `dynamic refinement anchor 0.10` cm.
@@ -21,9 +21,11 @@ It is assembled from three existing sources rather than invented from scratch:
   400-element mesh that Tests 21--23 use to validate the refinement
   algorithm.
 
-The single-bead start is what makes this case distinct: every other validated
-refinement test begins from an already-extended jet, so the young-jet growth
-regime had never been exercised.
+The single-bead start is what makes this case distinct: every other anchored
+stochastic-Platen refinement test (Tests 21--23) begins from an
+already-extended jet, so the young-jet growth regime of this configuration
+had not been exercised. Example 5 also grows from one bead with refinement,
+but with RK4, multiple-step Coulomb sums, and no anchors.
 
 ## This case is non-evaporative by definition
 
@@ -32,10 +34,11 @@ its evaporation directives are read but unused. The evaporative configuration
 is [Test Case 25](test-25.md), whose `input.dat` differs from this one by two
 lines: `evaporation yes` and `evaporation polymer frac 0.50d0`.
 
-With Yarin's own 6 % polymer fraction the evaporative configuration stops on a
-stress NaN near step 1.07 million, because the dried jet keeps its charge
-while losing fifteen times its mass and cross-section. With 50 % it runs
-stably; [Test Case 25](test-25.md) carries that analysis.
+With Yarin's own 6 % polymer fraction the evaporative configuration stopped on
+a stress NaN near step 1.07 million in runs of a build of 2026-09-29, because
+the dried jet keeps its charge while losing fifteen times its mass and
+cross-section. With 50 % it runs stably; [Test Case 25](test-25.md) carries
+that analysis.
 
 ## The refinement cadence is load-bearing
 
@@ -51,8 +54,13 @@ equation.
 
 `warning(108)` fires whenever a refinement threshold is set below twenty
 times the base discretization resolution. It is informational, not enforced:
-Example 5 and Tests 21--23 are themselves below that ratio and remain valid
-short-window references.
+Example 5 and Tests 24 and 25 sit exactly at that ratio (0.4 cm over a
+resolution of 0.02 cm) and raise no warning, while Tests 21--23, at five times
+the resolution, are below it and remain valid short-window references.
+
+Refinement also starts late: `dynamic refinement start 2.5d-4`, which neither
+Example 5 nor Test 23 sets, allows no refinement during the first
+`2.5e-4` s (50,000 steps).
 
 ## Related work
 
@@ -83,14 +91,27 @@ Four more CPU seeds (318 – 321) give mean active counts between 511.3 and
 over the same window: the stationary regime does not depend on the noise
 realization. Each CPU run takes about 14,000 s.
 
-One NVIDIA A30 runs the same 5 million steps in about 620 s. It reproduces the
+One NVIDIA A30 runs the same 5 million steps in 596 s (process bound to the
+GPU's NUMA node; 621 s with the build of 2026-10-05; see below). It reproduces the
 CPU run byte for byte up to step 1,379,105, where it engages the persistent
 path, and then follows the CPU trajectory: with seed 317 the active bead count
-first differs at step 2.66 million (2.18 million with seed 318). Between
+first differs at step 4.28 million (4.74 million with seed 318), and every
+insertion and removal falls at the CPU's step up to step 3.96 million (4.57
+million). Until 2026-10-07 the A30 inserted the bead that needs the array
+reallocation one step late (step 1,963,390 instead of 1,963,389; see
+[Test 15](test-15.md)), and the counts separated at 2.66 and 2.18 million
+steps. Between
 steps 4 and 5 million the five A30 seeds (317 – 321) give 511.1 – 512.0
 active beads (471 – 553), a path length of 211.3 – 211.4 cm, an off-axis
 distance of 3.78 – 3.79 cm, a cone angle of 26.6 – 26.7°, and a collector
 velocity of 1963 – 1964 cm/s, with 219 additions and 1,042 – 1,045 removals.
+
+NVHPC 25.5 (2026-10-07, A30, seed 317) agrees with the 24.3 build within
+1.3e-7 up to 2.1 million steps; every insertion and removal falls at the same
+step up to step 2,599,092 (then one step apart), with the same totals (219
+insertions, 1,042 removals) and 511.2 active beads between 4 and 5 million
+steps, as with 24.3. The two compilers round divisions differently; the
+reference values are those of NVHPC 24.3.
 
 Before 2026-10-05 the CPU and the standard GPU builds drew this case's noise
 step by step, and an earlier CPU run of the same seed gave, over the same
@@ -104,14 +125,19 @@ inserting bead (2026-10-01) and halved `lp`, and is not a reference.
 Full-length reference (2026-10-06): one A30 ran the 100 million steps of the
 distributed input (seed 317, with `print time 1.d-4` and the `cpue cpu`
 columns) in 14,906 s with the build of 2026-10-05, whose output is
-byte-identical to the current build's over the first 5 million steps; the run
+byte-identical to the current build's up to the reallocation at step
+1,963,389 (one step late in that build, see above); the run
 closed correctly, with 4,363 insertions, 44,590 removals, 496 accepted
 refinement events, and one reallocation. From 10 to 100 million steps the
 regime is stationary: collector velocity 1960 cm/s, `yz` 3.83 cm, 26.9°,
 517 active beads (474 – 560), path length 213.8 cm, and `rc` 3.16 µm, and
 every 10-million-step block agrees within 0.3 beads and 0.2 cm. The window
 between 4 and 5 million steps above is about 1 % lower (511 beads, 211.4 cm):
-the jet is still settling there.
+the jet is still settling there. These statistics rest on periodically
+repeating noise: the default pool of 100,000,000 values repeats every
+`1e8 / (6 * active beads)` steps
+([random numbers](../introduction/random-numbers.md)), about 32,000 steps at
+517 beads, so the 100 million steps go through the pool about 3,100 times.
 
 ## Where the A30 run spends its time
 
@@ -129,13 +155,18 @@ update kernel of Test 25.
 
 Seed 317, process bound to the GPU's NUMA node: the loop takes 588 s, 110 s
 in phase 1 (80 µs/step) and 478 s in phase 2 (132 µs/step), with the build of
-2026-10-06; the build of 2026-10-05 takes 621 s on the same node (512 s,
-141 µs/step, in phase 2) and gives the same output byte for byte. The standard
-GPU build of 2026-10-05 morning, which kept this case on the host with only
-the Coulomb sums on the GPU, took 4546 s. Median time per step over the
-20,000-step print intervals:
+2026-10-06 (9d7ba36); the build of 2026-10-05 takes 621 s on the same node
+(512 s, 141 µs/step, in phase 2) and gives the same output byte for byte. The
+common device step (milestone M3 of `docs/STATE.md`, 2026-10-06) gave the
+same output byte for byte and took 596 s, against 593 s for 9d7ba36 in the
+same session (phase 2 132.8 against 132.1 µs per step); since the insertion
+fix of 2026-10-07 the output differs from step 1,963,389 (above). NVHPC 25.5
+takes 630 s, against 597 s for 24.3 in the same session (2026-10-07). The
+standard GPU build of 2026-10-05 morning, which kept this case on the host
+with only the Coulomb sums on the GPU, took 4546 s. Median time per step over
+the 20,000-step print intervals:
 
-| Active beads | CPU | A30, current | A30, 2026-10-05 | A30, before 2026-10-05 |
+| Active beads | CPU | A30, 2026-10-06 | A30, 2026-10-05 | A30, before 2026-10-05 |
 | --- | ---: | ---: | ---: | ---: |
 | 1 – 30 | 19 µs | 20 µs | 20 µs | 27 µs |
 | 30 – 60 | 59 µs | 61 µs | 61 µs | 74 µs |

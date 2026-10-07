@@ -1,5 +1,787 @@
 # JETSPIN development state and handoff log
 
+## Work plan: one device strategy for every run (from 2026-10-06)
+
+Goal agreed with the user on 2026-10-06: every run uses the strategy that
+Tests 24 and 25 established, with one code path whose forks depend on the
+selected physics as little as possible, and eventually every model on the
+GPU. Decisions: the Example 4 regression references are regenerated when it
+moves to the Gaussian pool; physics features missing from the device kernels
+are ported (the target is everything on the GPU). Proposed, not yet
+decided: MPI runs stay on the CPU (multi-GPU is a separate project).
+
+### The standard
+
+1. Two-level decision: a size-independent configuration test, taken once
+   before the loop (it also decides the Gaussian pool), and a per-step gate
+   (`npjet>=100`) that stays open once it has opened.
+2. Below the gate the OpenACC build runs the CPU build's code, Coulomb sums
+   included (host below 128 beads), so it is byte-identical to the CPU build
+   up to the engagement.
+3. Above the gate the state stays on the device: an ordinary step returns
+   only the 20-byte topology record; full-state transfers only for output,
+   refinement events and capacity changes.
+4. One asynchronous queue and one wait per step; small kernels fused
+   (preparation per force evaluation, update kernel, end-of-step kernel).
+5. Stochastic forcing reads the sequential Gaussian pool, on CPU and GPU.
+6. Exact restart; validation by identity up to the engagement, CPU
+   comparison and seed ensembles after it, oracles, restart check.
+
+### Where each case stood when the plan started (2026-10-06, confirmed in M0)
+
+The current coverage, with measured launches and transfers per step, is the
+table in `docs/introduction/openacc.md`.
+
+| Case | Physics and integrator | GPU path today |
+| --- | --- | --- |
+| Ex 1, 2 | 1D (system 1), RK2 / RK4 | none |
+| Ex 3 | 3D, RK2, Maxwell, insertion, no air drag | none (EOM kernel needs air drag); Coulomb offloaded with copies above 128 beads |
+| Ex 4 | Platen, insertion, no refinement | non-persistent (configured test needs refinement and tags); noise drawn step by step |
+| Ex 5 | RK4, refinement, multiple-step Coulomb, no air drag | none |
+| Ex 6 | RK2, Kelvin-Voigt (no evaporation), multiple step | none |
+| Ex 7 | RK4, evaporation, rotating external field | none (`nfieldtype`) |
+| Ex 8 | RK4, evaporation, no air drag | none |
+| Tests 9-11 | RK4 / Euler / RK2 fixed 1000 beads | persistent only for `npjet==1000`; synchronous |
+| Test 12 | Platen fixed 1000 | persistent (`npjet==1000`), pool, synchronous, not fused |
+| Tests 13, 14 | RK4, insertion and removal, 1024 / 1500 | persistent only for `npjet>=1000` and capacity >= 1280; synchronous |
+| Test 15 | RK4, insertion, no removal, 100 | persistent through a separate 100-bead test gate |
+| Tests 16, 18 | RK4 evaporation | persistent from 100 beads (2026-10-06); synchronous |
+| Tests 17, 19 | RK4 Kelvin-Voigt evaporation | own device driver (`integrator_kv_ev_mod`); synchronous |
+| Test 20 | Platen evaporation fixed 1000 | persistent, pool, synchronous, not fused |
+| Tests 21-25 | Platen dynamic with refinement | the standard |
+
+Two further gaps: the non-evaporative Euler/RK2/RK4 host paths offload the
+EOM stage whenever air drag is on (hybrid, not the CPU code); the persistent
+gates of Tests 9-15 are shaped on the test geometries (`npjet==1000`,
+`>=1000`, "no removal"), so a run of another size does not engage.
+
+### Target architecture
+
+One device step for every scheme and model, in a new module:
+- stage evaluator: preparation (smoothed nozzle charge, inserting bead),
+  Coulomb sums, model kernel (Maxwell, Maxwell with evaporation,
+  Kelvin-Voigt, Kelvin-Voigt with evaporation; air drag, external field,
+  noise as options), on a given stage state;
+- scheme: stage combinations and final update for Euler, RK2, RK4 and
+  Platen (pool noise) in generic kernels, evaporated volume as an option;
+- common end of step: statistics, inserting bead, topology decisions,
+  freezing, stored statistics (the Platen end-of-step kernel generalized);
+- one gate (configuration + sticky size gate), one engagement and release
+  routine (mapping, async queue, log line), one restart state.
+The host code of each integrator stays the CPU build's code.
+
+### Milestones
+
+- M0. Confirm the table by running every case on the A30 (engagement log
+  line, path, identity with the CPU before engagement); document the
+  standard and the table in `docs/introduction/openacc.md`.
+- M1. Common gate and engagement; device RK step (Euler, RK2, RK4) for
+  Maxwell with and without evaporation, replacing the persistent branches
+  of `eulsys`/`rk2sys`/`rk4sys`, the device chain of `rk4sys_ev`, and
+  `eulsys/rk2sys_maxwell_ev_device`; host paths without device calls.
+  Check: Tests 9-11, 13-16, 18, `validate_evaporation.sh`, single-bead
+  runs past 100 beads, CPU identity before engagement.
+- M2. Kelvin-Voigt (with and without evaporation) in the same step
+  (Tests 17, 19, Example 6 without multiple step).
+- M3. Platen as a scheme of the same step; the configured test without
+  refinement (Example 4, references regenerated).
+- M4. Asynchronous queue and fused kernels for every scheme.
+- M5. Device kernels for the missing features: no air drag, refinement with
+  the RK schemes, time-dependent external fields, multiple-step Coulomb,
+  then 1D (systems 1 and 2) and the remaining options.
+- M6. Exact restart and the restart check for every family; references.
+
+Build system (decided with the user on 2026-10-07): version 2.0 is merged
+with the current `build/Makefile`, with which every validation was made.
+After the merge, before or alongside M4:
+- declare every module dependency in the Makefile (today only
+  `device_step_mod` and the integrators list theirs, so editing a module
+  does not rebuild its users and `make -j` is unsafe; the test scripts
+  avoid it by building from scratch in a copy);
+- add a `CMakeLists.txt` beside the Makefile, not replacing it: the same
+  compiler flags and variants (MPI, OpenACC, oracles, debug) as options,
+  out-of-source builds, automatic Fortran module dependencies; accepted
+  when its builds give results identical to the Makefile's in the 23 audit
+  cases, with a CI job that builds with it and pages in `compiling.md` and
+  `manual/compiling.tex`. The Makefile stays the reference of the tests
+  and the manual until the CMake build has been in use for a while.
+
+### Progress
+
+- 2026-10-06: plan agreed. M0 done: every example (first 20,000 steps) and
+  every test input run on CPU and A30 with `NVCOMPILER_ACC_NOTIFY=3`
+  (`audit.sh`, `auditstat.py`); the table in `docs/introduction/openacc.md`
+  now carries the measured launches and transfers per step. Confirmed the
+  table above, plus one gap it missed: the 1D Coulomb sum (Examples 1, 2)
+  is offloaded at every step even with one bead, with 24 uploads per call
+  (about 250 times slower than the CPU build, results identical). Examples
+  3-8 run the CPU code below 100 beads and match the CPU build byte for
+  byte over 20,000 steps. Test 18 moves 22 arrays per step.
+- 2026-10-06, M1 (done): `source/device_step_mod.f90`, one device step for
+  Euler, RK2 and RK4: `device_step_configured` (size-independent),
+  `device_step_eligible` (100 beads, sticky,
+  `JETSPIN_OPENACC_DISABLE_PERSISTENT`), `ensure_device_step` (mapping,
+  workspace, capacity rebuild, one log line "OpenACC device step engaged
+  (scheme, model) at step N with M active beads"), `device_stage`
+  (smoothing, inserting bead, Coulomb, model kernel; the force oracle on the
+  host under `JETSPIN_DEV_HOST_FORCE_ORACLE`), `device_rk_step`. The RK
+  update kernels take an optional `evaporative` flag. In `integrator_mod`
+  the six RK routines lost every `_OPENACC` branch (a script resolves the
+  conditionals as a CPU build does: the preprocessed CPU code is identical
+  line for line) and only dispatch to `device_rk_step` above the gate;
+  removed `fixed_accelerator_eligible`, `dynamic_rk4_accelerator_eligible`,
+  `small_dynamic_test_eligible`, `evaporative_dynamic_accelerator_eligible`,
+  the three `*_maxwell_ev_device` drivers with their workspace, and the
+  `accelerator_*_final_statistics` kernels (about 1,100 lines). The 1D
+  Coulomb sum follows the 128-bead host rule (`coulomb_offload`).
+  Evidence: every case of the M0 audit gives the same `statout.dat` and
+  events as before, CPU and A30 (Tests 9-11 and 13-18 now through the new
+  step); Examples 1, 2 run on the host on the A30 (0 launches);
+  `validate_evaporation.sh`, regression openacc 1-8 and the restart check
+  pass; all nine variants build; force and Coulomb oracles of Tests 13 and
+  16 agree with the device step. Single-bead jets (Test 25 physics with
+  system 3, collector at 25 cm), Euler, RK2 and RK4, with and without
+  evaporation: byte-identical to the CPU build up to the engagement at 100
+  beads (steps 2,228,488-2,238,801) and, after it, every `statout.dat` row
+  equal to the CPU's up to 2.6 million steps, every printed row too once the
+  path-length defect below was fixed (checked again for Euler).
+- Path-length count at capacity growth (found by those runs): at the step
+  that grows the arrays, `accelerator_release_jet_capacity` turns the
+  persistent flag off after the RK device step has added that step's path
+  length on the device, so `statistic_driver` took its host branch and the
+  device count missed the step: the printed `lp` of that interval was too
+  large by one part in 20,000 (exactly one step). The device statistics
+  now stay in use while they are mapped and the jet arrays are bound
+  (`accelerator_statistics_on_device`). The Platen paths, which count in
+  their end-of-step kernel, are unchanged.
+- 2026-10-06, M2 (done): the Kelvin-Voigt model, with and without
+  evaporation, in the same step. `accelerator_kv_stage` and
+  `accelerator_kv_stress_3d` (formerly `accelerator_kv_evap_stage` and
+  `accelerator_kv_evap_stress_3d`; the old `accelerator_kv_stress_3d` was
+  an unused copy) take an `evaporative` flag: without evaporation the
+  stress derivative is the strain rate plus its time derivative, as in
+  `eom3_KV_st`. `integrator_kv_ev_mod` keeps only the CPU build's code
+  (stripped as in M1; its host `eval_stage` also offloaded the stress) and
+  dispatches to `device_rk_step`; `kv_evap_device_eligible`, its three
+  device drivers and its device workspace are gone (about 260 lines).
+  `eulsys_KV`, `rk2sys_KV` and `rk4sys_KV` dispatch too. Two restrictions
+  dropped on the way: air drag (the EOM kernel already left out drag and
+  lift with `lairdrag` off, but refused to run; part of M5) and the
+  collector-curvature option, now on for every model as in `eom3` (the old
+  `rk4sys` device path had it, Euler and RK2 not; no effect in any test).
+  Evidence: Tests 17 and 19 byte-identical to the former Kelvin-Voigt
+  device driver (`statout.dat`, events, launches per step), force oracle
+  identical events; the whole M0 audit (Examples 1-8, Tests 9-23, CPU and
+  A30) byte-identical to M1 except Example 8, which now engages at step
+  13,699 (RK4, evaporation, no air drag): identical to the CPU build up to
+  it, then within 2e-8 over 6,300 steps, one insertion one step earlier,
+  force oracle with the same events. New cases (A30 against the CPU build
+  and the force oracle, 1000 steps): Test 17 without evaporation
+  (Kelvin-Voigt, integrators 1-3, with and without air drag), Tests 13 and
+  16 without air drag (integrators 1-3), Example 3 started with 150 beads
+  (RK2, no air drag); oracle events identical, Euler oracle within 1e-9
+  over the first rows, well-conditioned columns within 4e-5 of the CPU
+  build (the transverse coordinates of order 1e-12 cm and `rc` differ as in
+  Tests 16 and 17). `validate_evaporation.sh`, regression openacc 1-8 and
+  the restart check pass.
+- 2026-10-06, M3 (done): the Platen scheme in the same step.
+  `device_step_supported(scheme)` (model and options; for Platen it also
+  decides the Gaussian pool, in every build and for any number of ranks),
+  `device_step_configured(scheme)` (adds one rank holding the whole jet),
+  `device_step_eligible(scheme)` (100 beads, sticky, pool allocated for
+  Platen); `device_stage` gained the stochastic terms and the fused
+  preparation kernel; `device_platen_step` = three force evaluations, one
+  predict kernel (`accelerator_platen_predict`, evaporative flag; the
+  separate evaporative kernel is gone), `accelerator_platen_update` and
+  `accelerator_platen_end_step`, which now also serves runs without
+  insertion (no topology decision, statistics over `inpjet..npjet`) and
+  restores the smoothed charge only when the fused preparation smoothed it
+  (the force-oracle builds smooth on the host: without this the oracle
+  wrote a stale charge into the nozzle bead). `platen` and `platen_ev` keep
+  only the CPU build's code; removed `fixed_accelerator_geometry`,
+  `fixed_evaporative_platen_eligible`, `dynamic_platen_configured`,
+  `dynamic_platen_eligible`, `dynamic_evaporative_platen_configured`,
+  `dynamic_evaporative_platen_eligible`, `non_evap_host_force_oracle`,
+  `maxwell_evap_device_stage`, `place_inserting_bead`, the unused
+  `persistent_acc`/`used_acc_eom` branches of the RK routines, and the
+  unfused Platen kernels (velocity and positions with and without
+  evaporation, stress statistics, `accelerator_maxwell_stress_3d`,
+  `accelerator_maxwell_evap_stress_3d`). The pool slice of a step spans
+  `inpjet..npjet` instead of `mystart..myend`, so that MPI ranks read the
+  serial run's values.
+  Behaviour changes: Example 4 (Platen without refinement) reads the pool
+  on CPU and GPU (regression baselines of case 4 regenerated for gfortran
+  and NVFORTRAN; the local builds reproduced the old baselines exactly
+  before) and takes the device step above 100 beads; Tests 12 and 20 take
+  the fused tail (12 launches per step instead of 18 and 19).
+  Evidence: the whole audit (Examples 1-8, Tests 9-23, CPU and A30)
+  byte-identical to M2 except Example 4; Example 4 CPU and A30 identical
+  to each other; Tests 24 and 25 over 2.1 million steps byte-identical to
+  the 9d7ba36 references (every row, printed row, `traj.xyz` frame and
+  event; engagement at steps 1,379,105 and 1,446,413 as before); Example 4
+  started with 150 beads engages at step 1, within 1e-5 of the CPU build
+  in `x` (the transverse `yz` differs as the other stochastic cases),
+  force oracle within 1e-9 and same events; Platen force oracles of Tests
+  12, 20 (identical), 21 (1e-7) and 22 (3e-8) with the same events as the
+  device step; serial regression cases 1-8 against the baselines with
+  gfortran and NVFORTRAN, smoke serial and debug, `validate_evaporation.sh`,
+  regression openacc 1-8 and the restart check pass. Not run here: the
+  two-rank MPI comparisons (mpirun hangs on the node used), which now
+  check case 4 with the pool.
+  Performance (A30 and its NUMA node, 5 million steps, as the 9d7ba36
+  measurements, results byte-identical to them): Test 24 596 s (593 s;
+  device phase 132.8 instead of 132.1 us per step), Test 25 666 s (658 s;
+  142.4 instead of 140.6 us per step). With the stage derivatives as columns
+  of two-dimensional arrays the evaporative Platen step took 4 us more per
+  step; one allocation per array and stage (a derived type) leaves 2 us. The
+  difference appears only on the asynchronous queue: with
+  `JETSPIN_OPENACC_SYNC=1` both builds take 274.7 us per step, and an Nsight
+  Systems window shows the same kernel times and launch costs; it was not
+  traced further, since M4 changes the launch sequence anyway.
+- Next: M4 (asynchronous queue and fusion for the RK steps and the fixed
+  Platen geometry: Tests 9-19 still launch 9-34 kernels per step
+  synchronously, Test 18 moves 22 arrays per step), then M5 (refinement
+  with RK, multiple-step Coulomb, time-dependent fields, 1D, MPI decision)
+  and M6 (restart check per family).
+
+### Before merging `development` into `master` (agreed 2026-10-06)
+
+`development` is 44 commits ahead of `master` (last merged 2026-08-09),
+plus milestones M0-M3, not committed yet. The continuous integration runs
+only the GFortran smoke modes (serial, debug, MPI) and the manual: no
+regression suite and no GPU. Checks still to do, in this order:
+
+1. MPI. The two-rank comparisons of `tests/regression/run.sh` (GFortran and
+   NVFORTRAN, cases 1-8; case 4 now reads the Gaussian pool, which only
+   this comparison shows to be rank-independent) and `tests/smoke/run.sh
+   mpi`, in batch jobs, on one node and with the two ranks on two nodes.
+2. Restart beyond the dynamic Platen runs: an RK run on the device step
+   (Test 13 or 16), Kelvin-Voigt (Test 17), Example 4 on the CPU (pool).
+   Known gap: the restart file does not record that the device step had
+   engaged, so a run restarted below 100 beads after its engagement
+   continues on the host (same physics, not the uninterrupted run byte for
+   byte); to add to the restart state (version 2). Done, see Progress.
+3. Long runs of the changed behaviours: Example 4 with the pool against
+   the former step-by-step noise (CPU seed ensemble, statistical
+   equivalence); Example 8, which now engages, A30 against CPU over the
+   whole run; Kelvin-Voigt without evaporation and runs without air drag,
+   one long run each; the single-bead RK2 and RK4 runs again with the final
+   build (the path-length fix was rechecked with Euler only). Done, see
+   Progress (it found the late insertion at array growth on the device).
+4. NVHPC 25.5: builds, regression openacc, Tests 24 and 25 briefly. Done,
+   see Progress (it found that the step count of a run depended on the
+   compiler).
+5. Release housekeeping: a `CHANGELOG.md` entry for the development line
+   (OpenACC port, Gaussian pool, exact restart, one device step), the
+   version and tag (2.0, decided by the user on 2026-10-07; the manual
+   named `2.0-alpha`), local files excluded from git. Done except the tag, which goes with the merge (item 6); it
+   grew into a review of the whole documentation against the code (see
+   Progress).
+6. Merge: M0-M3 as three or four readable commits (M1, M2, M3, the case-4
+   baselines), push to `development`, green CI, then a pull request
+   `development` -> `master`; with the merge, the tag `v2.0`, the release
+   date in `CHANGELOG.md` if it changes, and the "latest stable release" of
+   `README.md` and `docs/project-overview.md` (now 1.22). Changed by the
+   user on 2026-10-07: first a pre-release, 2.0-beta.1 (see Progress); the
+   merge into `master` and the tag `v2.0` wait for the final 2.0.
+7. Performance: Test 25 is 1.3 % slower than at 9d7ba36 (asynchronous
+   overlap only); accept it or wait for M4. Accepted (see Progress).
+
+Progress:
+
+- 2026-10-06, item 1 (done): in batch jobs, one node with two ranks and two
+  nodes with one rank each (InfiniBand): `tests/smoke/run.sh mpi` and
+  `tests/regression/run.sh` (GFortran 8.5, OpenMPI 4.1.6) and
+  `tests/regression/run.sh nvfortran` (NVHPC 24.3) pass, cases 1-8. Case 4
+  (Gaussian pool) gives the serial run's `statout.dat` exactly on two ranks
+  (normalized difference 0), and the serial runs match the regenerated
+  baselines exactly. An MPI launch started outside the batch system on a
+  node held by another job hangs; the batch jobs are the way to run these
+  checks.
+- 2026-10-06, item 2 (done): `tests/restart/run.sh` now checks eight cases
+  (Tests 24, 25, 12, 13, 16, 17, Examples 4 and 8: Platen with and without
+  insertion and refinement, RK4 with and without evaporation, Kelvin-Voigt
+  with evaporation) with five backends (NVFORTRAN, OpenACC, GFortran, and
+  two ranks with GFortran and NVFORTRAN), and takes selected cases and an
+  existing executable (`JETSPIN_RESTART_EXE`). Restart state version 2 adds
+  two fields: whether the device step has engaged
+  (`device_step_engaged`, restored by `device_step_restore_engaged`; the
+  restarted run prints `OpenACC device step resumed (...)`), and the times
+  the pool cursor has wrapped, so that a restart resumes after the same
+  number of consumed values even with a pool of another size
+  (`set_gaussian_history_consumed`). Version 1 files are still read (gate
+  closed, cursor as before). Defects found by the new cases, fixed:
+  - Restarting a run without removal (Test 12, `removing no`):
+    `read_dat_restart` froze every bead past the collector and moved it
+    back onto it, which the step does only for runs that remove beads
+    (`remove_jetbead`). The restarted Test 12 had its tip pinned at 16 cm
+    while the uninterrupted run carried it past (CPU and GPU, every build
+    before). Now only with removal. Superseded the next day: every run
+    freezes the beads at the collector, the step included, and the restart
+    freezes them all again (entry below).
+  - The pool of a fixed jet covered `nint(final time / timestep)` steps,
+    while the loop runs until the step number times the timestep reaches
+    the final time: with a final time that is not a multiple of the
+    timestep the last step read the pool from its start. The pool now
+    covers the loop's steps. Tests 12 and 20 (exact multiples) are
+    unchanged, CPU and A30.
+  - A fixed jet extended by a restart (a longer final time sizes a longer
+    pool) resumed at the saved cursor, which had wrapped to zero at the end
+    of the shorter pool: the restarted run read the first step's noise
+    again, with a warning. The longer pool holds the same sequence (drawn
+    step by step from the seed), so resuming after the consumed values
+    continues the uninterrupted run exactly.
+  - The known gap: Example 8 engages at step 13,699 (arrays at index 100,
+    89 beads active); an insertion at step 13,840 compacts the arrays to 91
+    beads, which reach 100 again at step 15,109. Restarted at step 14,000,
+    the former build continued on the host until step 15,110 (`traj.xyz`
+    frames differ from step 17,000); version 2 resumes on the device at step
+    14,001, identical to the uninterrupted run.
+  Also: the input of Example 4 has DOS line ends, which the parser rejects
+  when mixed with Unix ones (the check normalizes them). Noticed, not
+  changed: an accepted refinement event freezes and moves onto the
+  collector every bead past it even in runs without removal
+  (`fit_jet_akima` in `dynamic_refinement_mod`), unlike the step. Tests 21
+  and 22 refine without removal, but their tips stay below 12.3 cm with the
+  collector at 16 cm (Test 23, with removal, has it at 12 cm), so no
+  distributed case reaches that code. Fixed on 2026-10-07 (entry below).
+  Evidence: with the M3 binaries Test 12 fails (CPU and A30) and Example 8
+  fails on the A30; with the final build all eight cases pass with every
+  backend: NVFORTRAN, OpenACC (A30), GFortran, GFortran with runtime checks,
+  and two ranks with GFortran and with NVFORTRAN (batch job, one node);
+  every `statout.dat` row, terminal row and `traj.xyz` frame after the
+  restart step identical. Full Tests 12 and 20 identical to the M3 build
+  (CPU and A30). Smoke serial, debug and MPI, regression GFortran and
+  NVFORTRAN (serial and two ranks) and OpenACC, `validate_evaporation.sh`
+  and the nine Make variants pass.
+- 2026-10-07, item 3 (done): long runs, A30 against the CPU build, and seed
+  ensembles. They found one defect, fixed: **the device topology path
+  inserted a bead one step late whenever the arrays had to grow for it.**
+  `device_topology_decide` flags a capacity growth instead of inserting when
+  the arrays are full; `main` grew them and went on, so the bead came at the
+  next step, while `add_jetbead` grows the arrays and inserts in the same
+  step. After the growth `main` now decides the step again
+  (`accelerator_topology_check`, insertion, removal test and freezing
+  included). The first insertion after a mid-run engagement always needs a
+  growth (the gate opens when the arrays reach index 100, their initial
+  capacity), so every run engaged mid-run (Examples 3, 4, 6, 8, single-bead
+  jets, Test 24 at its reallocation) shifted all later insertions by one
+  step and separated from the CPU run from there; the earlier records had
+  ascribed this to the Coulomb summation order (Tests 16-19) or documented
+  it as a known difference (Test 15). Evidence that pinned it: Example 4
+  started with 150 beads (arrays full), saved states at steps 7538 and 7539
+  identical to 1e-16 between A30 and CPU, the device's own insertion
+  distance at step 7539 bit-identical to the CPU's (0.860210, threshold
+  0.860159), no insertion on the device; with the fix the run follows the
+  CPU within 1.2e-9 in `yz` over 20,000 steps (2.1e-1 before) with the same
+  events. Tests 15, 16, 17 (each integrator) and 19 now give the CPU's
+  events step for step, Test 18 its totals; Tests 9-14 and 20-23 and Test
+  25 (2.1 million steps) unchanged; Test 24 unchanged up to step 1,963,389,
+  where its reallocation now inserts at the CPU's step.
+  Results, final build (A30 against the NVFORTRAN CPU build):
+  - Single-bead jets (Test 25 physics with system 3, Euler/RK2/RK4, with
+    and without evaporation, 2.6 million steps, engagement at 2.23
+    million): every `statout.dat` row and every event identical; terminal
+    rows identical except the last digit of `lp` in at most three rows
+    (7e-10). The six A30 runs took 2.5-8 minutes each on a dedicated GPU.
+  - Example 8 in full (1e6 steps, up to about 7,000 beads; 521 s on the
+    A30, 1957 s on one CPU core): identical up to the engagement at step
+    13,699, insertions identical up to step 26,122 and removals up to step
+    34,783 (13,839 before the fix), then chaotic separation with event
+    offsets of both signs within a few tens of steps; 7,090 insertions and
+    130 removals on both, last row `n` identical.
+  - Example 3 (RK2, Maxwell, no air drag), 1e7 steps, engagement at step
+    1,114,161: identical before it; after it `x`, `vn`, `n` and the
+    currents identical in every row, worst `yz` 6.7e-5; events identical up
+    to step 2,364,190 (1,125,560 before the fix), 878 insertions and 767
+    removals up to 1e7 steps on both.
+  - Example 6 without multiple-step Coulomb (RK2, Kelvin-Voigt, no
+    evaporation, no air drag), 1e7 steps, engagement at step 670,647:
+    identical before it; worst `rc` 9.8e-4 (one row), `yz` 8.3e-5; events
+    identical up to step 1,405,042 (677,532 before), 1,453 insertions and
+    1,340 removals on both.
+  - Example 4 seed ensembles (5 million steps, means over 0.03-0.05 s,
+    after the jet reached the collector): the Gaussian pool against the
+    former step-by-step noise on the CPU, 8 seeds each, agree within
+    |z| <= 1.1 for every observable (`yz` 2.95929 and 2.95933 cm, 114.58
+    beads, 20.958 degrees, `lp` 177.49 and 177.51 cm), with identical
+    events (437 insertions, 323 removals) except one seed of the old noise
+    with one more removal. A30 against CPU, both with the pool, 24 seeds:
+    within |z| <= 1.2 for `yz`, `n`, `angl`, `lp` (paired, same noise: `yz`
+    t = -0.76); `vc` and `rc` at z = -1.8 and -1.7, set by the three CPU
+    seeds with one more removal. Before the fix the A30 ensemble gave
+    `yz` lower by 4.5e-4 cm (z = -2.0, paired t = -2.4): the late
+    insertion at the engagement, not noise.
+  - Test 24, 5 million steps, seeds 317 and 318, against the CPU
+    references: active count equal up to 4.28 and 4.74 million steps (2.66
+    and 2.18 million before the fix), events up to 3.96 and 4.57 million;
+    4-5 million window 511.2 and 511.0 beads (CPU 510.9 and 511.0).
+  - Performance (one A30 against one CPU core, same NUMA node): Example 8
+    3.8 times faster (521 s against 1957 s, thousands of beads), Example 4
+    2.7 times (539 s against 1454 s, 5 million steps, about 115 beads,
+    Platen on the asynchronous queue), but Examples 3 and 6 slower on the
+    A30 (2179 s against about 1800 s and 2704 s against 1962 s, 1e7 steps,
+    about 110 beads): the synchronous, unfused RK step costs 220-270 us per
+    step at that size. Input for M4.
+  Validation after the fix: `validate_evaporation.sh`, regression openacc,
+  restart check (OpenACC, eight cases) and refinement Tests 21 (also with
+  capacity growth and the force oracle), 22 and 23 pass, the refinement
+  events as documented (equal to the CPU's).
+- 2026-10-07, follow-up of item 2 (user decisions): **a bead that reaches
+  the collector is frozen there in every run**, as a bead discharging on the
+  grounded electrode; `removing yes` only deletes the collected beads.
+  Before, `remove_jetbead` froze only with removal (and so did the device
+  topology kernels), while the restart (`read_dat_restart`) and an accepted
+  refinement (`fit_jet_akima`) froze in every run. A first change made the
+  refinement follow `lremove`; the case built to show it revealed the real
+  defect, and the user chose the physical rule instead. Now
+  `remove_jetbead` freezes first and returns before the removal when
+  `lremove` is off; the restart and `fit_jet_akima` freeze as they always
+  did; the device topology freezing loops (Platen end of step,
+  `accelerator_topology_check`) no longer test `lremove`; a device step
+  without insertion (fixed bead sets, which remove nothing on the device)
+  freezes with the new `accelerator_freeze_at_collector` (one launch per
+  step; Tests 9-11 22/10/14, Tests 12 and 20 13 launches); `main` no longer
+  calls the host `remove_jetbead` on a device-resident state.
+  The defect: without removal nothing was frozen, and the beads past the
+  collector kept their charge and their Coulomb interactions. (This entry
+  first blamed the image charge of `coulomb_force_mod`, `xmirror=|x-h|+h`,
+  falling on the bead itself; corrected in the manual review of the same
+  day: the image terms exist only with the developer directive `mirror
+  yes`, off in released builds, and the failures with refinement below
+  were not traced further.) Without refinement such a
+  jet flew past the collector (Test 15, `removing no`, reached 36 cm with
+  the collector at 16 cm); with refinement it failed a few hundred steps
+  after a remesh: Test 22 with the collector at 12 cm (stronger field) at
+  step 14,113, Test 23 (its field) with `removing no` at step 16,035, CPU
+  with every build, NaN on the A30 (the same inputs with `removing yes` ran
+  through 11 and 8 refinement events). With the rule both run stably to
+  18,000 steps (10 and 7 events, CPU and A30), and without refinement the
+  insertions with and without removal fall at the same steps (18 of 18):
+  the frozen beads do not act on the free jet. With refinement the runs
+  with and without removal separated after the first remesh that followed
+  the contact, since the remeshed path included the collected beads still
+  in the arrays. Second user decision, done the same day: **the refinement
+  ignores the deposited fiber.** Without removal, `driver_dynamic_refinement`
+  finds the contact bead (the last of the leading run of frozen beads; on
+  the device state one reduction, `accelerator_contact_bead`) and moves
+  `inpjet` there while the event is tested and performed;
+  `define_akima_bounds` keeps the refined jet at its indices instead of
+  moving it down to index 0 (`lkeepprefix`), and the deposited beads are
+  saved before the arrays are rebuilt and restored after. Runs with removal
+  are unchanged (they start at most at the contact bead; for one step a
+  second frozen bead may wait for deletion). Result: Test 23 without
+  removal accepts the same refinement events as Test 23, same steps and
+  same free-jet counts (14268 413->459 ... 17966 516->520), and inserts its
+  beads at the same steps, CPU and A30; with the stronger field (collector
+  at 12 cm) the first three events coincide and the later ones fall up to
+  2 steps apart (that one-step second frozen bead of the run with
+  removal), insertions identical. Tests 21-23 byte-identical to the build
+  before; Test 23 without removal restarted at step 16,000 (after the
+  contact and its third event) continues the uninterrupted run exactly
+  (rows and events, CPU and A30); the suites of the entry pass again, as do
+  the nine Make variants.
+  Effect on the distributed cases: Tests 9-12 and 20 (fixed jets whose
+  leading bead starts on the collector) keep it at 16 cm (before it crossed
+  the plane by 6e-4 cm in 1,000 steps), Test 15 at 16 cm (36 cm before);
+  for all six the A30 rows now equal the CPU's in every printed row (Test
+  15 within 4.3e-5 before). Every other case (Examples 1-8, Tests 13, 14,
+  16-19, 21-23, Tests 24 and 25 to 2.1 million steps) is unchanged, CPU and
+  A30. Checks: `validate_evaporation.sh`, refinement runners (Test 21 GFortran,
+  NVFORTRAN, OpenACC; Tests 22 and 23 NVFORTRAN and OpenACC, events as
+  documented), regression openacc, restart check (NVFORTRAN, OpenACC,
+  GFortran, two ranks), smoke serial, debug and MPI, regression GFortran
+  and NVFORTRAN with the two-rank comparisons (batch job), nine Make
+  variants: all pass.
+- 2026-10-07, item 4 (done): NVHPC 25.5 with `CUDA_VERSION=12.9` (25.5 ships
+  the CUDA 11.8 and 12.9 toolkits; its builds run with a driver of the CUDA
+  12.3 generation). Every target builds (CPU, MPI, OpenACC, OpenACC host and
+  the five oracle and comparison builds), with the accelerator messages of
+  24.3. Passed with 25.5: regression NVFORTRAN (serial runs against the 24.3
+  baselines: cases 1-3 and 5-7 difference 0, case 4 0.0065 and case 8 0.16 of
+  the tolerance; two ranks against serial on one node and on two nodes, batch
+  jobs, 25.5's OpenMPI), regression OpenACC, restart check (NVFORTRAN,
+  OpenACC, two ranks; eight cases each), `validate_evaporation.sh`,
+  refinement Tests 21 (CPU, OpenACC, capacity growth, force oracle), 22 (CPU,
+  OpenACC, force oracle) and 23 (CPU, OpenACC, force oracle, host Akima,
+  Akima A/B 2.3e-16 / 1.8e-12 / 1.7e-15, assembly A/B) with the event steps of
+  24.3; the Coulomb oracle reproduces the native `statout.dat` of Tests 13, 16
+  and 23.
+  Defect found, fixed: **the number of steps of a run depended on the
+  compiler.** The loop ended when `dble(nstep)*tstep` reached `endtime`, both
+  already divided by the time unit; with a final time that is a multiple of
+  the timestep the product fell one ulp short of `endtime` whenever the
+  divisions were rounded exactly, and the run made one step more. NVFORTRAN
+  24.3 at `-O3` divides by multiplying with the reciprocal (`-Mrecip-div`)
+  and mostly made the expected count; NVFORTRAN 25.5 and GFortran divide
+  exactly and made one step more in 19 of the 23 audited inputs (Examples
+  2-5 and 7, Tests 9-19 and 21-23: 1001 steps instead of 1000), 24.3 too for
+  some final times (Example 2 at 20,000 steps, `final time 60.d-7` with a
+  `1.d-7` step). `integration_last_step` (`integrator_mod`) now gives the
+  last step, the first whose time reaches `endtime` to within a relative
+  1e-12, to the loop and to the pool size: every build makes the expected
+  count. The 24.3 builds give the same rows and events as before in all 23
+  cases; with GFortran and 25.5 the extra step is gone (the only visible
+  change: Tests 18 and 19 log one event less, at step 1001).
+  The same rounding separates 24.3 and 25.5 results: Examples 1, 2 and Tests
+  9-12, 15, 20 identical, Examples 3-7 and Tests 21-23 within 4e-7, the
+  transverse columns of Tests 13, 14, 16, 17 (roundoff of order 1e-12 cm)
+  different with identical events; the chaotic cases separate: Example 8
+  after its 128th event (same totals), Test 18 (same totals: 500 insertions,
+  899 removals), Test 19 from step 62, where a bead reaches the collector
+  with 24.3 and stops a relative 1.8e-8 short of it with 25.5 (500
+  insertions, 61 removals, 1239 beads against 76 removals and 1224 beads).
+  With either compiler the A30 runs give the CPU build's events in every
+  case but Test 18 (equal totals, as before).
+  Tests 24 and 25, 5 million steps, seed 317, A30, two runs per build with
+  the GPUs swapped (each process bound to its GPU's NUMA node): 24.3 and 25.5
+  within 1.3e-7 (Test 24) and 1.7e-7 (Test 25) up to 2.1 million steps,
+  events identical up to steps 2,599,092 and 2,437,171 (then one step
+  apart), same totals (219 insertions and 1,042 removals; 221 and 922), 4-5
+  million means 511.2 and 511.2 beads, 267.9 and 267.5. Each build gives the
+  same rows on both GPUs, and the 24.3 runs equal the earlier references (the
+  Test 24 run of item 3, the Test 25 run of M3); the CPU builds of either
+  compiler give their A30 run's `statout.dat` rows up to 2.1 million steps.
+  Performance: 25.5 is slower. Test 24 597 s against 630 s (+5.5 %), Test 25
+  664 s against 706 s (+6.3 %); host phase 79 against 92 us per step (Test
+  24) and 108 against 117 (Test 25), device phase 133 against 137 and 141
+  against 149; pool generation 5.4 against 7.5 s; CPU builds over 2.1
+  million steps of Tests 24 and 25 766 s against 840-870 s. NVHPC 24.3
+  remains the reference compiler; 25.5 is supported.
+- 2026-10-07, item 5 (done, the tag excepted): `CHANGELOG.md` has a
+  "Version 2.0" entry; the program banner and the header of `main.f90` name
+  2.0 (the banner said 1.22; the user fixed the name 2.0, not 2.0-alpha, the
+  same day);
+  the per-user Claude Code settings of the checkout are excluded locally
+  (`.git/info/exclude`); the `v2.0` tag is to be set on `master` at
+  the merge (item 6). The root `README.md` states that the documentation was
+  written with the assistance of an AI agent (user request).
+  At the user's request the whole documentation was then checked against
+  the code: three reviews from the documentation side (guides and data
+  pages; example and test pages, docs and manual; manual chapters and test
+  READMEs) and two from the code side (the uncommitted diff since 9d7ba36,
+  the committed line since v1.22), read-only, then the fixes.
+  Code defects found, fixed:
+  - `JETSPIN_OPENACC_DISABLE_EOM=1` made `accelerator_eom3_stage` return
+    without computing, and `device_stage` ignored the result: a
+    non-evaporative Maxwell device step integrated stale derivatives (its
+    host fallback lived in the call-scoped paths removed in M1). Now the
+    variable keeps the device step closed, like
+    `JETSPIN_OPENACC_DISABLE_PERSISTENT`, and a refused device EOM stage
+    stops the run (error 22).
+  - After a restart, "Time-integration throughput" divided all the steps,
+    those before the restart included, by this run's loop time.
+  - The input summary printed "velocity drag yes by default" while
+    `dragvel` is off by default (since 1.20).
+  - Dead code left by M1 in `rk4sys_ev` (branches on two flags that were
+    always false), unused variables in `platen`, `platen_ev`, `rk4sys_ev`,
+    the unused `rheology_kelvin_voigt`, and stale comments (removed gates
+    and kernels named as current, the Gaussian pool "detached and rebound",
+    the 100-bead gate described as a bead count, the Akima endpoint
+    diagnostic called development-only although every build prints it).
+  Lost in the collector rule of 2026-10-07: the versioned CPU/A30 records of
+  Tests 9-12 (`tests/performance/test9/`, `integrators/`) still had the
+  leading bead crossing the collector, so their `compare.sh` failed;
+  regenerated (NVFORTRAN 24.3, CPU and A30 records identical, 25.5 gives
+  the same rows; provenance in `tests/performance/BUILD-PROVENANCE.md`).
+  Found: `tests/regression/run.sh openacc` never reaches the device gate (the
+  cases have at most 25 beads), so it checks the OpenACC build's host path;
+  the GPU kernels are validated by Tests 9-25, `validate_evaporation.sh`,
+  the refinement runners and the restart check (now documented).
+  Not restored, documented: the in-line CPU/GPU Maxwell stage comparisons of
+  `rk4sys_ev` (macros `JETSPIN_COMPARE_MAXWELL_*`, removed in M1, never
+  documented), and the host evaluation of the Platen tail in the
+  force-oracle builds (since M3 the tail stays on the device there too).
+  Removed at the user's request: `JETSPIN_COULOMB_DIAGNOSTIC=1`, a
+  development check left in the evaporative 3-D Coulomb path only, which
+  recomputed every device sum on the host and printed the difference (and
+  stopped the run outside the device step, where the arrays are not
+  mapped), and the macro `JETSPIN_DISABLE_COULOMB_EVAP` (2026-08-14), which
+  kept the evaporative 3-D Coulomb sum on the host without refreshing the
+  host state, so that inside the device step it summed a stale state; the
+  Coulomb-oracle build covers both (note on diagnostic strategies in
+  `openacc.md`). Fixed at the user's request: `job time` was checked against
+  rank 0's processor time (`cpu_time`), which does not count waits and can
+  fall behind the batch limit; it is now the elapsed time since the start
+  of the program (the monotonic 64-bit clock of the loop timer), read on
+  rank 0 and broadcast (Test 18 with `job time 3` stops after 3.007 s,
+  writing `save.dat`; the 23 audit cases unchanged).
+  Multiple-step Coulomb sums (user request: correct in 1-D and 3-D, serial
+  and MPI), four defects, fixed:
+  - `list_test` (the `maximum displ` rebuild test) started its count at the
+    second bead of each rank: in a serial run the leading bead was never
+    tested, and with MPI the untested beads depended on the number of
+    ranks.
+  - A removal did not request a new neighbour list (the insertion and the
+    remesh do; so did the unused removal strategy 1): the per-rank arrays,
+    which follow the beads from `inpjet`, could shift by one bead. In the
+    serial runs checked the list was rebuilt anyway through
+    `allocate_coularrays`.
+  - The per-rank arrays (`coulforcems`, `oldcoulforcems`, `dvcoulforcems`,
+    `neighlentry`, `neighlentrymirr`, the rows of `neighlist`) had
+    `ceiling(mxnpjet/mxrank)` elements for the indices `0..mxnpjet`: a jet
+    filling its arrays wrote one element past them (since 1.21). GFortran
+    runs of Example 6 crashed at step about 668,500 (100 active beads in
+    100 slots; out of bounds at `outerycf(101,:)` with runtime checks),
+    the two-rank run too; NVFORTRAN overwrote the next column silently.
+  - The instability report before error 14 read `jetxx(inpjet-1)` (an
+    `.and.` that Fortran does not short-circuit).
+  Evidence (scratch builds and Slurm jobs, GFortran 8.5 + OpenMPI 4.1.6):
+  the loop fix alone changes nothing in Examples 5 and 6 over 2 million
+  steps (the displacement test never fires there: `every 100` steps of
+  1e-8 s); with the array fix NVFORTRAN Example 6 changes from step
+  670,000 (within 3.2e-6, same event totals) and Example 5 not at all;
+  GFortran with runtime checks runs Examples 5 and 6 (1e6 steps) without
+  errors; serial against two ranks, new code: Example 5 within 2e-7
+  (events identical), Example 6 within 1.3e-5 (one event one step apart
+  at step 701,466, same totals), where the two-rank Example 6 of the old
+  code crashed. A one-dimensional variant of Example 2 with `multiple step
+  every 100`, `primary cutoff 1.d0`, `maximum displacement 1.d-1` becomes
+  unstable after about 1.2 million steps with every build, old and new
+  (beads overtake each other and the 1-D cross section of
+  `compute_crosssec` takes the square root of a negative length); with an
+  update every 10 steps, a maximum displacement of 1e-3, or a cutoff
+  larger than the jet it runs to 2 million steps (the last within 0.1 %
+  of the direct sum): taken then for a too coarse choice of parameters;
+  the manual review below found the code defect (the second full
+  evaluation of the 1-D sum was truncated at the cutoff).
+  Documentation: the input directives parsed but missing from the docs and
+  the manual (seed, units, collector distance, external potential options,
+  air drag and noise conditions, multiple step, primary cutoff, print
+  options, job and close time, developer-gated directives; the manual's
+  `cutoff` and `print xyz rescale` were wrong, air drag does not need the
+  Platen scheme, mandatory directives were shown with defaults), warnings
+  107 and 109, the terminal log lines and the developer output files, the
+  runtime environment variables and Make variables, the gate on `npjet`,
+  the options outside the device step, the Coulomb offload outside it (1-D
+  or 3-D, from 128 beads), the oracle scope, the queue scope, the
+  restart-state version, the restart appends, the capacity rules of
+  `incnpjet` and `reallocation_increment`, the refinement endpoint volume,
+  the multiple-step list update (at least two beads beyond half the
+  maximum displacement), a GPU section in `running.md` and the manual, the
+  OpenACC/MPI note in the parallelization pages, the module and repository
+  maps, the docs index (Tests 10-15, 18, 19, test suites), the example
+  pages (device step of Examples 3 and 8, NVHPC 25.5 results of Tests 24
+  and 25, manual pages of Examples 4-6), and the parameter table of
+  Example 3 (charge density 1.47e-2 C/L and modulus 5000 Pa, from the
+  input; the table gave 2.8e-7 C/L and 50000 Pa).
+  Evidence: Examples 1-8 (20,000 steps) and Tests 9-23 with the fixed code
+  give the rows and events of the builds before, NVFORTRAN 24.3 and 25.5
+  (CPU and A30) and GFortran, 23 of 23 each; with
+  `JETSPIN_OPENACC_DISABLE_EOM=1` Tests 12 and 16 do not engage and give
+  the CPU code's results; the nine Make variants build; smoke serial,
+  debug and MPI, regression GFortran and NVFORTRAN (serial and two ranks,
+  batch job) and OpenACC, restart check (OpenACC, NVFORTRAN, GFortran with
+  runtime checks, two ranks), `validate_evaporation.sh` and refinement
+  Tests 21-23 pass with 24.3, and the same suites with 25.5; every relative
+  Markdown link resolves; the manual builds (57 pages).
+- 2026-10-07, item 7 (accepted): the user accepts that the device phase of
+  Test 25 takes 142.4 instead of 140.6 us per step (666 s instead of 658 s
+  over 5 million steps; Test 24 132.8 instead of 132.1 us, 596 s instead
+  of 593 s), the cost of the shared stage-derivative structure of the
+  generic device step on the asynchronous queue, in exchange for one code
+  path that the next milestones can extend; M4 rewrites the launch
+  sequence anyway.
+- 2026-10-07, manual review (user request, before item 6): six read-only
+  reviews of the LaTeX manual against the code and the docs (about 120
+  findings), verified by the lead; five editing agents on disjoint files
+  (physics chapters; input/output; evaporation, integration, multiple step;
+  Test Cases 1-15; 16-25, with their docs/examples pages and READMEs) and the
+  lead's own edits (front matter, structure, compiling, running,
+  restarting, parallelization, CHANGELOG, this file); every diff reviewed;
+  the manual builds (64 pages, no undefined reference).
+  Two statements of this file corrected: the image charge of
+  `coulomb_force_mod` does not exist in released builds (`mirror yes` is a
+  developer directive), so the collector-rule entry above blamed the wrong
+  mechanism; and the 1-D multiple-step instability of item 5 was a code
+  defect, not a choice of parameters (below).
+  Code defects found and fixed (multiple-step Coulomb, `coulomb_force_mod`):
+  - 1-D: the second full evaluation truncated the direct sum at the primary
+    cutoff (`compute_coulomelec`, also the OpenACC 1-D kernel and the
+    evaporative sum) while the list rebuild did not: the far field was
+    extrapolated with the wrong sign and grew over the interval. The direct
+    sums truncate only without multiple step now.
+  - A request of a new list (insertion, removal, remesh, larger arrays)
+    arriving while the derivative of the last update was pending was
+    dropped (`lneighlistdo .and. .not.lcomputfder`); only the scheduled
+    update waits now.
+  - Beads frozen at the collector requested a new list only with removal
+    (`if(lremove)` around the `jetfr`/`jetfm` test); since the collector
+    rule they freeze without removal too, and the per-rank arrays shifted.
+    `jetfm` is also initialized at every allocation.
+  - With evaporation the second full evaluation used the non-evaporative
+    masses (`compute_coulomelec_and_external`); new
+    `compute_coulomelec_and_external_ev`.
+  - The error check (`erms`), once per interval, either took the direct sum
+    as force (when `erms` was printed) or returned leaving the forces of
+    the previous call; it now only measures, and the forces are those of
+    every other evaluation. `erms` is in cm s^-2 (it was a reduced
+    acceleration times chargescale**2/lengthscale**2 labelled dyne), `nms`
+    no longer divides by zero when the list was not built in an interval.
+  Other fixes: `traj.xyz` was written in reduced units without
+  `rescalexyz` and the frame files applied the length unit twice with a
+  rescale factor (now cm times the factor everywhere); `primary cutoff`
+  without multiple step was compared in cm with reduced distances (now
+  converted); `make -C manual clean` ran `latexmk -C`, which deleted the
+  tracked PDF (now `-c`).
+  Evidence (builds r18, g18, n25g, gdbg18; final r19, g19, n25h, output-only
+  changes after r18): Examples 1-8 (20,000 steps) and Tests 9-23 identical
+  to the builds before except Examples 5 and 6 (within 1e-8 and 4e-7, same
+  events), 24.3 CPU and A30, GFortran, 25.5 A30; r19 identical to r18 in all
+  92 runs. 1-D variant of Example 2 (`multiple step every 100`, `primary
+  cutoff 1.d0`, `maximum displacement 1.d-1`), 2e6 steps: within 1.4e-7 of
+  the direct sum, same 130 insertions, serial = two ranks exactly (the old
+  code left the tip at about 1.5 cm while the direct sum reached 26 cm at
+  step 700,000, and stopped at step 1,344,736). Examples 5 and 6, 1e6 steps:
+  within 6e-8 and 4.4e-6 of the direct sum (`multiple step no`), same events
+  (Example 6: 146 insertions, 35 removals, one a step later; the old code
+  was 25 % off in the off-axis distance with one more insertion); two ranks
+  within 2e-8 and 6e-6 of serial. Example 5 without removal: as Example 5
+  (no bead reaches the collector within 1e6 steps). Printing `erms` changes
+  nothing (Examples 5, 6, 8: rows and events identical); with the old code it
+  changed the trajectory. Example 8 with multiple step (evaporation, about
+  1,470 beads, 3e5 steps): with a cutoff longer than the jet the rows equal
+  the direct sum's exactly; with a cutoff of 1 cm the far field is
+  extrapolated and the run makes 146 removals (update every 100 or 25
+  steps), 132 (every 10), 131 (every 3) against 129 for the direct sum
+  (which every compiler and the A30 reproduce), with 1.1 % fewer active
+  beads at 100 steps and 0.1 % at 3; without `maximum displacement` it makes
+  1,990; the old code made 10 removals and 9 % more beads. Serial = two
+  ranks in the event totals. Without evaporation (a fast regime: 1,855
+  removals, about 300 active beads) a cutoff longer than the jet again
+  gives the direct sum's rows and 3,969 events exactly; with 1 cm an update
+  every 3 or 10 steps stays within 5 % of the direct sum's mean bead count
+  and removals (the scatter of this regime), every 100 steps keeps 36 %
+  fewer beads: an interval too long for such a jet, as the manual says. GFortran runtime checks (gdbg18): Example 2
+  variant, Examples 5, 6, 5 without removal and 8 with multiple step run
+  clean. val11 (regression OpenACC, restart OpenACC / NVFORTRAN / GFortran
+  runtime checks, validate_evaporation, refinement 21-23, smoke serial and
+  debug, 24.3 and 25.5), the nine Make variants, and the Slurm jobs fixd /
+  n25fixd (regression GFortran and NVFORTRAN serial and two ranks, restart
+  two ranks, smoke MPI): all pass; the regression baselines of cases 5 and 6
+  still hold (1,000 steps).
+  Citations (user request): besides the JETSPIN article, the README and
+  the About page of the manual suggest the review of Rev. Mod. Phys. 92,
+  035004 (2020) and the chapter "Modelling of Nanofiber Formation
+  Processes" (Springer, 2024); both are in `manual/bibliography.bib`.
+  Not changed, documented: the type-2 (RC) waveform gives 0 at sin = 0
+  where type 1 gives 1/2; a refinement event never splits the long element
+  nearest the nozzle (it ends the remeshed stretch); integrator 4 with
+  Kelvin-Voigt or with system 1 or 3 is not rejected at input and stops at
+  the first step; with `perturbation yes` the nozzle velocity starts at zero
+  while its position follows the circle (not measured).
+- 2026-10-07, item 6 as a pre-release (user decision): the user does not
+  declare 2.0 final yet; the work is released as 2.0-beta.1 (banner,
+  manual cover, `CHANGELOG.md`, `README.md`, `docs/project-overview.md`),
+  committed on `development` by topic (code and test scripts, versioned
+  baselines and records, Markdown documentation, LaTeX manual), pushed,
+  and tagged `v2.0-beta.1` after a green CI; the GitHub release is marked
+  as a pre-release, so 1.22 stays the latest release and `master` is
+  unchanged. Later pre-releases are numbered beta.2, ... or rc.1, ...; the
+  final 2.0 is merged into `master` and tagged `v2.0`. The commits are not
+  split by milestone (M1, M2, M3), as planned in item 6: the later fixes
+  touch the same files, and only the final state was validated as a whole.
+
 ## Exact restart, fused Platen tail, evaporative RK below 100 beads (2026-10-06)
 
 ### Changes
@@ -52,10 +834,9 @@
   descriptor temporaries on the host stack and copy them on queue 1 after
   the routine has returned (segmentation fault at the engagement step,
   `NVCOMPILER_ACC_NOTIFY=2`). The kept kernel avoids both, so it builds and
-  runs with 24.3 and 25.5. NVHPC 25.5 (`module load
-  intel/nvidia_hpc_sdk/nvhpc/25.5`, `CUDA_VERSION=12.9`) runs on a CUDA 12.3
-  driver; its results differ from 24.3 builds by about 1e-7 relative over
-  2.1 million steps of Test 25.
+  runs with 24.3 and 25.5. NVHPC 25.5 built with `CUDA_VERSION=12.9` runs
+  on a CUDA 12.3 driver; its results differ from 24.3 builds by about 1e-7
+  relative over 2.1 million steps of Test 25.
 - **Evaporative Euler/RK2/RK4 (system 3).** Bug 1 does not apply to
   `rk4sys_ev`: it draws no pool, and its gate
   (`evaporative_dynamic_accelerator_eligible`) had no size threshold, so a

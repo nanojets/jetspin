@@ -56,9 +56,13 @@ floating-point differences may occur across processors and compilers.
 | Serial versus versioned baseline | `1e-7` | `1e-10` |
 | Two-rank MPI versus matching serial run | `1e-6` | `1e-9` |
 | OpenACC versus matching NVFORTRAN CPU run | `1e-6` | `1e-9` |
+| OpenACC versus NVFORTRAN CPU, case 8 (columns `n`, `curn`, `curc` ignored) | `3e-2` | `1e-8` |
 
 The MPI tolerance is slightly wider because collective reductions can change
-floating-point summation order. These defaults are intended as portable
+floating-point summation order. The case-8 OpenACC bound dates from the time
+when every Coulomb sum ran on the GPU, whose summation order the evaporating
+case 8 amplifies; override it with `JETSPIN_OPENACC_EVAPORATION_RTOL` and
+`JETSPIN_OPENACC_EVAPORATION_ATOL`. These defaults are intended as portable
 starting values, not permission to accept unexplained deviations.
 
 Override them for diagnostic work with:
@@ -91,11 +95,15 @@ The longer initial jet keeps the discretization valid with 25 beads. On two
 ranks, the active beads are split 13/12, so both ranks execute stochastic
 Platen work. The example file in `examples/input-4/` remains unchanged.
 
-Rank 0 generates globally indexed Gaussian blocks and broadcasts them before
-distributed integration. The regression comparison verifies that this
+Rank 0 generates the Gaussian pool once and broadcasts it before the loop;
+each step reads one slice of it, indexed by global bead number over the
+whole jet, on every rank. The regression comparison verifies that this
 stochastic trajectory matches the serial trajectory. See
 [random numbers and MPI reproducibility](random-numbers.md) for the runtime
-design.
+design. Until 2026-10-06 Test Case 4 drew globally indexed Gaussian blocks
+step by step; its baselines (`case-4.statout`, both compilers) were
+regenerated when it moved to the pool, which every stochastic Platen run of
+the device step's models reads in every build since then.
 
 ## Running the suite
 
@@ -139,8 +147,21 @@ NVFORTRAN CPU executable using:
 tests/regression/run.sh openacc
 ```
 
-The OpenACC comparison uses `JETSPIN_OPENACC_REGRESSION_RTOL` and
-`JETSPIN_OPENACC_REGRESSION_ATOL`, defaulting to `1e-6` and `1e-9`.
+The script builds the OpenACC target with `GPUCC` and `CUDA_VERSION` from
+the environment (defaults `80` and `12.3`); with HPC SDK 25.5, which ships
+CUDA 12.9, run `CUDA_VERSION=12.9 tests/regression/run.sh openacc`. The
+OpenACC comparison uses `JETSPIN_OPENACC_REGRESSION_RTOL` and
+`JETSPIN_OPENACC_REGRESSION_ATOL`, defaulting to `1e-6` and `1e-9`, and the
+case-8 bound above.
+
+The regression cases never exceed 25 beads, below the gate of the OpenACC
+device step (`npjet` = 100) and the 128-bead threshold of the offloaded
+Coulomb sums, so this mode compares the OpenACC build's host path, the CPU build's
+code, with the CPU build. The GPU kernels are validated by Tests 9-25 (see
+the [benchmark index](../examples/README.md)),
+`tests/performance/dynamic/validate_evaporation.sh`, the refinement runners
+in `tests/refinement/`, and the restart check `tests/restart/run.sh
+openacc`; see [OpenACC](openacc.md#numerical-validation).
 
 To retain temporary inputs, logs, executables, and output for diagnosis:
 

@@ -99,6 +99,9 @@
          ' evlim evaporation-volume floor while conserving the segment total.'
         write(outp,outf2)'ERROR - the fitted segment evaporated-volume total', &
          ' is intrinsically below evlim*sum(reference volume); aborting.'
+      case (22)
+        write(outp,outf2)'ERROR - the OpenACC device step cannot evaluate', &
+         ' the equations of motion of this run.'
       case (21)
         write(outp,outf2)'ERROR - dynamic refinement cannot satisfy the', &
          ' minimum bead radius floor while conserving the segment volume.'

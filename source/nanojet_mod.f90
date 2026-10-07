@@ -391,7 +391,10 @@
   
   call set_mxchunk(mxnpjet)
   allocate(jetfr(0:mxnpjet))
-  if(lmultiplestep)allocate(jetfm(0:mxnpjet))
+  if(lmultiplestep)then
+    allocate(jetfm(0:mxnpjet))
+    jetfm(:)=.false.
+  endif
   allocate(jetpt(0:mxnpjet))
   allocate(jetxx(0:mxnpjet))
   allocate(jetyy(0:mxnpjet))
@@ -525,7 +528,7 @@
 ! Ordinary insertion-overflow growth of mxnpjet, independent of any dynamic-
 ! refinement event. dynamic_refinement_mod.f90 already resizes the indexed
 ! Gaussian noise history when IT grows mxnpjet; this path must do the same,
-! otherwise accelerator_platen_velocity keeps indexing gaussianhistory with
+! otherwise the Platen update kernel keeps indexing gaussianhistory with
 ! the new, larger mxnpjet while the array itself is still sized for the old
 ! one, reading past its end on device (CUDA_ERROR_ILLEGAL_ADDRESS).
   if(doallocate)call resize_gaussian_history(mxnpjet)
@@ -543,6 +546,7 @@
   if(doallocate .and. lmultiplestep)then
     deallocate(jetfm)
     allocate(jetfm(0:mxnpjet))
+    jetfm(:)=.false.
   endif
   
   call allocate_array_buffservice(newend)
@@ -1026,16 +1030,14 @@
     noisefric=noisefric*tao
     noisevar=noisevar*(tao**2.d0)/(lengthscale**2.d0)
   endif
-  if(.not.lxyzrescale)then
-    xyzrescale=1.d0
-  else
-    xyzrescale=xyzrescale*lengthscale
-  endif
-  if(.not.lpdbrescale)then
-    pdbrescale=1.d0
-  else
-    pdbrescale=pdbrescale*lengthscale
-  endif
+! the XYZ and PDB coordinates are written in cm times the rescale factor
+! (default 1); until 2026-10-07 traj.xyz was in reduced units without
+! rescalexyz, and the frame files applied the length unit twice with a
+! rescale factor
+  if(.not.lxyzrescale)xyzrescale=1.d0
+  xyzrescale=xyzrescale*lengthscale
+  if(.not.lpdbrescale)pdbrescale=1.d0
+  pdbrescale=pdbrescale*lengthscale
   if(luppot)then
     kuppot=kuppot*(tao**2.d0)/(massscale)
   endif
@@ -1045,10 +1047,11 @@
   if(ltaoelectr)then
     taoelectr=taoelectr/tao
   endif
-  if(lmultiplestep)then
-    dcutoff=dcutoff/lengthscale
-    maxdispl=maxdispl/lengthscale
-  endif
+! the primary cutoff is given in cm, with or without multiple step (until
+! 2026-10-07 it was converted only with it, and the 1-D direct sum
+! compared it in cm with reduced distances)
+  if(ldcutoff .or. lmultiplestep)dcutoff=dcutoff/lengthscale
+  if(lmultiplestep)maxdispl=maxdispl/lengthscale
   if(typemass==3)then
     lenprobmassa=lenprobmassa/lengthscale
     massratio=massratio/massscale*(lengthscale**3.d0)
@@ -1286,7 +1289,8 @@
  
 !***********************************************************************
 !     
-!     JETSPIN subroutine for removing the last bead at the collector
+!     JETSPIN subroutine for freezing the beads that reach the collector
+!     and removing the last bead at the collector
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
@@ -1304,9 +1308,10 @@
   integer :: ipoint,newinpjet
   integer, parameter :: strategysub=0
   
-  if(.not.lremove)return
+  nremoved=0
   
   if(strategysub==1)then
+    if(.not.lremove)return
     lrem=.false.
     do ipoint=inpjet,npjet
       if(jetxx(ipoint)>=h)then
@@ -1328,6 +1333,11 @@
     
   else
     
+! A bead that reaches the grounded collector discharges and stays there:
+! it is frozen (no motion, no Coulomb interaction) with or without
+! removal, which only deletes the collected beads.  Until 2026-10-07 a run
+! without removal froze nothing: its beads crossed the collector plane
+! and kept their charge and their Coulomb interactions.
     do ipoint=inpjet,npjet
       if(jetxx(ipoint)>=h)then
         jetfr(ipoint)=.true.
@@ -1336,6 +1346,10 @@
     enddo
     
     lrem=.false.
+    if(.not.lremove)then
+      lremdat=.false.
+      return
+    endif
     ipoint=inpjet
     if(jetxx(ipoint)>=h)then
       if(jetxx(ipoint+1)>=h)then
@@ -1349,6 +1363,10 @@
       nremtrack=nremtrack+nremoved
       topology_remove_total=topology_remove_total+nremoved
       inpjet=newinpjet+1
+! A new neighbour list for the multiple-step Coulomb sums, as after an
+! insertion: their per-rank arrays follow the beads from inpjet (missing
+! until 2026-10-07, which shifted them by one bead after a removal).
+      if(lmultiplestep)lneighlistdo=.true.
       lremdat=.true.
     else
       lremdat=.false.

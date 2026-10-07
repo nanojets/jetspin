@@ -27,6 +27,7 @@ module statistic_mod
  use electric_field_mod,    only : actual_form_electric_field
 #ifdef _OPENACC
  use accelerator_mod,       only : accelerator_is_persistent, &
+                             accelerator_statistics_on_device, &
                              accelerator_is_topology_enabled, &
                              accelerator_store_statistics, &
                              accelerator_update_host_state, &
@@ -144,7 +145,7 @@ module statistic_mod
   
   call store_vel_init()
 #ifdef _OPENACC
-  if(accelerator_is_persistent())then
+  if(accelerator_statistics_on_device())then
     call accelerator_store_statistics(inpjet,npjet,jetxx,jetyy,jetzz, &
      jetst,counterlpath,ncounterlpath,maxstress,maxstressposx)
   else
@@ -306,15 +307,19 @@ module statistic_mod
   endif
   statdata(41)=maxstress*G
   statdata(42)=maxstressposx*lengthscale
-  if(nmulstepdone==0)then
+! no list update in the interval: 0 (until 2026-10-07 a division by zero)
+  if(nmulstepdone==nmulstepdoneold)then
     statdata(43)=0
   else
     statdata(43)=dble(nstepsub-nstepsubold)/ &
      dble(nmulstepdone-nmulstepdoneold)
   endif
+! mean deviation of the extrapolated outer Coulomb acceleration, in
+! cm s^-2 (until 2026-10-07 scaled by chargescale**2/lengthscale**2 and
+! labelled dyne)
   if(nmultisteperror/=0)then
     statdata(44)=(multisteperror/dble(nmultisteperror))* &
-     chargescale**2.d0/(lengthscale**2.d0)
+     lengthscale/(tao**2.d0)
   else
     statdata(44)=0.d0
   endif

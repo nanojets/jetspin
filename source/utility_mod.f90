@@ -53,13 +53,16 @@ module utility_mod
 ! component, draw) with the bead stride hard-wired to mxnpjet+1, so every
 ! capacity change forced a host rebuild plus a device remap and shortened
 ! the covered cycle; the pool was then available only with
-! JETSPIN_GPU_DYNAMIC_PLATEN.) gaussianhistoryvalues stays <= 0 while no
+! JETSPIN_GPU_DYNAMIC_PLATEN, a build option removed on 2026-10-06.) gaussianhistoryvalues stays <= 0 while no
 ! history is prepared, which makes begin_gaussian_history_step a no-op.
  integer, public, save :: gaussianhistoryvalues=-1
  integer, public, save :: gaussianhistorybase=0
  integer, public, save :: gaussianhistorywindow=0
  integer, public, save :: gaussianhistoryfirst=0
  integer, save :: gaussianhistorycursor=0
+! Times the cursor has wrapped: laps*gaussianhistoryvalues+cursor values
+! consumed since the pool was drawn (restart file, state version 2).
+ integer, save :: gaussianhistorylaps=0
  double precision,save :: hwiener
  integer,save :: winenernodes
 ! Tracks, independently of any caller's guess, whether gaussianhistory is
@@ -82,6 +85,7 @@ module utility_mod
  public :: mark_gaussianhistory_device_mapped
  public :: begin_gaussian_history_step
  public :: gaussian_history_cursor,set_gaussian_history_cursor
+ public :: gaussian_history_laps,set_gaussian_history_consumed
  public :: modulvec
  public :: dot
  public :: cross
@@ -367,6 +371,7 @@ module utility_mod
   endif
   gaussianhistoryvalues=nvalues
   gaussianhistorycursor=0
+  gaussianhistorylaps=0
   gaussianhistorybase=0
   gaussianhistorywindow=0
   gaussianhistoryfirst=inpnt
@@ -431,6 +436,8 @@ module utility_mod
 ! Wrap only once the whole stored sequence has been consumed. The slice is
 ! read with the same modulo, so a slice straddling the end of the pool is
 ! served correctly rather than by discarding the tail.
+  gaussianhistorylaps=gaussianhistorylaps+(gaussianhistorycursor+ &
+   gaussianhistorywindow*6)/gaussianhistoryvalues
   gaussianhistorycursor=mod(gaussianhistorycursor+gaussianhistorywindow*6, &
    gaussianhistoryvalues)
 
@@ -451,6 +458,26 @@ module utility_mod
   if(gaussianhistoryvalues<=0)return
   gaussianhistorycursor=modulo(cursor,gaussianhistoryvalues)
  end subroutine set_gaussian_history_cursor
+
+ integer function gaussian_history_laps()
+! Times the cursor has wrapped, saved in the restart file with the cursor.
+  implicit none
+  gaussian_history_laps=gaussianhistorylaps
+ end function gaussian_history_laps
+
+ subroutine set_gaussian_history_consumed(consumed)
+! Resume the pool after the given number of consumed values.  A pool of
+! another size holds the same sequence up to the shorter size (both
+! layouts are drawn from the seed in the order the timesteps read them;
+! a fixed jet's pool sized by another final time, for instance), so a run
+! restarted with it continues as an uninterrupted run with it would.  Call
+! after prepare_gaussian_history.
+  implicit none
+  integer(kind=8), intent(in) :: consumed
+  if(gaussianhistoryvalues<=0)return
+  gaussianhistorycursor=int(modulo(consumed,int(gaussianhistoryvalues,8)))
+  gaussianhistorylaps=int(consumed/int(gaussianhistoryvalues,8))
+ end subroutine set_gaussian_history_consumed
 
  subroutine mark_gaussianhistory_device_mapped(mapped)
   implicit none

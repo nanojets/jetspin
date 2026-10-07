@@ -24,25 +24,26 @@
 ! If results obtained with this code are published, an
 ! appropriate citation would be:
 !
-! Marco Lauricella, Ivan Coluzza, Giuseppe Pontrelli,
+! Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza,
 ! Dario Pisignano, Sauro Succi,
 ! JETSPIN: A specific-purpose open-source software for
-! electrospinning simulations of nanofibers,  
+! simulations of nanofiber electrospinning,
 ! Computer Physics Communications, 197 (2015), pp. 227-238. 
 !
 ! author: M. Lauricella
 !
 ! contributors: I. Coluzza,G. Pontrelli, D. Pisignano, S. Succi
 !
-!                        JETSPIN VERSION 1.22
+!                     JETSPIN VERSION 2.0-beta.1
 !
-! (May 2017)
+! (October 2026, pre-release of version 2.0; previous release 1.22,
+! May 2017)
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   
   use version_mod,    only : init_world,get_rank_world,get_size_world,&
                        alloc_domain,time_world,wall_time_world, &
-                       get_sync_world,finalize_world,idrank
+                       get_sync_world,finalize_world,idrank,bcast_world_d
   use utility_mod,    only : init_random_seed
 #ifdef _OPENACC
   use accelerator_mod, only : accelerator_prepare, &
@@ -89,7 +90,8 @@
                                refbeadstartfit
   use integrator_mod, only : initime,endtime,driver_integrator, &
                             prepare_integrator_random_history, &
-                            reset_persistent_integrator
+                            reset_persistent_integrator, &
+                            integration_last_step
   use integrator_kv_ev_mod, only : driver_integrator_KV_ev
   use statistic_mod,  only : statistic_driver
   use io_mod,         only : iprintdat,iprintxyz,lprintdat,lprintxyz,&
@@ -112,11 +114,11 @@
   
   implicit none
   
-  integer:: nstep
+  integer:: nstep,nlaststep,nfirststep
   integer :: nremoved
   
   double precision :: mytime
-  double precision :: itime,ctime,ftime
+  double precision :: itime,ctime,ftime,jobstart
   double precision :: loop_start_time,loop_end_time,loop_elapsed_time
   
   logical :: ladd,lresize,lrem,lremdat,ldorefinment,lrecycle
@@ -136,8 +138,10 @@
   
   call alloc_domain()
   
-! start clock
+! start clock (processor time for the final report, elapsed time for the
+! job-time limit)
   call time_world(itime)
+  call wall_time_world(jobstart)
   
 ! print logo on terminal
   call print_logo(6)
@@ -208,8 +212,11 @@
 ! write the input parameters on the binary file (only for developers) 
   if(.not. lreadrest)call write_dat_parameter(lprintdat,130,mytime)
   
-! initialize lrecycle 
+! initialize lrecycle and the step that ends the loop
   lrecycle=.true.
+  nlaststep=integration_last_step(tstep)
+! the steps of this run (a restarted run starts after the saved step)
+  nfirststep=nstep
   
 !***********************************************************************
 !     start the time integration
@@ -219,8 +226,9 @@
 #ifdef _OPENACC
   call accelerator_prepare()
 #endif
-! Pre-generate fixed stochastic benchmark noise before loop timing. CPU and
-! GPU executions use the same step/bead/component-indexed history.
+! Pre-generate, before loop timing, the sequential Gaussian pool of the
+! Platen runs that the device step supports (every build, any number of
+! ranks): CPU and GPU, serial and MPI runs read the same values.
   call prepare_integrator_random_history(tstep)
 ! A restarted run resumes the pool and the generator where save.dat left
 ! them (both were just regenerated from the seed of input.dat).
@@ -242,8 +250,9 @@
 !   update the counter
     nstep=nstep+1
     
-!   check recycle loop
-    lrecycle=((dble(nstep)*tstep)<endtime)
+!   check recycle loop: the last step is the first whose time reaches
+!   endtime, to within roundoff (integration_last_step)
+    lrecycle=(nstep<nlaststep)
     
 !   integrate the system
     call profiling_start(prof_integrator)
@@ -277,17 +286,6 @@
        lremove,h,resolution,dresolution,thresolution,ivelocity,istress, &
        imassa,icharge,ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
        jetms,jetch,jetvl,jetfr,ladd,lresize,lrem)
-! A bead released at the nozzle starts with the nozzle velocity on the
-! device path (no ldragvel there); keep the vn statistics as add_jetbead
-! does (until 2026-10-06 vn stayed at its last host value).
-      if(linserted .and. .not.lwasinserted)then
-        insvx=ivelocity
-        insvy=0.d0
-        insvz=0.d0
-      endif
-      if(ladd .and. levaporation) &
-       call accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
-      if(ladd)call tag_accelerator_added_bead()
       if(lresize)then
         call accelerator_update_host_capacity_state(npjet,jetxx,jetyy,jetzz, &
          jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
@@ -302,7 +300,27 @@
          jetms,jetch,jetvl,jetfr)
         if(levaporation)call accelerator_rebind_evaporation(mxnpjet,jetve,jetce)
         call reset_persistent_integrator()
+! The arrays were full: decide the step again, now with room for the bead.
+! add_jetbead grows the arrays and inserts the bead in the same step; until
+! 2026-10-07 the device path inserted it one step later (and tested removal
+! only then), so that its insertions after a capacity growth lagged the
+! CPU build's by one step.
+        call accelerator_topology_check(npjet,mxnpjet,inpjet,linserted, &
+         lremove,h,resolution,dresolution,thresolution,ivelocity,istress, &
+         imassa,icharge,ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
+         jetms,jetch,jetvl,jetfr,ladd,lresize,lrem)
       endif
+! A bead released at the nozzle starts with the nozzle velocity on the
+! device path (no ldragvel there); keep the vn statistics as add_jetbead
+! does (until 2026-10-06 vn stayed at its last host value).
+      if(linserted .and. .not.lwasinserted)then
+        insvx=ivelocity
+        insvy=0.d0
+        insvz=0.d0
+      endif
+      if(ladd .and. levaporation) &
+       call accelerator_update_device_added_evaporation(npjet,ivolume,jetve,jetce)
+      if(ladd)call tag_accelerator_added_bead()
       if(ladd)then
         naddtrack=naddtrack+1
         topology_add_total=topology_add_total+1
@@ -317,6 +335,9 @@
     call profiling_stop(prof_add_bead)
     call profiling_start(prof_remove_bead)
 #ifdef _OPENACC
+! On the device the beads at the collector were frozen by the topology
+! step (insertion) or by the device step (a fixed bead set, which removes
+! nothing on the device); the host arrays are not current there.
     if(ldevicetopology .and. .not.lresize .and. lremove)then
       nremoved=merge(1,0,lrem)
       call accelerator_finish_remove_bead(inpjet,lrem,jetxx,jetyy,jetzz,jetst, &
@@ -328,6 +349,11 @@
         nremtrack=nremtrack+nremoved
         topology_remove_total=topology_remove_total+nremoved
       endif
+    elseif((ldevicetopology .and. .not.lresize) .or. &
+     (.not.ldevicetopology .and. (accelerator_is_persistent() .or. &
+     accelerator_is_topology_enabled())))then
+      nremoved=0
+      lremdat=.false.
     else
       call remove_jetbead(nstep,nremoved,mytime,lrem,lremdat)
     endif
@@ -441,8 +467,14 @@
     call write_restart_file(nrestartdump,135,'save.dat',nstep,mytime)
     call profiling_stop(prof_restart)
     
-!   cycle time check
-    call time_world(ctime)
+!   cycle time check: the elapsed time since the start of the program, as
+!   the batch system counts it, read on rank 0 so that every rank takes the
+!   same decision.  Until 2026-10-07 this was rank 0's processor time
+!   (cpu_time), which does not count waits (input/output, GPU, a shared
+!   core) and could let the job reach its limit before closing.
+    call wall_time_world(ctime)
+    ctime=ctime-jobstart
+    call bcast_world_d(ctime)
     
 !   check recycle loop
     lrecycle=(lrecycle .and. timjob-ctime>timcls)
@@ -456,8 +488,9 @@
     write(6,'(/,a,f14.6,a)') &
      'Time-integration loop wall time: ',loop_elapsed_time,' s'
     if(loop_elapsed_time>0.d0)then
+! Until 2026-10-07 the steps before a restart were counted too.
       write(6,'(a,f14.3,a/)')'Time-integration throughput: ', &
-       dble(nstep)/loop_elapsed_time,' steps/s'
+       dble(nstep-nfirststep)/loop_elapsed_time,' steps/s'
     endif
   endif
   call profiling_report(loop_elapsed_time,idrank)

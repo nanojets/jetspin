@@ -18,7 +18,9 @@
                              maxgaussianhistory,mingaussianhistory, &
                              maxgaussianhistorylimit,gaussianhistoryvalues, &
                              gaussian_history_cursor, &
-                             set_gaussian_history_cursor
+                             set_gaussian_history_cursor, &
+                             gaussian_history_laps, &
+                             set_gaussian_history_consumed
  use nanojet_mod,           only : airdragamp,doreorder,tao,aird,airv,&
                              chargescale,consistency,findex,g,h,&
                              icharge,icrossec,ilength,&
@@ -75,6 +77,8 @@
  use electric_field_mod,    only : nfieldtype
  use integrator_mod,        only : integrator,endtime,lendtime,&
                              lintegrator
+ use device_step_mod,       only : device_step_engaged, &
+                             device_step_restore_engaged
  use statistic_mod,         only : nmaxstatdata,reprinttime,statdata,&
                              compute_statistic,addedmass,removedmass, &
                              addedcharge,removedcharge,countericurr, &
@@ -140,13 +144,18 @@
 ! 2026-10-06 (restartstateversion 1): Gaussian-pool cursor, refinement and
 ! anchor-spacing counters, and the intrinsic random-generator state.  The
 ! pool and the generator are prepared only after the restart file is read,
-! so their part is kept here until apply_restart_random_state.  A file
-! without this block (older JETSPIN) still restarts, without these states.
+! so their part is kept here until apply_restart_random_state.  Version 2
+! adds the times the pool cursor has wrapped (the values consumed, so that
+! a pool of another size resumes at the same point of the sequence) and
+! whether the device step of the OpenACC build has engaged.  A file
+! without this block (older JETSPIN) still restarts, without these states;
+! a version 1 file restarts with the device gate closed.
  integer, parameter :: restartstatemagic=20261006
- integer, parameter :: restartstateversion=1
+ integer, parameter :: restartstateversion=2
  logical, save :: lrestartstate=.false.
  integer, save :: restartpoolcursor=0
  integer, save :: restartpoolvalues=-1
+ integer, save :: restartpoollaps=-1
  integer, save :: nrestartrandom=0
  integer, allocatable, save :: restartrandom(:)
  logical :: ldragvelfound=.false.
@@ -235,7 +244,7 @@
   write(iu,of)"*         =========================================================           *"
   write(iu,of)"*                                                                             *"
   write(iu,of)"*                                                                             *"
-  write(iu,of)"*    Version 1.22 (May 2017)                                                  *"
+  write(iu,of)"*    Version 2.0-beta.1 (October 2026, pre-release)                           *"
   if(ldevelopers) &
   write(iu,of)"*    Compiled in developer mode                                               *"
   write(iu,of)"*                                                                             *"
@@ -273,7 +282,7 @@
   write(iu,of)"*    Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza,                      *"
   write(iu,of)"*    Dario Pisignano, Sauro Succi,                                            *"
   write(iu,of)"*    JETSPIN: A specific-purpose open-source software for                     *"
-  write(iu,of)"*    electrospinning simulations of nanofibers,                               *"
+  write(iu,of)"*    simulations of nanofiber electrospinning,                                *"
   write(iu,of)"*    Computer Physics Communications, 197 (2015), pp. 227-238.                *"
   write(iu,of)"*                                                                             *"
   write(iu,of)"*                                                                             *"
@@ -610,9 +619,9 @@
   elseif(printcodsub(iarg)==42)then
     legendobs='mxsx =  x position of the jet maximum stress     '
   elseif(printcodsub(iarg)==43)then
-    legendobs='nms  =  number of multiple step procedure done   '
+    legendobs='nms  =  mean steps per neighbor-list build       '
   elseif(printcodsub(iarg)==44)then
-    legendobs='erms =  maximum error of multiple step approach  '
+    legendobs='erms =  mean error of multiple step approach     '
   elseif(printcodsub(iarg)==45)then
     legendobs='v    =  value of the external electric potential '
   elseif(printcodsub(iarg)==46)then
@@ -2308,7 +2317,7 @@
   elseif(printcodsub(iarg)==43)then
     printlisub(iarg)='nms'
   elseif(printcodsub(iarg)==44)then
-    printlisub(iarg)='erms (dyne)'
+    printlisub(iarg)='erms (cm s^-2)'
   elseif(printcodsub(iarg)==45)then
     printlisub(iarg)='v (statV)'
   elseif(printcodsub(iarg)==46)then
@@ -2619,7 +2628,7 @@
           write(6,form3)"velocity drag no"
         endif
       else
-        write(6,form3)"velocity drag yes by default"
+        write(6,form3)"velocity drag no by default"
       endif
       if(typedragvel/=0 .and. ldevelopers)then
         labelsub='type of velocity drag'
@@ -2901,7 +2910,7 @@
           write(6,form3)"velocity drag no"
         endif
       else
-        write(6,form3)"velocity drag yes by default"
+        write(6,form3)"velocity drag no by default"
       endif
       if(typedragvel/=0 .and. ldevelopers)then
         labelsub='type of velocity drag'
@@ -4081,7 +4090,9 @@
   if(lscratchbd)deallocate(jetbd)
   
   call read_restart_state(filein)
-  
+
+! A bead at the collector is frozen there, with or without removal
+! (remove_jetbead).
   jetfr(:)=.false.
   do ipoint=inpjet,npjet
     if(jetxx(ipoint)>=h)then
@@ -4270,11 +4281,14 @@
 !***********************************************************************
 !     
 !     JETSPIN subroutine for appending to the restart file the run
-!     state that the bead records do not hold (restartstateversion 1):
+!     state that the bead records do not hold (restartstateversion 2):
 !     Gaussian-pool cursor and size, refinement and anchor-spacing
 !     counters, topology totals, the velocity of the last bead released
-!     at the nozzle (statistics), and the state of the intrinsic random
-!     generator, which only rank 0 advances.
+!     at the nozzle (statistics), the state of the intrinsic random
+!     generator, which only rank 0 advances, and (version 2) the times
+!     the pool cursor has wrapped and whether the device step has
+!     engaged: its gate stays open once it has opened, also when a
+!     compaction leaves fewer beads than the gate requires.
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     
@@ -4300,6 +4314,7 @@
   write(fileout)nseed
   write(fileout)seed
   deallocate(seed)
+  write(fileout)gaussian_history_laps(),device_step_engaged()
   
   return
   
@@ -4323,8 +4338,11 @@
   integer, intent(in) :: filein
   
   integer :: ios,imagic,iversion
+  logical :: lengaged
   
   lrestartstate=.false.
+  lengaged=.false.
+  restartpoollaps=-1
   if(idrank==0)then
     read(filein,iostat=ios)imagic,iversion
     if(ios==0 .and. imagic==restartstatemagic .and. iversion>=1)then
@@ -4336,6 +4354,7 @@
       if(allocated(restartrandom))deallocate(restartrandom)
       allocate(restartrandom(nrestartrandom))
       read(filein)restartrandom
+      if(iversion>=2)read(filein)restartpoollaps,lengaged
       lrestartstate=.true.
     endif
   endif
@@ -4361,6 +4380,9 @@
   call bcast_world_d(insvx)
   call bcast_world_d(insvy)
   call bcast_world_d(insvz)
+  call bcast_world_i(restartpoollaps)
+  call bcast_world_l(lengaged)
+  if(lengaged)call device_step_restore_engaged()
   
   return
   
@@ -4383,15 +4405,32 @@
   implicit none
   
   integer :: nseed
+  integer(kind=8) :: consumed
   
   if(.not.lrestartstate)return
   
   if(gaussianhistoryvalues>0)then
-    if(restartpoolvalues/=gaussianhistoryvalues .and. idrank==0) &
-     write(6,'(a,i0,a,i0,a)')'WARNING - Gaussian pool of ', &
-     gaussianhistoryvalues,' values, restart.dat was written with ', &
-     restartpoolvalues,': the noise does not continue the saved sequence'
-    call set_gaussian_history_cursor(restartpoolcursor)
+    if(restartpoollaps>=0 .and. restartpoolvalues>0)then
+! Version 2: resume after the values consumed.  A pool of another size
+! (noise pool, or a fixed jet whose final time changed) holds the same
+! sequence up to the shorter size, so the run continues as an
+! uninterrupted run with this pool would, unless the saved run had read
+! beyond the shorter size.
+      consumed=int(restartpoollaps,8)*int(restartpoolvalues,8)+ &
+       int(restartpoolcursor,8)
+      if(restartpoolvalues/=gaussianhistoryvalues .and. &
+       consumed>int(min(restartpoolvalues,gaussianhistoryvalues),8) .and. &
+       idrank==0)write(6,'(a,i0,a,i0,a)')'WARNING - Gaussian pool of ', &
+       gaussianhistoryvalues,' values, restart.dat was written with ', &
+       restartpoolvalues,': the noise does not continue the saved sequence'
+      call set_gaussian_history_consumed(consumed)
+    else
+      if(restartpoolvalues/=gaussianhistoryvalues .and. idrank==0) &
+       write(6,'(a,i0,a,i0,a)')'WARNING - Gaussian pool of ', &
+       gaussianhistoryvalues,' values, restart.dat was written with ', &
+       restartpoolvalues,': the noise does not continue the saved sequence'
+      call set_gaussian_history_cursor(restartpoolcursor)
+    endif
   endif
   
   if(idrank==0)then
@@ -5095,7 +5134,7 @@
   if(mod(k,iprintxyzsub)/=0)return
   
   mytime=timesub*tao
-  myrescale=rescale*lengthscale
+  myrescale=rescale
   
   l=k/iprintxyzsub
   nomefile=trim(filename)//write_fmtnumb(l)//'.xyz'
@@ -5200,7 +5239,7 @@
   if(mod(k,iprintpdbsub)/=0)return
   
   mytime=timesub*tao
-  myrescale=rescale*lengthscale
+  myrescale=rescale
   
   l=k/iprintpdbsub
   nomefile=trim(filename)//write_fmtnumb(l)//'.pdb'

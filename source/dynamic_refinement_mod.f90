@@ -25,7 +25,8 @@
                   ivolume,jetbd,massratio,imassa,jetfr,h, &
                   lenthresholdbead,ltagbeads,lbreakup,jetbr, &
                   lmultiplestep,lneighlistdo,jetfm,lmassavariable, &
-                  lenprobmassa,icharge,jetce,levaporation,evlim
+                  lenprobmassa,icharge,jetce,levaporation,evlim, &
+                  lremove
  use fit_mod,     only : jetptc,allocate_arrayspline,create_spline, &
                    allocate_array_jetptc,driver_fit_spline, &
                    looking_indexes_2,looking_indexes_4, &
@@ -38,6 +39,7 @@
 #ifdef _OPENACC
  use accelerator_mod, only : accelerator_device_state_is_current, &
                    accelerator_refinement_candidate, &
+                   accelerator_contact_bead, &
                    accelerator_update_host_capacity_state, &
                    accelerator_update_host_evaporation_state, &
                    accelerator_release_jet_capacity, &
@@ -89,6 +91,15 @@
  integer, save :: nbuff=0
  
  logical, save :: mydoallocate
+! The deposited fiber of a run without removal: the beads frozen at the
+! collector before the contact bead (the last of them, joined to the free
+! jet).  The refinement sees the jet from the contact bead, as a run with
+! removal does, and these beads are kept as they are (prefixfirst ..
+! prefixlast, saved in prefixd/prefixl while the arrays are rebuilt).
+ logical, save :: lkeepprefix=.false.
+ integer, save :: prefixfirst=0,prefixlast=-1
+ double precision, allocatable, save :: prefixd(:,:)
+ logical, allocatable, save :: prefixl(:,:)
  
  integer, save :: nmyindex=0
  integer, allocatable, save :: myindex(:,:)
@@ -130,6 +141,7 @@ implicit none
   integer, intent(in) :: k
   logical, intent(inout) :: dorefinment
   logical :: device_refinement
+  integer :: icontact
 
   device_refinement=.false.
 #ifdef _OPENACC
@@ -139,13 +151,34 @@ implicit none
   if(.not.lrefinement)return
   if(k<irefinementstart)return
   
+! Without removal the beads that reached the collector stay there as
+! deposited fiber: the refinement starts at the contact bead, inpjet being
+! moved there while the event is tested and performed (with removal those
+! beads are deleted, and the jet already starts at most at the contact).
+  lkeepprefix=.false.
+  if(.not.lremove)then
+    icontact=deposited_contact(device_refinement)
+    if(icontact>inpjet)then
+      lkeepprefix=.true.
+      prefixfirst=inpjet
+      prefixlast=icontact-1
+      inpjet=icontact
+    endif
+  endif
+  
 ! check if the dynamic refinement is necessary
   call check_dynamic_refinement_akima(k,dorefinment)
   
-  if(.not.dorefinment)return
+  if(.not.dorefinment)then
+    if(lkeepprefix)inpjet=prefixfirst
+    lkeepprefix=.false.
+    return
+  endif
   
 ! apply the dynamic refinement if requested
   call dynamic_refinement_akima(k,dorefinment,device_refinement)
+  if(lkeepprefix)inpjet=prefixfirst
+  lkeepprefix=.false.
 
 #ifdef _OPENACC
 ! Only an accepted event reaches this point. Target-mesh construction and
@@ -173,6 +206,119 @@ implicit none
   return
   
  end subroutine driver_dynamic_refinement
+
+ integer function deposited_contact(device)
+
+!***********************************************************************
+!
+!     JETSPIN function returning the contact bead: the last bead of the
+!     leading run of beads frozen at the collector, or inpjet when the
+!     jet has not reached it.  On the device state the device computes
+!     it, since the host jetfr is not current there.
+!
+!***********************************************************************
+
+  implicit none
+
+  logical, intent(in) :: device
+  integer :: ipoint
+
+#ifdef _OPENACC
+  if(device)then
+    deposited_contact=accelerator_contact_bead(inpjet,npjet,jetfr)
+    return
+  endif
+#endif
+  deposited_contact=inpjet
+  do ipoint=inpjet,npjet-1
+    if(.not.jetfr(ipoint))exit
+    deposited_contact=ipoint
+  enddo
+
+ end function deposited_contact
+
+ subroutine save_deposited_prefix()
+
+!***********************************************************************
+!
+!     JETSPIN subroutine saving the deposited fiber (prefixfirst ..
+!     prefixlast) before the refinement rebuilds the jet arrays.
+!
+!***********************************************************************
+
+  implicit none
+
+  integer :: i0,i1
+
+  i0=prefixfirst
+  i1=prefixlast
+  if(allocated(prefixd))deallocate(prefixd)
+  if(allocated(prefixl))deallocate(prefixl)
+  allocate(prefixd(14,i0:i1),prefixl(4,i0:i1))
+  prefixd(:,:)=0.d0
+  prefixl(:,:)=.false.
+  prefixd(1,i0:i1)=jetxx(i0:i1)
+  prefixd(2,i0:i1)=jetyy(i0:i1)
+  prefixd(3,i0:i1)=jetzz(i0:i1)
+  prefixd(4,i0:i1)=jetvx(i0:i1)
+  prefixd(5,i0:i1)=jetvy(i0:i1)
+  prefixd(6,i0:i1)=jetvz(i0:i1)
+  prefixd(7,i0:i1)=jetst(i0:i1)
+  prefixd(8,i0:i1)=jetms(i0:i1)
+  prefixd(9,i0:i1)=jetch(i0:i1)
+  prefixd(10,i0:i1)=jetvl(i0:i1)
+  prefixd(11,i0:i1)=jetcr(i0:i1)
+  prefixd(12,i0:i1)=jetpt(i0:i1)
+  if(levaporation)then
+    prefixd(13,i0:i1)=jetve(i0:i1)
+    prefixd(14,i0:i1)=jetce(i0:i1)
+  endif
+  prefixl(1,i0:i1)=jetbd(i0:i1)
+  prefixl(2,i0:i1)=jetfr(i0:i1)
+  if(lbreakup)prefixl(3,i0:i1)=jetbr(i0:i1)
+  if(lmultiplestep)prefixl(4,i0:i1)=jetfm(i0:i1)
+
+ end subroutine save_deposited_prefix
+
+ subroutine restore_deposited_prefix()
+
+!***********************************************************************
+!
+!     JETSPIN subroutine putting the deposited fiber back in front of
+!     the refined jet, at the same indices (define_akima_bounds keeps
+!     them free).
+!
+!***********************************************************************
+
+  implicit none
+
+  integer :: i0,i1
+
+  i0=prefixfirst
+  i1=prefixlast
+  jetxx(i0:i1)=prefixd(1,i0:i1)
+  jetyy(i0:i1)=prefixd(2,i0:i1)
+  jetzz(i0:i1)=prefixd(3,i0:i1)
+  jetvx(i0:i1)=prefixd(4,i0:i1)
+  jetvy(i0:i1)=prefixd(5,i0:i1)
+  jetvz(i0:i1)=prefixd(6,i0:i1)
+  jetst(i0:i1)=prefixd(7,i0:i1)
+  jetms(i0:i1)=prefixd(8,i0:i1)
+  jetch(i0:i1)=prefixd(9,i0:i1)
+  jetvl(i0:i1)=prefixd(10,i0:i1)
+  jetcr(i0:i1)=prefixd(11,i0:i1)
+  jetpt(i0:i1)=prefixd(12,i0:i1)
+  if(levaporation)then
+    jetve(i0:i1)=prefixd(13,i0:i1)
+    jetce(i0:i1)=prefixd(14,i0:i1)
+  endif
+  jetbd(i0:i1)=prefixl(1,i0:i1)
+  jetfr(i0:i1)=prefixl(2,i0:i1)
+  if(lbreakup)jetbr(i0:i1)=prefixl(3,i0:i1)
+  if(lmultiplestep)jetfm(i0:i1)=prefixl(4,i0:i1)
+  deallocate(prefixd,prefixl)
+
+ end subroutine restore_deposited_prefix
  
  subroutine set_refinement_threshold()
  
@@ -219,9 +365,10 @@ implicit none
 ! integration window; growing a jet from a single bead under such a
 ! cadence was found to compound a nonphysical cross-section thinning
 ! across repeated events (docs/refinement-robustness-investigation.md). This is a
-! non-fatal advisory, not an enforced minimum: the historical Example 5
-! and Tests 21-23 all use a threshold below this recommendation and
-! remain validated short-window references.
+! non-fatal advisory, not an enforced minimum: Tests 21-23 use a threshold
+! below this recommendation (five times the resolution) and remain
+! validated short-window references; Example 5 and Tests 24 and 25 sit
+! exactly at it (0.4 cm over 0.02 cm) and raise no warning.
     if(refinementthreshold<20.d0*resolution) &
      call warning(108,refinementthreshold/resolution)
   endif
@@ -437,6 +584,7 @@ implicit none
   endif
   
   if(nfitting<=(npjet-inpjet+1))return
+  if(lkeepprefix)call save_deposited_prefix()
 
   oldactive=npjet-inpjet
 ! The interpolation algorithm needs only anchors inside the fitted segment,
@@ -535,9 +683,9 @@ implicit none
      ' new=',mxnpjet
   endif
 #endif
-! Gaussian values belonging to existing bead indices are preserved while
-! any new capacity slots are generated once on the host. In OpenACC builds
-! the resized history is detached and rebound inside this routine.
+! The sequential Gaussian pool does not depend on the capacity, and
+! resize_gaussian_history is a no-op (until 2026-09-30 the history was
+! rebuilt here and, in OpenACC builds, detached and rebound).
   if(mydoallocate) &
    call resize_gaussian_history(mxnpjet,device_capacity_rebind)
   call allocate_array_jetptc()
@@ -745,6 +893,7 @@ implicit none
   if(allocated(anchorvel))deallocate(anchorvel)
   if(allocated(anchorstress))deallocate(anchorstress)
   if(allocated(anchorradius))deallocate(anchorradius)
+  if(lkeepprefix)call restore_deposited_prefix()
   
   doallocate=(doallocate .or. mydoallocate)
   if(lmultiplestep)lneighlistdo=.true.
@@ -870,8 +1019,11 @@ implicit none
     oldlowerbound=max(0,inpjet-ncutoffsub)
     oldlowerbuff=inpjet-1
     
+! The refined jet moves down to index 0, unless a deposited fiber
+! (lkeepprefix) lies in front of it: then it stays where it is.
     newlowerbound=0
-    newlowerbuff=oldlowerbuff-oldlowerbound
+    if(lkeepprefix)newlowerbound=oldlowerbound
+    newlowerbuff=oldlowerbuff-oldlowerbound+newlowerbound
     
     newupperbound=nfitting+newlowerbuff+1
     
@@ -1175,8 +1327,11 @@ implicit none
     if(lmultiplestep)then
       deallocate(jetfm)
       allocate(jetfm(0:mxnpjet))
+      jetfm(:)=.false.
     endif
   endif
+! A bead at the collector is frozen there, with or without removal
+! (remove_jetbead).
   jetfr(:)=.false.
   do ipoint=inpjet,npjet
     if(jetxx(ipoint)>=h)then

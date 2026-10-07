@@ -19,7 +19,6 @@
 #ifdef _OPENACC
  use accelerator_mod,       only : accelerator_enabled, &
                              accelerator_coulomb_evap_3d, &
-                             accelerator_coulomb_evap_compare, &
                              accelerator_smooth_charge_3d, &
                              accelerator_restore_charge, &
                              accelerator_wait,accelerator_queue
@@ -51,8 +50,8 @@ logical, save :: lmscomputed=.false.
 #ifdef _OPENACC
  logical, save :: accelerator_coulomb_env_checked=.false.
  logical, save :: accelerator_coulomb_disabled=.false.
-! Fewest active beads for which a non-persistent run offloads a 3-D Coulomb
-! sum (see coulomb_offload_3d).  JETSPIN_OPENACC_COULOMB_MIN_BEADS overrides
+! Fewest active beads for which a run outside the device step offloads a
+! Coulomb sum, 1-D (since 2026-10-06) or 3-D (see coulomb_offload).  JETSPIN_OPENACC_COULOMB_MIN_BEADS overrides
 ! it; 0 offloads every call, as all builds did before 2026-10-05.
  integer, save :: accelerator_coulomb_min_beads=128
  logical, save :: accelerator_coulomb_min_checked=.false.
@@ -97,8 +96,8 @@ contains
  end subroutine set_coulomb_accelerator_persistent
 
 #ifdef _OPENACC
- logical function coulomb_offload_3d()
-! Whether a 3-D Coulomb sum runs on the device.  A persistent run keeps the
+ logical function coulomb_offload()
+! Whether a Coulomb sum (1-D or 3-D) runs on the device.  A persistent run keeps the
 ! jet there and always does.  A non-persistent call uploads the jet and
 ! downloads the forces every time, a nearly fixed cost, while the host direct
 ! sum grows with the square of the active beads: below
@@ -107,7 +106,7 @@ contains
   character(len=16) :: env
   integer :: value,status
   if(accelerator_persistent_mode)then
-    coulomb_offload_3d=.true.
+    coulomb_offload=.true.
     return
   endif
   if(.not.accelerator_coulomb_min_checked)then
@@ -124,8 +123,8 @@ contains
     endif
     accelerator_coulomb_min_checked=.true.
   endif
-  coulomb_offload_3d=(npjet-inpjet+1)>=accelerator_coulomb_min_beads
- end function coulomb_offload_3d
+  coulomb_offload=(npjet-inpjet+1)>=accelerator_coulomb_min_beads
+ end function coulomb_offload
 #endif
 
  subroutine reset_coulomb_accelerator(ycf)
@@ -343,14 +342,17 @@ end subroutine reset_coulomb_accelerator
   call allocate_coulcrossec(mxnpjet)
   if(levaporation)then
     if(.not. present(yve))call error(19)
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+! Until 2026-10-07 the development macro JETSPIN_DISABLE_COULOMB_EVAP also
+! kept the evaporative sum on the host here (superseded by the Coulomb-oracle
+! build, which also refreshes the host state from the device).
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
 ! accelerator_coulomb_evap_3d rebuilds the cross sections on the device; the
 ! host arrays of a persistent run are stale.
     if(.not.(accelerator_persistent_mode .and. (systype==3 .or. systype==4) &
      .and. mxrank==1 .and. .not.lmultiplestep))then
 #endif
     call compute_crosssec(yxx,yyy,yzz,yve,coulcrossec)
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
     endif
 #endif
     select case(systype)
@@ -464,20 +466,26 @@ end subroutine reset_coulomb_accelerator
         end block
         accelerator_coulomb_env_checked=.true.
       endif
+! Since 2026-10-06 the 1-D sum follows the 3-D rule (coulomb_offload): it
+! was offloaded at every call, with 24 uploads, even for a single bead.
       if(accelerator_enabled .and. mxrank==1 .and. &
-       .not.accelerator_coulomb_disabled)then
+       .not.accelerator_coulomb_disabled .and. coulomb_offload())then
         call compute_coulomelec_openacc_1d(ycf,yxx)
         return
       endif
 #endif
       
-!     compute the Coulomb forces
+!     compute the Coulomb forces; the primary cutoff truncates the 1-D
+!     direct sum only without the multiple-step algorithm, whose
+!     extrapolation needs the complete sum (until 2026-10-07 its second
+!     full evaluation was truncated, and the far field was extrapolated
+!     with the wrong sign)
       do ipoint=inpjet+idrank,npjet,mxrank
         if(jetfr(ipoint))cycle
         Qt=jetch(ipoint)*Q
         do jpoint=ipoint+1,npjet
           if(jetfr(jpoint))cycle
-          if(ldcutoff)then
+          if(ldcutoff .and. .not.lmultiplestep)then
             dtemp=dabs(yxx(jpoint)-yxx(ipoint))
             if(dtemp>dcutoff)cycle
           endif
@@ -530,7 +538,7 @@ end subroutine reset_coulomb_accelerator
       ycf(0:ncoulforce,1:3)=0.d0
 
 #if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
-      if(accelerator_enabled .and. mxrank==1 .and. coulomb_offload_3d())then
+      if(accelerator_enabled .and. mxrank==1 .and. coulomb_offload())then
         if(accelerator_persistent_mode .and. &
          .not.accelerator_coulomb_mapped)then
           coulcrossec(:)=0.d0
@@ -578,7 +586,7 @@ end subroutine reset_coulomb_accelerator
             utang(2)=yyy(ipoint)-yjpoint
             utang(3)=yzz(ipoint)-zjpoint
             norm = modulvec(utang)
-            if(ldcutoff)then
+            if(ldcutoff .and. .not.lmultiplestep)then
               if(norm>dcutoff)cycle
             endif
             if(norm>1.d-30)then
@@ -599,7 +607,7 @@ end subroutine reset_coulomb_accelerator
       ! Charge smoothing updates jetch on the host before every RK stage.
       ! Refresh the persistent device copy used by the Maxwell EOM kernel.
       ! A non-persistent run that sums on the host (short jets, see
-      ! coulomb_offload_3d) has no device copy to refresh.
+      ! coulomb_offload) has no device copy to refresh.
 !$acc update device(jetch(0:ncoulforce)) if_present
 #endif
 #ifdef JETSPIN_DEV_HOST_COULOMB_ACTIVE
@@ -629,6 +637,10 @@ end subroutine reset_coulomb_accelerator
 
   integer :: ipoint,jpoint,ihigh
   double precision :: distance,denominator,forcei,xmirror
+  logical :: ltruncate
+
+! The primary cutoff truncates the direct sum only without multiple step.
+  ltruncate=ldcutoff .and. .not.lmultiplestep
 
 ! The data region is deliberately explicit. During this first porting stage
 ! the time integrator remains on the host, so coordinates enter and forces
@@ -644,7 +656,7 @@ end subroutine reset_coulomb_accelerator
       do jpoint=inpjet,npjet
         if(jpoint==ipoint .or. jetfr(jpoint))cycle
         distance=dabs(yxx(jpoint)-yxx(ipoint))
-        if(ldcutoff .and. distance>dcutoff)cycle
+        if(ltruncate .and. distance>dcutoff)cycle
         ihigh=max(ipoint,jpoint)
         denominator=(distance+coulcrossec(ihigh))**2.d0
         if(ipoint<jpoint)then
@@ -705,6 +717,10 @@ end subroutine reset_coulomb_accelerator
   integer :: ipoint,jpoint,ihigh
   double precision :: dx,dy,dz,distance,denominator,coefficient
   double precision :: forcex,forcey,forcez,xmirror
+  logical :: ltruncate
+
+! The primary cutoff truncates the image terms only without multiple step.
+  ltruncate=ldcutoff .and. .not.lmultiplestep
 
   if(accelerator_persistent_mode)then
 !$acc parallel loop async(accelerator_queue) gang vector &
@@ -763,7 +779,7 @@ end subroutine reset_coulomb_accelerator
             dy=yyy(ipoint)-yyy(jpoint)
             dz=yzz(ipoint)-yzz(jpoint)
             distance=dsqrt(dx*dx+dy*dy+dz*dz)
-            if(distance>1.d-30 .and. .not.(ldcutoff .and. distance>dcutoff))then
+            if(distance>1.d-30 .and. .not.(ltruncate .and. distance>dcutoff))then
               denominator=(distance+dcross(jpoint))**2.d0
               coefficient=-dch(ipoint)*dch(jpoint)*Q/ &
                (dms(ipoint)*denominator*distance)
@@ -812,7 +828,7 @@ end subroutine reset_coulomb_accelerator
   double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,meanerrms,dt
   double precision, dimension(3) :: versor,utang
   
-  logical :: lneighlistdosub,ldodirectsum
+  logical :: lneighlistdosub,ldodirectsum,lerrdone
   double precision, save :: myoldtime=0.d0
   
   integer :: inpjetmio,npjetmio
@@ -825,13 +841,13 @@ end subroutine reset_coulomb_accelerator
   meanerrms=0.d0
   
   
-  if(lremove)then
-    do ipoint=inpjet,npjet
-      if(jetfr(ipoint))then
-        if(.not. jetfm(ipoint))lneighlistdosub=.true.
-      endif
-    enddo
-  endif
+! a bead frozen since the last list (at the collector, with or without
+! removal since 2026-10-07) changes the per-rank arrays: new list
+  do ipoint=inpjet,npjet
+    if(jetfr(ipoint))then
+      if(.not. jetfm(ipoint))lneighlistdosub=.true.
+    endif
+  enddo
   
   select case(systype)
     case(1)
@@ -839,8 +855,12 @@ end subroutine reset_coulomb_accelerator
       call allocate_coularrays(mxnpjet,ycf,1,lneighlistdosub)
       ldodirectsum=(mod(nstep,nmulstep)==0)
       if(ldodirectsum)lcheckerr=.true.
-      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. ldodirectsum)
-      lneighlistdo=(lneighlistdo .and. (.not. lcomputfder))
+!     a scheduled update waits for the derivative of the last one; a
+!     topology change (insertion, removal, remesh, freezing, larger
+!     arrays) rebuilds the list at once (until 2026-10-07 it was dropped
+!     until the derivative had been taken)
+      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. &
+       (ldodirectsum .and. .not.lcomputfder))
       call list_test(lneighlistdo,timesub,yxx)
       if(lneighlistdo)then
         lneighlistdo=.false.
@@ -885,27 +905,25 @@ end subroutine reset_coulomb_accelerator
         endif 
       elseif(lmscomputed)then
         
-        if(mod(nstep+1,nmulstep)==0)then
-          if(lcheckerr)then
-            lcheckerr=.false.
-            call compute_multistep_error(nstep,lmultisteperror, &
-             meanerrms,timesub,ycf,oldcoulforcems,yxx)
+!       at the end of the interval compare the extrapolated outer forces
+!       with the direct sum (erms), with ycf as workspace; the forces are
+!       then those of every other evaluation (until 2026-10-07 this one
+!       kept the forces of the previous call, or took the direct sum when
+!       erms was printed)
+        if(mod(nstep+1,nmulstep)==0 .and. lcheckerr)then
+          lcheckerr=.false.
+          call compute_multistep_error(nstep,lmultisteperror, &
+           meanerrms,lerrdone,timesub,ycf,oldcoulforcems,yxx)
+          if(lerrdone)then
             multisteperror=meanerrms+multisteperror
             nmultisteperror=nmultisteperror+1
-          else
-            ycf(:,:)=0.d0
-            call compute_inner_coulomelec(timesub,ycf,yxx)
-            call compute_outer_coulomelec(timesub,ycf,yxx)
-            imiomax=(ncoulforce+1)
-            call sum_world_darr(ycf,imiomax)
           endif
-        else
-          ycf(:,:)=0.d0
+        endif
+        ycf(:,:)=0.d0
           call compute_inner_coulomelec(timesub,ycf,yxx)
           call compute_outer_coulomelec(timesub,ycf,yxx)
-          imiomax=(ncoulforce+1)
-          call sum_world_darr(ycf,imiomax) 
-        endif
+        imiomax=(ncoulforce+1)
+        call sum_world_darr(ycf,imiomax)
       else
         call error(17)
       endif
@@ -915,8 +933,12 @@ end subroutine reset_coulomb_accelerator
       call allocate_coularrays(mxnpjet,ycf,3,lneighlistdosub)
       ldodirectsum=(mod(nstep,nmulstep)==0)
       if(ldodirectsum)lcheckerr=.true.
-      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. ldodirectsum)
-      lneighlistdo=(lneighlistdo .and. (.not. lcomputfder))
+!     a scheduled update waits for the derivative of the last one; a
+!     topology change (insertion, removal, remesh, freezing, larger
+!     arrays) rebuilds the list at once (until 2026-10-07 it was dropped
+!     until the derivative had been taken)
+      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. &
+       (ldodirectsum .and. .not.lcomputfder))
       call list_test(lneighlistdo,timesub,yxx,yyy,yzz)
       if(lneighlistdo)then
         
@@ -964,27 +986,25 @@ end subroutine reset_coulomb_accelerator
          
       elseif(lmscomputed)then
         
-        if(mod(nstep+1,nmulstep)==0)then
-          if(lcheckerr)then
-            lcheckerr=.false.
-            call compute_multistep_error(nstep,lmultisteperror, &
-             meanerrms,timesub,ycf,oldcoulforcems,yxx,yyy,yzz)
+!       at the end of the interval compare the extrapolated outer forces
+!       with the direct sum (erms), with ycf as workspace; the forces are
+!       then those of every other evaluation (until 2026-10-07 this one
+!       kept the forces of the previous call, or took the direct sum when
+!       erms was printed)
+        if(mod(nstep+1,nmulstep)==0 .and. lcheckerr)then
+          lcheckerr=.false.
+          call compute_multistep_error(nstep,lmultisteperror, &
+           meanerrms,lerrdone,timesub,ycf,oldcoulforcems,yxx,yyy,yzz)
+          if(lerrdone)then
             multisteperror=meanerrms+multisteperror
             nmultisteperror=nmultisteperror+1
-          else
-            ycf(:,:)=0.d0
-            call compute_inner_coulomelec(timesub,ycf,yxx,yyy,yzz)
-            call compute_outer_coulomelec(timesub,ycf,yxx,yyy,yzz)
-            imiomax=(ncoulforce+1)*3
-            call sum_world_darr(ycf,imiomax)
           endif
-        else
-          ycf(:,:)=0.d0
+        endif
+        ycf(:,:)=0.d0
           call compute_inner_coulomelec(timesub,ycf,yxx,yyy,yzz)
           call compute_outer_coulomelec(timesub,ycf,yxx,yyy,yzz)
-          imiomax=(ncoulforce+1)*3
-          call sum_world_darr(ycf,imiomax)
-        endif
+        imiomax=(ncoulforce+1)*3
+        call sum_world_darr(ycf,imiomax)
       else
         call error(17)
       endif
@@ -1029,7 +1049,10 @@ end subroutine reset_coulomb_accelerator
         deallocate(dvcoulforcems)
         deallocate(neighlentry)
         deallocate(coulservicearr)
-        mychunk=ceiling(dble(imiomax)/dble(mxrank))
+! A rank holds up to ceiling((imiomax+1)/mxrank) beads of the indices
+! 0..imiomax; until 2026-10-07 the +1 was missing, and a jet filling its
+! arrays wrote one element past these per-bead arrays.
+        mychunk=ceiling(dble(imiomax+1)/dble(mxrank))
         allocate(coulforcems(mychunk,indarr))
         allocate(oldcoulforcems(mychunk,indarr))
         allocate(dvcoulforcems(mychunk,indarr))
@@ -1051,7 +1074,8 @@ end subroutine reset_coulomb_accelerator
     allocate(ycf(0:ncoulforce,indarr))
     if(lmultiplestep)then
       if(present(lneighlistdosub))lneighlistdosub=.true.
-      mychunk=ceiling(dble(imiomax)/dble(mxrank))
+! Beads of the indices 0..imiomax per rank (the +1 missing until 2026-10-07)
+      mychunk=ceiling(dble(imiomax+1)/dble(mxrank))
       allocate(coulforcems(mychunk,indarr))
       allocate(oldcoulforcems(mychunk,indarr))
       allocate(dvcoulforcems(mychunk,indarr))
@@ -1510,7 +1534,7 @@ end subroutine reset_coulomb_accelerator
  end subroutine compute_inner_coulomelec
  
  subroutine compute_multistep_error(nstep,lmeanerrmssub, &
-  meanerrmssub,timesub,ycf,outerycf,yxx,yyy,yzz)
+  meanerrmssub,ldonesub,timesub,ycf,outerycf,yxx,yyy,yzz)
  
 !***********************************************************************
 !     
@@ -1528,6 +1552,7 @@ end subroutine reset_coulomb_accelerator
   integer, intent(in) :: nstep
   logical, intent(in) :: lmeanerrmssub
   double precision, intent(out) :: meanerrmssub
+  logical, intent(out) :: ldonesub
   double precision, intent(in) ::  timesub
   double precision, allocatable, intent(inout) ::  ycf(:,:)
   double precision, allocatable, intent(inout) :: outerycf(:,:)
@@ -1547,10 +1572,12 @@ end subroutine reset_coulomb_accelerator
   integer, save :: icounter=0
   
   meanerrmssub=0.d0
+  ldonesub=.false.
   
   if(.not.(lmeanerrmssub .and. lmscomputed))return
   if(msinpjet/=inpjet)return
   if(msnpjet/=npjet)return
+  ldonesub=.true.
   
   ycf(:,:)=0.d0
   outerycf(:,:)=0.d0
@@ -1664,7 +1691,8 @@ end subroutine reset_coulomb_accelerator
   logical :: ldoreallocate
   
   
-  mychunk=ceiling(dble(mxnpjet)/dble(mxrank))
+! The rows of neighlist, as allocated by allocate_coularrays
+  mychunk=ceiling(dble(mxnpjet+1)/dble(mxrank))
   newmaxneighlist=maxneighlist+incnpjet
   
   if(lmirror)then
@@ -1707,11 +1735,15 @@ end subroutine reset_coulomb_accelerator
  
 !***********************************************************************
 !     
-!     JETSPIN subroutine to test for updating of neighbour list
+!     JETSPIN subroutine to test for updating of neighbour list:
+!     a new list when at least two beads moved more than half the
+!     maximum displacement since the last one.  The stored positions
+!     follow the beads of this rank in index order, so every insertion,
+!     removal or remesh forces a new list (lneighlistdo).
 !     
 !     licensed under Open Software License v. 3.0 (OSL-3.0)
 !     author: M. Lauricella
-!     last modification January 2016
+!     last modification October 2026
 !     
 !***********************************************************************
  
@@ -1775,9 +1807,11 @@ end subroutine reset_coulomb_accelerator
 !       maximum displacement 
         rmax=(maxdispl/2.d0)**2.d0
         
-!       test atomic displacements
+!       test atomic displacements (every bead of this rank: until
+!       2026-10-07 the loop started from 1 and skipped the first one, in
+!       a serial run the leading bead)
         moved=0
-        do jsub=1,isub
+        do jsub=0,isub
           dr=(xdif(jsub)**2.d0)
           if(dr>rmax)moved=moved+1
         enddo
@@ -1843,9 +1877,11 @@ end subroutine reset_coulomb_accelerator
 !       maximum displacement 
         rmax=(maxdispl/2.d0)**2.d0
         
-!       test atomic displacements
+!       test atomic displacements (every bead of this rank: until
+!       2026-10-07 the loop started from 1 and skipped the first one, in
+!       a serial run the leading bead)
         moved=0
-        do jsub=1,isub
+        do jsub=0,isub
           dr=(xdif(jsub)**2.d0+ydif(jsub)**2.d0+zdif(jsub)**2.d0)
           if(dr>rmax)moved=moved+1
         enddo
@@ -1902,7 +1938,6 @@ end subroutine reset_coulomb_accelerator
   double precision, parameter :: onethird=1.d0/(dsqrt(3.d0))
   
   integer :: ipoint,jpoint,imiomax
-  character(len=8) :: coulomb_diag
   double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,dtemp,cp,cmass1, &
    cmass2
   double precision, allocatable :: ycf_host_ref(:,:)
@@ -1937,7 +1972,7 @@ end subroutine reset_coulomb_accelerator
         Qt=jetch(ipoint)*Q
         do jpoint=ipoint+1,npjet
           if(jetfr(jpoint))cycle
-          if(ldcutoff)then
+          if(ldcutoff .and. .not.lmultiplestep)then
             dtemp=dabs(yxx(jpoint)-yxx(ipoint))
             if(dtemp>dcutoff)cycle
           endif
@@ -1991,9 +2026,9 @@ end subroutine reset_coulomb_accelerator
       
       ycf(0:ncoulforce,1:3)=0.d0
 
-#if defined(_OPENACC) && !defined(JETSPIN_DISABLE_COULOMB_EVAP) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
+#if defined(_OPENACC) && !defined(JETSPIN_DEV_HOST_COULOMB_ACTIVE)
       if(accelerator_enabled .and. mxrank==1 .and. .not.lmultiplestep .and. &
-       coulomb_offload_3d())then
+       coulomb_offload())then
         if(accelerator_persistent_mode .and. &
          .not.accelerator_coulomb_mapped)then
 !$acc enter data create(ycf(0:ncoulforce,1:3), &
@@ -2003,17 +2038,9 @@ end subroutine reset_coulomb_accelerator
         call accelerator_coulomb_evap_3d(npjet,inpjet,ycf,yxx,yyy,yzz, &
          yvl,yve,jetms,jetch,jetfr,coulcrossec,Q,lmirror,h,ldcutoff,dcutoff, &
          linserting,linserted,icrossec)
-        call get_environment_variable('JETSPIN_COULOMB_DIAGNOSTIC',coulomb_diag)
-        if(trim(coulomb_diag)=='1')then
-#ifdef _OPENACC
-          call accelerator_wait()
-!$acc update self(ycf(0:npjet,1:3),coulcrossec(0:npjet), &
-!$acc& yxx(0:npjet),yyy(0:npjet),yzz(0:npjet),yve(0:npjet), &
-!$acc& jetch(0:npjet),jetfr(0:npjet))
-#endif
-          call accelerator_coulomb_evap_compare(npjet,inpjet,ycf,yxx,yyy,yzz, &
-           yvl,yve,jetms,jetch,jetfr,coulcrossec,Q,lmirror,h,ldcutoff,dcutoff)
-        endif
+! Until 2026-10-07 JETSPIN_COULOMB_DIAGNOSTIC=1 recomputed this sum on the
+! host at every call and printed the difference (a development check,
+! removed; the Coulomb-oracle build substitutes the host sum instead).
         return
       endif
 #endif
@@ -2060,7 +2087,7 @@ end subroutine reset_coulomb_accelerator
             utang(2)=yyy(ipoint)-yjpoint
             utang(3)=yzz(ipoint)-zjpoint
             norm = modulvec(utang)
-            if(ldcutoff)then
+            if(ldcutoff .and. .not.lmultiplestep)then
               if(norm>dcutoff)cycle
             endif
             if(norm>1.d-30)then
@@ -2325,6 +2352,84 @@ end subroutine reset_coulomb_accelerator
   
  end subroutine compute_neighlist_and_coulomelec_ev
  
+ subroutine compute_coulomelec_and_external_ev(nstep,ycf,outerycf, &
+  timesub,yxx,yvl,yve,yyy,yzz)
+ 
+!***********************************************************************
+!     
+!     JETSPIN subroutine for computing the total Coulomb forces and
+!     the outer ones, as difference with the inner shell, of the
+!     evaporating jet (the second full evaluation of the multiple-step
+!     algorithm; until 2026-10-07 it took the non-evaporative masses)
+!     
+!     licensed under Open Software License v. 3.0 (OSL-3.0)
+!     
+!***********************************************************************
+ 
+  implicit none
+  
+  integer, intent(in) :: nstep
+  double precision, allocatable, intent(inout) ::  ycf(:,:)
+  double precision, allocatable, intent(inout) :: outerycf(:,:)
+  double precision, intent(in) ::  timesub
+  double precision, allocatable, intent(in) ::  yxx(:)
+  double precision, allocatable, intent(in) ::  yvl(:)
+  double precision, allocatable, intent(in) ::  yve(:)
+  double precision, allocatable, intent(in), optional ::  yyy(:)
+  double precision, allocatable, intent(in), optional ::  yzz(:)
+  
+  integer :: isub,imiomax,ipoint
+  
+  ycf(:,:)=0.d0
+  outerycf(:,:)=0.d0
+  coulservicearr(:,:)=0.d0
+  
+  select case(systype)
+    case(1)
+    
+!     compute the total Coulomb forces
+      call compute_coulomelec_ev(nstep,timesub,ycf,yxx,yvl,yve)
+      
+!     compute the inner Coulomb forces
+      call compute_inner_coulomelec_ev(timesub,coulservicearr,yxx,yvl,yve)
+        
+      imiomax=(ncoulforce+1)
+      call sum_world_darr(coulservicearr,imiomax)
+      
+!     compute the outer Coulomb forces as difference
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        outerycf(isub,1)=ycf(ipoint,1)-coulservicearr(ipoint,1)
+      enddo
+      
+    case default
+    
+!     compute the total Coulomb forces
+      call compute_coulomelec_ev(nstep,timesub,ycf,yxx,yvl,yve,yyy,yzz)
+      
+!     compute the inner Coulomb forces
+      call compute_inner_coulomelec_ev(timesub,coulservicearr,yxx,yvl, &
+       yve,yyy,yzz)
+        
+      imiomax=(ncoulforce+1)*3
+      call sum_world_darr(coulservicearr,imiomax)
+      
+!     compute the outer Coulomb forces as difference
+      isub=0
+      do ipoint=inpjet+idrank,npjet,mxrank
+        if(jetfr(ipoint))cycle
+        isub=isub+1
+        outerycf(isub,1:3)=ycf(ipoint,1:3)-coulservicearr(ipoint,1:3)
+      enddo
+      
+  end select
+  
+  return
+  
+ end subroutine compute_coulomelec_and_external_ev
+ 
  subroutine compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve,yyy,yzz)
  
 !***********************************************************************
@@ -2478,7 +2583,7 @@ end subroutine reset_coulomb_accelerator
   double precision :: norm,Qt,xjpoint,yjpoint,zjpoint,meanerrms,dt
   double precision, dimension(3) :: versor,utang
   
-  logical :: lneighlistdosub,ldodirectsum
+  logical :: lneighlistdosub,ldodirectsum,lerrdone
   double precision, save :: myoldtime=0.d0
   
   integer :: inpjetmio,npjetmio
@@ -2491,13 +2596,13 @@ end subroutine reset_coulomb_accelerator
   meanerrms=0.d0
   
   
-  if(lremove)then
-    do ipoint=inpjet,npjet
-      if(jetfr(ipoint))then
-        if(.not. jetfm(ipoint))lneighlistdosub=.true.
-      endif
-    enddo
-  endif
+! a bead frozen since the last list (at the collector, with or without
+! removal since 2026-10-07) changes the per-rank arrays: new list
+  do ipoint=inpjet,npjet
+    if(jetfr(ipoint))then
+      if(.not. jetfm(ipoint))lneighlistdosub=.true.
+    endif
+  enddo
   
   select case(systype)
     case(1)
@@ -2505,8 +2610,12 @@ end subroutine reset_coulomb_accelerator
       call allocate_coularrays(mxnpjet,ycf,1,lneighlistdosub)
       ldodirectsum=(mod(nstep,nmulstep)==0)
       if(ldodirectsum)lcheckerr=.true.
-      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. ldodirectsum)
-      lneighlistdo=(lneighlistdo .and. (.not. lcomputfder))
+!     a scheduled update waits for the derivative of the last one; a
+!     topology change (insertion, removal, remesh, freezing, larger
+!     arrays) rebuilds the list at once (until 2026-10-07 it was dropped
+!     until the derivative had been taken)
+      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. &
+       (ldodirectsum .and. .not.lcomputfder))
       call list_test(lneighlistdo,timesub,yxx)
       if(lneighlistdo)then
         lneighlistdo=.false.
@@ -2520,8 +2629,8 @@ end subroutine reset_coulomb_accelerator
       elseif(lcomputfder)then
         dt=timesub-myoldtime
         ycf(:,:)=0.d0
-        call compute_coulomelec_and_external(nstep,ycf, &
-         coulforcems,timesub,yxx)
+        call compute_coulomelec_and_external_ev(nstep,ycf, &
+         coulforcems,timesub,yxx,yvl,yve)
         if(dt/=0.d0)then
           
           lcomputfder=.false.
@@ -2551,27 +2660,25 @@ end subroutine reset_coulomb_accelerator
         endif 
       elseif(lmscomputed)then
         
-        if(mod(nstep+1,nmulstep)==0)then
-          if(lcheckerr)then
-            lcheckerr=.false.
-            call compute_multistep_error_ev(nstep,lmultisteperror, &
-             meanerrms,timesub,ycf,oldcoulforcems,yxx,yvl,yve)
+!       at the end of the interval compare the extrapolated outer forces
+!       with the direct sum (erms), with ycf as workspace; the forces are
+!       then those of every other evaluation (until 2026-10-07 this one
+!       kept the forces of the previous call, or took the direct sum when
+!       erms was printed)
+        if(mod(nstep+1,nmulstep)==0 .and. lcheckerr)then
+          lcheckerr=.false.
+          call compute_multistep_error_ev(nstep,lmultisteperror, &
+           meanerrms,lerrdone,timesub,ycf,oldcoulforcems,yxx,yvl,yve)
+          if(lerrdone)then
             multisteperror=meanerrms+multisteperror
             nmultisteperror=nmultisteperror+1
-          else
-            ycf(:,:)=0.d0
-            call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve)
-            call compute_outer_coulomelec(timesub,ycf,yxx)
-            imiomax=(ncoulforce+1)
-            call sum_world_darr(ycf,imiomax)
           endif
-        else
-          ycf(:,:)=0.d0
+        endif
+        ycf(:,:)=0.d0
           call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve)
           call compute_outer_coulomelec(timesub,ycf,yxx)
-          imiomax=(ncoulforce+1)
-          call sum_world_darr(ycf,imiomax) 
-        endif
+        imiomax=(ncoulforce+1)
+        call sum_world_darr(ycf,imiomax)
       else
         call error(17)
       endif
@@ -2581,8 +2688,12 @@ end subroutine reset_coulomb_accelerator
       call allocate_coularrays(mxnpjet,ycf,3,lneighlistdosub)
       ldodirectsum=(mod(nstep,nmulstep)==0)
       if(ldodirectsum)lcheckerr=.true.
-      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. ldodirectsum)
-      lneighlistdo=(lneighlistdo .and. (.not. lcomputfder))
+!     a scheduled update waits for the derivative of the last one; a
+!     topology change (insertion, removal, remesh, freezing, larger
+!     arrays) rebuilds the list at once (until 2026-10-07 it was dropped
+!     until the derivative had been taken)
+      lneighlistdo=(lneighlistdo .or. lneighlistdosub .or. &
+       (ldodirectsum .and. .not.lcomputfder))
       call list_test(lneighlistdo,timesub,yxx,yyy,yzz)
       if(lneighlistdo)then
         
@@ -2598,8 +2709,8 @@ end subroutine reset_coulomb_accelerator
         
         dt=timesub-myoldtime
         ycf(:,:)=0.d0
-        call compute_coulomelec_and_external(nstep,ycf, &
-         coulforcems,timesub,yxx,yyy,yzz)
+        call compute_coulomelec_and_external_ev(nstep,ycf, &
+         coulforcems,timesub,yxx,yvl,yve,yyy,yzz)
          
         if(dt/=0.d0)then
           lcomputfder=.false.
@@ -2630,29 +2741,27 @@ end subroutine reset_coulomb_accelerator
          
       elseif(lmscomputed)then
         
-        if(mod(nstep+1,nmulstep)==0)then
-          if(lcheckerr)then
-            lcheckerr=.false.
-            call compute_multistep_error_ev(nstep,lmultisteperror, &
-             meanerrms,timesub,ycf,oldcoulforcems,yxx,yvl,yve,yyy,yzz)
+!       at the end of the interval compare the extrapolated outer forces
+!       with the direct sum (erms), with ycf as workspace; the forces are
+!       then those of every other evaluation (until 2026-10-07 this one
+!       kept the forces of the previous call, or took the direct sum when
+!       erms was printed)
+        if(mod(nstep+1,nmulstep)==0 .and. lcheckerr)then
+          lcheckerr=.false.
+          call compute_multistep_error_ev(nstep,lmultisteperror, &
+           meanerrms,lerrdone,timesub,ycf,oldcoulforcems,yxx,yvl,yve, &
+           yyy,yzz)
+          if(lerrdone)then
             multisteperror=meanerrms+multisteperror
             nmultisteperror=nmultisteperror+1
-          else
-            ycf(:,:)=0.d0
-            call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve, &
-             yyy,yzz)
-            call compute_outer_coulomelec(timesub,ycf,yxx,yyy,yzz)
-            imiomax=(ncoulforce+1)*3
-            call sum_world_darr(ycf,imiomax)
           endif
-        else
-          ycf(:,:)=0.d0
+        endif
+        ycf(:,:)=0.d0
           call compute_inner_coulomelec_ev(timesub,ycf,yxx,yvl,yve, &
            yyy,yzz)
           call compute_outer_coulomelec(timesub,ycf,yxx,yyy,yzz)
-          imiomax=(ncoulforce+1)*3
-          call sum_world_darr(ycf,imiomax)
-        endif
+        imiomax=(ncoulforce+1)*3
+        call sum_world_darr(ycf,imiomax)
       else
         call error(17)
       endif
@@ -2664,7 +2773,7 @@ end subroutine reset_coulomb_accelerator
  end subroutine compute_coulomelec_multistep_ev
  
  subroutine compute_multistep_error_ev(nstep,lmeanerrmssub, &
-  meanerrmssub,timesub,ycf,outerycf,yxx,yvl,yve,yyy,yzz)
+  meanerrmssub,ldonesub,timesub,ycf,outerycf,yxx,yvl,yve,yyy,yzz)
  
 !***********************************************************************
 !     
@@ -2682,6 +2791,7 @@ end subroutine reset_coulomb_accelerator
   integer, intent(in) :: nstep
   logical, intent(in) :: lmeanerrmssub
   double precision, intent(out) :: meanerrmssub
+  logical, intent(out) :: ldonesub
   double precision, intent(in) ::  timesub
   double precision, allocatable, intent(inout) ::  ycf(:,:)
   double precision, allocatable, intent(inout) :: outerycf(:,:)
@@ -2703,10 +2813,12 @@ end subroutine reset_coulomb_accelerator
   integer, save :: icounter=0
   
   meanerrmssub=0.d0
+  ldonesub=.false.
   
   if(.not.(lmeanerrmssub .and. lmscomputed))return
   if(msinpjet/=inpjet)return
   if(msnpjet/=npjet)return
+  ldonesub=.true.
   
   ycf(:,:)=0.d0
   outerycf(:,:)=0.d0

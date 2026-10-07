@@ -3,7 +3,7 @@
  !
  !Electrostatic parameters are JETSPIN's canonical set (density charge
  !44000, collector distance 16 cm, external potential 30.02076857), shared
- !with Examples 3 and 6 and Test Cases 10, 15, 16-20.
+ !with Examples 3, 4 and 5 and Test Cases 9-20.
  !
  !Rheology, air drag, insertion and removal are Test Case 23's;
  !initialization and print directives are Example 3's, so the jet grows from

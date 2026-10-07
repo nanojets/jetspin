@@ -665,7 +665,8 @@
   endif
 #endif
 
-! Development-only diagnostic: expose the endpoint segment slopes, the
+! Diagnostic printed by rank 0 at every accepted event, in every build:
+! expose the endpoint segment slopes, the
 ! extrapolated tangent actually used at the lower boundary knot, and the
 ! raw (pre-dabs) fitted value there and at its global minimum, to check
 ! whether the classic Akima endpoint-extrapolation formula is producing an

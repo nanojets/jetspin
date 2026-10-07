@@ -7,8 +7,6 @@ module accelerator_mod
  private
 
  logical, parameter, public :: accelerator_enabled=.true.
- integer, parameter, public :: rheology_maxwell=1
- integer, parameter, public :: rheology_kelvin_voigt=2
  logical, save :: accelerator_persistent=.false.
  logical, save :: accelerator_topology_enabled=.false.
  logical, save :: accelerator_device_state_authoritative=.false.
@@ -53,7 +51,7 @@ module accelerator_mod
  public :: accelerator_wait
  public :: accelerator_eom3_stage
  public :: accelerator_maxwell_evap_stage
- public :: accelerator_kv_evap_stage
+ public :: accelerator_kv_stage
  public :: accelerator_maxwell_evap_force_correction
  public :: accelerator_maxwell_rk4_stage_update
  public :: accelerator_maxwell_rk4_final_update
@@ -63,16 +61,12 @@ module accelerator_mod
  public :: accelerator_evap_rk4_final_update
  public :: accelerator_evap_commit_state
  public :: accelerator_compute_posnoinserted_3d
+ public :: accelerator_freeze_at_collector
+ public :: accelerator_contact_bead
  public :: accelerator_smooth_charge_3d
  public :: accelerator_restore_charge
  public :: accelerator_coulomb_evap_3d
- public :: accelerator_coulomb_evap_compare
  public :: accelerator_evaporation_force_3d
- public :: accelerator_maxwell_stress_3d
- public :: accelerator_maxwell_evap_stress_3d
- public :: accelerator_kv_stress_3d
- public :: accelerator_kv_evap_stress_3d
- public :: accelerator_evaporation_geometry_3d
  public :: accelerator_set_persistent
  public :: accelerator_set_topology_enabled
  public :: accelerator_is_topology_enabled
@@ -82,6 +76,7 @@ module accelerator_mod
  public :: accelerator_update_device_evaporation_state
  public :: accelerator_refinement_candidate
  public :: accelerator_is_persistent
+ public :: accelerator_statistics_on_device
  public :: accelerator_update_host_state
  public :: accelerator_update_host_capacity_state
  public :: accelerator_update_host_evaporation_state
@@ -101,16 +96,7 @@ module accelerator_mod
  public :: accelerator_store_statistics
  public :: accelerator_update_host_statistics
  public :: accelerator_update_device_statistics
- public :: accelerator_rk4_final_statistics
- public :: accelerator_euler_final_statistics
- public :: accelerator_rk2_final_statistics
  public :: accelerator_platen_predict
- public :: accelerator_platen_evap_predict
- public :: accelerator_platen_velocity
- public :: accelerator_platen_evap_velocity
- public :: accelerator_platen_positions
- public :: accelerator_platen_evap_positions
- public :: accelerator_platen_stress_statistics
  public :: accelerator_platen_stage_prep
  public :: accelerator_platen_end_step
  public :: accelerator_platen_update
@@ -255,9 +241,8 @@ contains
 
   ! The force stage is the already validated serial 3-D accelerator path.
   ! The combined Maxwell kernel then replaces its Newtonian stress and adds
-  ! the evaporation derivative.  This is intentionally restricted to the
-  ! compatible Test-16 physics until the complete eom4_ev force model is
-  ! device-resident.  Once beads have been removed, eom4_ev gives the lead
+  ! the evaporation derivative: the stage of every Maxwell evaporative
+  ! device step (RK and Platen, device_stage).  Once beads have been removed, eom4_ev gives the lead
   ! bead the surface-tension and lift terms computed with the last collected
   ! bead; collector_curvature reproduces them (missing until 2026-09-30).
   ! Since 2026-10-05 the evaporation rate and the Maxwell stress are
@@ -273,13 +258,17 @@ contains
   if(.not.ok)return
  end subroutine accelerator_maxwell_evap_stage
 
- subroutine accelerator_kv_evap_stage(firstpoint,lastpoint,npjet, &
+ subroutine accelerator_kv_stage(firstpoint,lastpoint,npjet, &
    yxx,yyy,yzz,yst,yvx,yvy,yvz,yvl,yve,ycf,jetms,jetch,jetfr, &
    fxx,fyy,fzz,fst,fvx,fvy,fvz,fve,linserting,linserted,liniperturb,lairdrag, &
    lflorentz,luppot,nfieldtype,pfreq,consistency,findex,yieldstress, &
    att,fveparam,gr,ks,li,vfield,velext,evairv,evmasscoeff,sqrevsc, &
-   evcsvapour,evumidity,cp0,Bev,mev,tev,evlim)
+   evcsvapour,evumidity,cp0,Bev,mev,tev,evlim,evaporative)
+! Kelvin-Voigt stage, with evaporation (the default) or without
+! (evaporative=.false.: yve and fve not referenced, as in eom3_KV_pos_v and
+! eom3_KV_st).  Until 2026-10-06 accelerator_kv_evap_stage, evaporative only.
   implicit none
+  logical, intent(in), optional :: evaporative
   integer, intent(in) :: firstpoint,lastpoint,npjet,nfieldtype
   logical, intent(in) :: linserting,linserted,liniperturb,lairdrag
   logical, intent(in) :: lflorentz,luppot,jetfr(0:)
@@ -292,27 +281,43 @@ contains
   double precision, intent(in) :: att,fveparam,gr,ks,li,vfield,velext
   double precision, intent(in) :: evairv,evmasscoeff,sqrevsc
   double precision, intent(in) :: evcsvapour,evumidity,cp0,Bev,mev,tev,evlim
-  logical :: ok
+  logical :: ok,evap
 
-  ! Reproduce the established CPU eom3_KV_pos_v_ev semantics.  That routine
-  ! does not add air drag or lift, even when airdrag is enabled in the input.
-  ok=accelerator_eom3_stage(firstpoint,lastpoint,npjet,yxx,yyy,yzz,yst, &
-   yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
-   linserted,liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
-   consistency,findex,yieldstress,att,fveparam,gr,ks,li,vfield,velext, &
-   .false.,0.d0,yve,apply_airdrag=.false.,collector_curvature=.true.)
+  evap=.true.
+  if(present(evaporative))evap=evaporative
+  ! Reproduce the established CPU eom3_KV_pos_v(_ev) semantics.  Those
+  ! routines do not add air drag or lift, even when airdrag is enabled in
+  ! the input.
+  if(evap)then
+    ok=accelerator_eom3_stage(firstpoint,lastpoint,npjet,yxx,yyy,yzz,yst, &
+     yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
+     linserted,liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
+     consistency,findex,yieldstress,att,fveparam,gr,ks,li,vfield,velext, &
+     .false.,0.d0,yve,apply_airdrag=.false.,collector_curvature=.true.)
+  else
+    ok=accelerator_eom3_stage(firstpoint,lastpoint,npjet,yxx,yyy,yzz,yst, &
+     yvx,yvy,yvz,yvl,ycf,jetms,jetch,jetfr,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
+     linserted,liniperturb,lairdrag,lflorentz,luppot,nfieldtype,pfreq, &
+     consistency,findex,yieldstress,att,fveparam,gr,ks,li,vfield,velext, &
+     .false.,0.d0,apply_airdrag=.false.,collector_curvature=.true.)
+  endif
   if(.not.ok)return
 
-  call accelerator_kv_evap_stress_3d(firstpoint,lastpoint,npjet, &
+  call accelerator_kv_stress_3d(firstpoint,lastpoint,npjet, &
    linserting,linserted,jetfr,fve,fst,yxx,yyy,yzz,yvx,yvy,yvz, &
    fvx,fvy,fvz,yst,yvl,yve,evairv,evmasscoeff,sqrevsc,evcsvapour, &
-   evumidity,cp0,Bev,mev,tev,evlim,acceleration_chunked=.true.)
- end subroutine accelerator_kv_evap_stage
+   evumidity,cp0,Bev,mev,tev,evlim,acceleration_chunked=.true., &
+   evaporative=evap)
+ end subroutine accelerator_kv_stage
 
  subroutine accelerator_maxwell_rk4_stage_update(firstpoint,lastpoint,h,stage, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
-   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+   fxx,fyy,fzz,fst,fvx,fvy,fvz,fev,yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim, &
+   evaporative)
+! evaporative=.false. (device_step_mod, 2026-10-06): no evaporated volume;
+! jetve, fev and yev are then not referenced.
   implicit none
+  logical, intent(in), optional :: evaporative
   integer, intent(in) :: firstpoint,lastpoint,stage
   double precision, intent(in) :: h,evlim
   double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
@@ -323,6 +328,9 @@ contains
   double precision, intent(inout) :: yvx(0:),yvy(0:),yvz(0:),yev(0:)
   integer :: ipoint,j
   double precision :: scale,ve
+  logical :: evap
+  evap=.true.
+  if(present(evaporative))evap=evaporative
   if(stage==1 .or. stage==2)then
     scale=0.5d0*h
   else
@@ -343,9 +351,11 @@ contains
     yvx(ipoint)=jetvx(ipoint)+scale*fvx(j)
     yvy(ipoint)=jetvy(ipoint)+scale*fvy(j)
     yvz(ipoint)=jetvz(ipoint)+scale*fvz(j)
-    ve=jetve(ipoint)+scale*fev(j)
-    if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
-    yev(ipoint)=ve
+    if(evap)then
+      ve=jetve(ipoint)+scale*fev(j)
+      if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
+      yev(ipoint)=ve
+    endif
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop
@@ -356,8 +366,9 @@ contains
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl, &
    f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
    f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
-   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim,evaporative)
   implicit none
+  logical, intent(in), optional :: evaporative
   integer, intent(in) :: firstpoint,lastpoint
   double precision, intent(in) :: h,evlim
   double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
@@ -371,6 +382,9 @@ contains
   double precision, intent(inout) :: yvx(0:),yvy(0:),yvz(0:),yev(0:)
   integer :: ipoint,j
   double precision :: scale,ve
+  logical :: evap
+  evap=.true.
+  if(present(evaporative))evap=evaporative
   scale=0.5d0*h
 #ifdef _OPENACC
 !$acc parallel loop gang vector present_or_copyin(jetxx,jetyy,jetzz,jetst, &
@@ -387,9 +401,11 @@ contains
     yvx(ipoint)=jetvx(ipoint)+scale*(f1vx(j)+f2vx(j))
     yvy(ipoint)=jetvy(ipoint)+scale*(f1vy(j)+f2vy(j))
     yvz(ipoint)=jetvz(ipoint)+scale*(f1vz(j)+f2vz(j))
-    ve=jetve(ipoint)+scale*(f1ev(j)+f2ev(j))
-    if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
-    yev(ipoint)=ve
+    if(evap)then
+      ve=jetve(ipoint)+scale*(f1ev(j)+f2ev(j))
+      if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
+      yev(ipoint)=ve
+    endif
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop
@@ -402,8 +418,9 @@ contains
    f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f2ev, &
    f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz,f3ev, &
    f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz,f4ev, &
-   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim)
+   yxx,yyy,yzz,yst,yvx,yvy,yvz,yev,evlim,evaporative)
   implicit none
+  logical, intent(in), optional :: evaporative
   integer, intent(in) :: firstpoint,lastpoint
   double precision, intent(in) :: h,evlim
   double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
@@ -415,6 +432,9 @@ contains
   double precision, intent(inout) :: yxx(0:),yyy(0:),yzz(0:),yst(0:),yvx(0:),yvy(0:),yvz(0:),yev(0:)
   integer :: ipoint,j
   double precision :: scale,ve
+  logical :: evap
+  evap=.true.
+  if(present(evaporative))evap=evaporative
   scale=h/6.d0
 #ifdef _OPENACC
 !$acc parallel loop gang vector present_or_copyin(jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve,jetvl) &
@@ -431,9 +451,11 @@ contains
     yvx(ipoint)=jetvx(ipoint)+scale*(f1vx(j)+2.d0*(f2vx(j)+f3vx(j))+f4vx(j))
     yvy(ipoint)=jetvy(ipoint)+scale*(f1vy(j)+2.d0*(f2vy(j)+f3vy(j))+f4vy(j))
     yvz(ipoint)=jetvz(ipoint)+scale*(f1vz(j)+2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
-    ve=jetve(ipoint)+scale*(f1ev(j)+2.d0*(f2ev(j)+f3ev(j))+f4ev(j))
-    if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
-    yev(ipoint)=ve
+    if(evap)then
+      ve=jetve(ipoint)+scale*(f1ev(j)+2.d0*(f2ev(j)+f3ev(j))+f4ev(j))
+      if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
+      yev(ipoint)=ve
+    endif
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop
@@ -443,8 +465,9 @@ contains
  subroutine accelerator_maxwell_commit_state(firstpoint,lastpoint, &
    yxx,yyy,yzz,yst,yvx,yvy,yvz,yev, &
    jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetve, &
-   counterlpath,ncounterlpath,maxstress,maxstressposx)
+   counterlpath,ncounterlpath,maxstress,maxstressposx,evaporative)
   implicit none
+  logical, intent(in), optional :: evaporative
   integer, intent(in) :: firstpoint,lastpoint
   double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yst(0:)
   double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:),yev(0:)
@@ -454,6 +477,9 @@ contains
   double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
   integer :: ipoint
   double precision :: dx,dy,dz
+  logical :: evap
+  evap=.true.
+  if(present(evaporative))evap=evaporative
   call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress, &
    maxstressposx)
 #ifdef _OPENACC
@@ -472,7 +498,8 @@ contains
     statistics_step_max=max(statistics_step_max,yst(ipoint))
     jetxx(ipoint)=yxx(ipoint); jetyy(ipoint)=yyy(ipoint); jetzz(ipoint)=yzz(ipoint)
     jetst(ipoint)=yst(ipoint); jetvx(ipoint)=yvx(ipoint); jetvy(ipoint)=yvy(ipoint)
-    jetvz(ipoint)=yvz(ipoint); jetve(ipoint)=yev(ipoint)
+    jetvz(ipoint)=yvz(ipoint)
+    if(evap)jetve(ipoint)=yev(ipoint)
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop
@@ -494,6 +521,48 @@ contains
 !$acc end serial
 #endif
  end subroutine accelerator_compute_posnoinserted_3d
+
+ integer function accelerator_contact_bead(inpjet,npjet,jetfr)
+! The last bead of the leading run of beads frozen at the collector (the
+! contact bead between the deposited fiber and the free jet), or inpjet:
+! the refinement of a run without removal starts there.  One reduction and
+! one integer back to the host.
+  implicit none
+  integer, intent(in) :: inpjet,npjet
+  logical, intent(in) :: jetfr(0:)
+  integer :: ipoint,firstfree
+  firstfree=npjet
+#ifdef _OPENACC
+  call accelerator_wait()
+!$acc parallel loop reduction(min:firstfree) present(jetfr)
+#endif
+  do ipoint=inpjet,npjet-1
+    if(.not.jetfr(ipoint))firstfree=min(firstfree,ipoint)
+  enddo
+  accelerator_contact_bead=max(inpjet,firstfree-1)
+ end function accelerator_contact_bead
+
+ subroutine accelerator_freeze_at_collector(firstpoint,lastpoint,h,jetxx,jetfr)
+! remove_jetbead's freezing for the device step of a run without insertion
+! (a fixed bead set, which removes nothing on the device): a bead that
+! reaches the collector is held there and leaves the Coulomb sums.  Runs
+! with insertion freeze in the topology step.
+  implicit none
+  integer, intent(in) :: firstpoint,lastpoint
+  double precision, intent(in) :: h
+  double precision, intent(inout) :: jetxx(0:)
+  logical, intent(inout) :: jetfr(0:)
+  integer :: ipoint
+#ifdef _OPENACC
+!$acc parallel loop async(accelerator_queue) present(jetxx,jetfr)
+#endif
+  do ipoint=firstpoint,lastpoint
+    if(jetxx(ipoint)>=h)then
+      jetfr(ipoint)=.true.
+      jetxx(ipoint)=h
+    endif
+  enddo
+ end subroutine accelerator_freeze_at_collector
 
  subroutine device_place_inserting_bead(npjet,resolution,yxx,yyy,yzz)
 ! compute_posnoinserted on one state: the blocked nozzle bead npjet-1 is put
@@ -603,50 +672,6 @@ contains
 #endif
  end subroutine accelerator_restore_charge
 
- subroutine accelerator_evaporation_geometry_3d(firstpoint,lastpoint,npjet, &
-   linserted,jetfr,yxx,yyy,yzz,yvx,yvy,yvz,yve,evairv,beadlen,reynolds)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: linserted,jetfr(0:)
-  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:)
-  double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:),yve(0:),evairv
-  double precision, intent(out) :: beadlen(0:),reynolds(0:)
-  integer :: ipoint,j
-  double precision :: dx,dy,dz,vnorm
-#ifdef _OPENACC
-!$acc parallel loop gang vector copyin(yxx(0:npjet),yyy(0:npjet), &
-!$acc& yzz(0:npjet),yvx(0:npjet),yvy(0:npjet),yvz(0:npjet), &
-!$acc& yve(0:npjet),jetfr(0:npjet)) copyout(beadlen(0:lastpoint-firstpoint), &
-!$acc& reynolds(0:lastpoint-firstpoint)) private(j,dx,dy,dz,vnorm)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    beadlen(j)=0.d0
-    reynolds(j)=0.d0
-    if(jetfr(ipoint) .or. ipoint>=npjet)cycle
-    if(ipoint==npjet-1 .and. .not.linserted)cycle
-    if(ipoint==npjet-2 .and. .not.linserted)then
-      dx=yxx(ipoint)-yxx(npjet)
-      dy=yyy(ipoint)-yyy(npjet)
-      dz=yzz(ipoint)-yzz(npjet)
-    else
-      dx=yxx(ipoint)-yxx(ipoint+1)
-      dy=yyy(ipoint)-yyy(ipoint+1)
-      dz=yzz(ipoint)-yzz(ipoint+1)
-    endif
-    beadlen(j)=dsqrt(dx*dx+dy*dy+dz*dz)
-    vnorm=dsqrt(yvx(ipoint)*yvx(ipoint)+yvy(ipoint)*yvy(ipoint)+ &
-     yvz(ipoint)*yvz(ipoint))
-    if(beadlen(j)>0.d0 .and. evairv>0.d0 .and. yve(ipoint)>0.d0)then
-      reynolds(j)=(2.d0*dsqrt(yve(ipoint)/ &
-       (3.14159265358979323846d0*beadlen(j)))*vnorm)/evairv
-    endif
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_evaporation_geometry_3d
-
  subroutine accelerator_evaporation_force_3d(rheology_mode,firstpoint,lastpoint,npjet, &
    linserting,linserted,jetfr,fev,yxx,yyy,yzz,yvx,yvy,yvz,yve,evairv, &
    evmasscoeff,sqrevsc,evcsvapour,evumidity)
@@ -698,92 +723,6 @@ contains
 !$acc end parallel loop
 #endif
  end subroutine accelerator_evaporation_force_3d
-
- subroutine accelerator_maxwell_stress_3d(firstpoint,lastpoint,npjet,linserted, &
-   jetfr,fst,yxx,yyy,yzz,yvx,yvy,yvz,yst,yvl,yve,cp0,Bev,mev,tev, &
-   consistency,findex,yieldstress)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: linserted,jetfr(0:)
-  double precision, intent(out) :: fst(0:)
-  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:)
-  double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:),yst(0:)
-  double precision, intent(in) :: yvl(0:),yve(0:)
-  double precision, intent(in) :: cp0,Bev,mev,tev,consistency,findex,yieldstress
-  integer :: ipoint,j
-  double precision :: dx,dy,dz,beadlen,beadvel,cp,ratmu,rattao
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector copyin(yxx(0:npjet),yyy(0:npjet), &
-!$acc& yzz(0:npjet),yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yst(0:npjet), &
-!$acc& yvl(0:npjet),yve(0:npjet),jetfr(0:npjet)) &
-!$acc& copyout(fst(0:lastpoint-firstpoint)) private(j,dx,dy,dz,beadlen, &
-!$acc& beadvel,cp,ratmu,rattao)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    fst(j)=0.d0
-    if(jetfr(ipoint) .or. ipoint>=npjet)cycle
-    if(ipoint==npjet-1 .and. .not.linserted)cycle
-    if(ipoint==npjet-2 .and. .not.linserted)then
-      dx=yxx(ipoint)-yxx(npjet)
-      dy=yyy(ipoint)-yyy(npjet)
-      dz=yzz(ipoint)-yzz(npjet)
-    else
-      dx=yxx(ipoint)-yxx(ipoint+1)
-      dy=yyy(ipoint)-yyy(ipoint+1)
-      dz=yzz(ipoint)-yzz(ipoint+1)
-    endif
-    beadlen=dsqrt(dx*dx+dy*dy+dz*dz)
-    if(beadlen<=0.d0 .or. yve(ipoint)<=0.d0 .or. yvl(ipoint)<=0.d0)cycle
-    if(ipoint==npjet-2 .and. .not.linserted)then
-      beadvel=((yvx(ipoint)-yvx(npjet))*dx+ &
-       (yvy(ipoint)-yvy(npjet))*dy+(yvz(ipoint)-yvz(npjet))*dz)/beadlen
-    else
-      beadvel=((yvx(ipoint)-yvx(ipoint+1))*dx+ &
-       (yvy(ipoint)-yvy(ipoint+1))*dy+(yvz(ipoint)-yvz(ipoint+1))*dz)/beadlen
-    endif
-    cp=cp0*yvl(ipoint)/yve(ipoint)
-    rattao=(cp/cp0)**tev
-    ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
-    fst(j)=(1.d0/rattao)*(yieldstress+consistency*ratmu* &
-     (beadvel/beadlen)**findex-yst(ipoint))
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_maxwell_stress_3d
-
- subroutine accelerator_maxwell_evap_stress_3d(firstpoint,lastpoint,npjet, &
-   linserting,linserted,jetfr,fev,fst,yxx,yyy,yzz,yvx,yvy,yvz,yst,yvl,yve, &
-   evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity,cp0,Bev,mev,tev, &
-   consistency,findex,yieldstress)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: linserting,linserted,jetfr(0:)
-  double precision, intent(out) :: fev(0:),fst(0:)
-  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:),yvx(0:),yvy(0:),yvz(0:)
-  double precision, intent(in) :: yst(0:),yvl(0:),yve(0:)
-  double precision, intent(in) :: evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity
-  double precision, intent(in) :: cp0,Bev,mev,tev,consistency,findex,yieldstress
-  integer :: ipoint,j
-  double precision :: fstval
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
-!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yst(0:npjet),yvl(0:npjet), &
-!$acc& yve(0:npjet),jetfr(0:npjet)) present_or_copyout(fev(0:lastpoint-firstpoint), &
-!$acc& fst(0:lastpoint-firstpoint)) private(j,fstval)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    call device_maxwell_evap_stress_point(ipoint,j,npjet,linserted,jetfr,fev, &
-     fstval,yxx,yyy,yzz,yvx,yvy,yvz,yst,yvl,yve,evairv,evmasscoeff,sqrevsc, &
-     evcsvapour,evumidity,cp0,Bev,mev,tev,consistency,findex,yieldstress)
-    fst(j)=fstval
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_maxwell_evap_stress_3d
 
  subroutine device_maxwell_evap_stress_point(ipoint,j,npjet,linserted,jetfr, &
    fev,fstval,yxx,yyy,yzz,yvx,yvy,yvz,yst,yvl,yve,evairv,evmasscoeff,sqrevsc, &
@@ -837,71 +776,18 @@ contains
    (beadvel/beadlen)**findex-yst(ipoint))
  end subroutine device_maxwell_evap_stress_point
 
- subroutine accelerator_kv_stress_3d(firstpoint,lastpoint,npjet,linserted,jetfr, &
-   fst,yxx,yyy,yzz,yvx,yvy,yvz,yax,yay,yaz,yst,yvl,yve,fevlocal, &
-   cp0,Bev,mev,tev,evlim)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: linserted,jetfr(0:)
-  double precision, intent(out) :: fst(0:)
-  double precision, intent(in) :: yxx(0:),yyy(0:),yzz(0:)
-  double precision, intent(in) :: yvx(0:),yvy(0:),yvz(0:)
-  double precision, intent(in) :: yax(0:),yay(0:),yaz(0:),yst(0:)
-  double precision, intent(in) :: yvl(0:),yve(0:),fevlocal(0:)
-  double precision, intent(in) :: cp0,Bev,mev,tev,evlim
-  integer :: ipoint,j
-  double precision :: dx,dy,dz,beadlen,beadvel,beadacc
-  double precision :: cp,ratmu,ratg,dcpdt,dratmu,dratg,strain,strainrate,strainacc
-#ifdef _OPENACC
-!$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
-!$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yax(0:npjet),yay(0:npjet), &
-!$acc& yaz(0:npjet),yst(0:npjet),yvl(0:npjet),yve(0:npjet), &
-!$acc& fevlocal(0:lastpoint-firstpoint),jetfr(0:npjet)) &
-!$acc& copyout(fst(0:lastpoint-firstpoint)) private(j,dx,dy,dz,beadlen,beadvel, &
-!$acc& beadacc,cp,ratmu,ratg,dcpdt,dratmu,dratg,strain,strainrate,strainacc)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    fst(j)=0.d0
-    if(jetfr(ipoint) .or. ipoint>=npjet)cycle
-    if(ipoint==npjet-1 .and. .not.linserted)cycle
-    if(ipoint==npjet-2 .and. .not.linserted)then
-      dx=yxx(ipoint)-yxx(npjet); dy=yyy(ipoint)-yyy(npjet); dz=yzz(ipoint)-yzz(npjet)
-      beadvel=((yvx(ipoint)-yvx(npjet))*dx+(yvy(ipoint)-yvy(npjet))*dy+ &
-       (yvz(ipoint)-yvz(npjet))*dz)
-      beadacc=((yax(ipoint)-yax(npjet))*dx+(yay(ipoint)-yay(npjet))*dy+ &
-       (yaz(ipoint)-yaz(npjet))*dz)
-    else
-      dx=yxx(ipoint)-yxx(ipoint+1); dy=yyy(ipoint)-yyy(ipoint+1); dz=yzz(ipoint)-yzz(ipoint+1)
-      beadvel=((yvx(ipoint)-yvx(ipoint+1))*dx+(yvy(ipoint)-yvy(ipoint+1))*dy+ &
-       (yvz(ipoint)-yvz(ipoint+1))*dz)
-      beadacc=((yax(ipoint)-yax(ipoint+1))*dx+(yay(ipoint)-yay(ipoint+1))*dy+ &
-       (yaz(ipoint)-yaz(ipoint+1))*dz)
-    endif
-    beadlen=dsqrt(dx*dx+dy*dy+dz*dz)
-    if(beadlen<=0.d0 .or. yve(ipoint)<=0.d0 .or. yvl(ipoint)<=0.d0)cycle
-    strainrate=beadvel/(beadlen*beadlen)
-    strainacc=beadacc/(beadlen*beadlen)
-    cp=cp0*yvl(ipoint)/yve(ipoint)
-    ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
-    ratg=ratmu/(cp/cp0)**tev
-    dcpdt=0.d0
-    if((yve(ipoint)/yvl(ipoint))>evlim*(1.d0+1.d-12))dcpdt=-cp*fevlocal(j)/yve(ipoint)
-    dratmu=ratmu*dlog(10.d0)*Bev*mev*(cp**(mev-1.d0))*dcpdt
-    dratg=ratg*(dlog(10.d0)*Bev*mev*(cp**(mev-1.d0))-tev/cp)*dcpdt
-    strain=(yst(ipoint)-ratmu*strainrate)/ratg
-    fst(j)=ratg*strainrate+ratmu*strainacc+dratg*strain+dratmu*strainrate
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_kv_stress_3d
-
- subroutine accelerator_kv_evap_stress_3d(firstpoint,lastpoint,npjet, &
+ subroutine accelerator_kv_stress_3d(firstpoint,lastpoint,npjet, &
    linserting,linserted,jetfr,fev,fst,yxx,yyy,yzz,yvx,yvy,yvz,yax,yay,yaz, &
    yst,yvl,yve,evairv,evmasscoeff,sqrevsc,evcsvapour,evumidity, &
-   cp0,Bev,mev,tev,evlim,acceleration_chunked)
+   cp0,Bev,mev,tev,evlim,acceleration_chunked,evaporative)
+! Kelvin-Voigt stress derivative from the stage accelerations: the
+! concentration-dependent law of eom3_KV_st_ev with the evaporation rate
+! (evaporative, the default), or the plain law of eom3_KV_st (strain rate
+! plus its time derivative), with fev zero and yve not referenced.  Until
+! 2026-10-06 the evaporative kernel was accelerator_kv_evap_stress_3d, and
+! accelerator_kv_stress_3d was an unused copy of it.
   implicit none
+  logical, intent(in), optional :: evaporative
   integer, intent(in) :: firstpoint,lastpoint,npjet
   logical, intent(in) :: linserting,linserted,jetfr(0:)
   double precision, intent(out) :: fev(0:),fst(0:)
@@ -913,9 +799,11 @@ contains
   integer :: ipoint,j,ia,ianext
   double precision :: dx,dy,dz,beadlen,vnorm,re,beadvel,beadacc
   double precision :: cp,ratmu,ratg,dcpdt,dratmu,dratg,strain,strainrate,strainacc
-  logical :: chunked_acceleration
+  logical :: chunked_acceleration,evap
   chunked_acceleration=.false.
   if(present(acceleration_chunked))chunked_acceleration=acceleration_chunked
+  evap=.true.
+  if(present(evaporative))evap=evaporative
 #ifdef _OPENACC
 !$acc parallel loop gang vector present_or_copyin(yxx(0:npjet),yyy(0:npjet),yzz(0:npjet), &
 !$acc& yvx(0:npjet),yvy(0:npjet),yvz(0:npjet),yax,yay,yaz, &
@@ -942,13 +830,17 @@ contains
       dx=yxx(ipoint+1)-yxx(ipoint); dy=yyy(ipoint+1)-yyy(ipoint); dz=yzz(ipoint+1)-yzz(ipoint)
     endif
     beadlen=dsqrt(dx*dx+dy*dy+dz*dz)
-    vnorm=dsqrt(yvx(ipoint)*yvx(ipoint)+yvy(ipoint)*yvy(ipoint)+yvz(ipoint)*yvz(ipoint))
-    if(beadlen>0.d0 .and. evairv>0.d0 .and. yve(ipoint)>0.d0)then
-      re=(2.d0*dsqrt(yve(ipoint)/(3.14159265358979323846d0*beadlen))*vnorm)/evairv
-      fev(j)=-evmasscoeff*0.495d0*(re**(1.d0/3.d0))*sqrevsc* &
-       (evcsvapour-evumidity)*3.14159265358979323846d0*beadlen
+    if(evap)then
+      vnorm=dsqrt(yvx(ipoint)*yvx(ipoint)+yvy(ipoint)*yvy(ipoint)+yvz(ipoint)*yvz(ipoint))
+      if(beadlen>0.d0 .and. evairv>0.d0 .and. yve(ipoint)>0.d0)then
+        re=(2.d0*dsqrt(yve(ipoint)/(3.14159265358979323846d0*beadlen))*vnorm)/evairv
+        fev(j)=-evmasscoeff*0.495d0*(re**(1.d0/3.d0))*sqrevsc* &
+         (evcsvapour-evumidity)*3.14159265358979323846d0*beadlen
+      endif
+      if(beadlen<=0.d0 .or. yve(ipoint)<=0.d0 .or. yvl(ipoint)<=0.d0)cycle
+    else
+      if(beadlen<=0.d0)cycle
     endif
-    if(beadlen<=0.d0 .or. yve(ipoint)<=0.d0 .or. yvl(ipoint)<=0.d0)cycle
     if(ipoint==npjet-2 .and. .not.linserted)then
       dx=yxx(ipoint)-yxx(npjet); dy=yyy(ipoint)-yyy(npjet); dz=yzz(ipoint)-yzz(npjet)
       beadvel=(yvx(ipoint)-yvx(npjet))*dx+(yvy(ipoint)-yvy(npjet))*dy+ &
@@ -965,6 +857,10 @@ contains
     endif
     strainrate=beadvel/(beadlen*beadlen)
     strainacc=beadacc/(beadlen*beadlen)
+    if(.not.evap)then
+      fst(j)=strainrate+strainacc
+      cycle
+    endif
     cp=cp0*yvl(ipoint)/yve(ipoint)
     ratmu=10.d0**(Bev*((cp**mev)-(cp0**mev)))
     ratg=ratmu/(cp/cp0)**tev
@@ -978,7 +874,7 @@ contains
 #ifdef _OPENACC
 !$acc end parallel loop
 #endif
- end subroutine accelerator_kv_evap_stress_3d
+ end subroutine accelerator_kv_stress_3d
 
  subroutine accelerator_coulomb_evap_3d(npjet,inpjet,ycf,yxx,yyy,yzz, &
    yvl,yve,jetms,jetch,jetfr,coulcrossec,q,lmirror,h,ldcutoff,dcutoff, &
@@ -1089,71 +985,6 @@ contains
 !$acc end parallel loop
 #endif
  end subroutine accelerator_coulomb_evap_3d
-
- subroutine accelerator_coulomb_evap_compare(npjet,inpjet,ycf,yxx,yyy,yzz, &
-   yvl,yve,jetms,jetch,jetfr,coulcrossec,q,lmirror,h,ldcutoff,dcutoff)
-  implicit none
-  integer, intent(in) :: npjet,inpjet
-  double precision, intent(in) :: ycf(0:,1:),yxx(0:),yyy(0:),yzz(0:)
-  double precision, intent(in) :: yvl(0:),yve(0:),jetms(0:),jetch(0:)
-  double precision, intent(in) :: coulcrossec(0:),q,h,dcutoff
-  logical, intent(in) :: jetfr(0:),lmirror,ldcutoff
-  double precision, allocatable :: ref(:,:)
-  double precision :: dx,dy,dz,norm,cmass1,cmass2,qt,coef,xmirror
-  double precision :: maxdiff
-  integer :: ipoint,jpoint,imax,jmax,k
-  allocate(ref(0:npjet,1:3))
-  ref=0.d0
-  do ipoint=inpjet,npjet
-    if(jetfr(ipoint))cycle
-    cmass1=yve(ipoint)/yvl(ipoint)
-    qt=jetch(ipoint)*q
-    do jpoint=ipoint+1,npjet
-      if(jetfr(jpoint))cycle
-      dx=yxx(ipoint)-yxx(jpoint)
-      dy=yyy(ipoint)-yyy(jpoint)
-      dz=yzz(ipoint)-yzz(jpoint)
-      norm=dsqrt(dx*dx+dy*dy+dz*dz)
-      if(norm>1.d-30)then
-        cmass2=yve(jpoint)/yvl(jpoint)
-        coef=(jetch(jpoint)*qt)/((norm+coulcrossec(jpoint))**2.d0)
-        ref(ipoint,1:3)=ref(ipoint,1:3)+coef/(jetms(ipoint)*cmass1)*(/dx,dy,dz/)/norm
-        ref(jpoint,1:3)=ref(jpoint,1:3)-coef/(jetms(jpoint)*cmass2)*(/dx,dy,dz/)/norm
-      endif
-    enddo
-    if(lmirror)then
-      do jpoint=inpjet,npjet
-        if(jetfr(jpoint))cycle
-        xmirror=dabs(yxx(jpoint)-h)+h
-        dx=yxx(ipoint)-xmirror
-        dy=yyy(ipoint)-yyy(jpoint)
-        dz=yzz(ipoint)-yzz(jpoint)
-        norm=dsqrt(dx*dx+dy*dy+dz*dz)
-        if(ldcutoff .and. norm>dcutoff)cycle
-        if(norm>1.d-30)then
-          coef=(jetch(jpoint)*qt)/((norm+coulcrossec(jpoint))**2.d0)
-          ref(ipoint,1:3)=ref(ipoint,1:3)-coef/(jetms(ipoint)*cmass1)*(/dx,dy,dz/)/norm
-        endif
-      enddo
-    endif
-  enddo
-  maxdiff=0.d0; imax=-1; jmax=-1
-  do ipoint=inpjet,npjet
-    do k=1,3
-      if(dabs(ycf(ipoint,k)-ref(ipoint,k))>maxdiff)then
-        maxdiff=dabs(ycf(ipoint,k)-ref(ipoint,k)); imax=ipoint; jmax=k
-      endif
-    enddo
-  enddo
-  write(*,'(A,ES14.6,A,I0,A,I0)') 'COULOMB_DIAGNOSTIC maxdiff=',maxdiff, &
-   ' bead=',imax,' component=',jmax
-  if(maxdiff>1.d-10 .and. imax>=inpjet)then
-    write(*,'(A,2ES24.16,A,4ES24.16)') 'COULOMB_DIAGNOSTIC gpu/ref=', &
-     ycf(imax,jmax),ref(imax,jmax),' state x/yve/vefrac/cross=', &
-     yxx(imax),yve(imax),yve(imax)/yvl(imax),coulcrossec(imax)
-  endif
-  deallocate(ref)
- end subroutine accelerator_coulomb_evap_compare
 
  subroutine accelerator_release_jet_capacity(mxnpjet,jetxx,jetyy,jetzz,jetst,jetvx, &
    jetvy,jetvz,jetms,jetch,jetvl,jetfr)
@@ -1335,67 +1166,18 @@ contains
   return
  end subroutine accelerator_refinement_candidate
 
- subroutine accelerator_platen_predict(firstpoint,lastpoint,h,airamp,noisediff, &
-   jetms,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-   f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-   y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz, &
-   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,linserted,jetfr)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint
-  logical, intent(in) :: linserted,jetfr(0:)
-  double precision, intent(in) :: h,airamp,noisediff,jetms(0:)
-  double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
-  double precision, intent(in) :: jetvx(0:),jetvy(0:),jetvz(0:)
-  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1st(0:)
-  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
-  double precision, intent(out) :: y1xx(0:),y1yy(0:),y1zz(0:),y1st(0:)
-  double precision, intent(out) :: y1vx(0:),y1vy(0:),y1vz(0:)
-  double precision, intent(out) :: y2xx(0:),y2yy(0:),y2zz(0:),y2st(0:)
-  double precision, intent(out) :: y2vx(0:),y2vy(0:),y2vz(0:)
-  integer :: ipoint,j
-  double precision :: dsqrh,stoc
-  dsqrh=dsqrt(dabs(h))
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector present(jetms,jetxx,jetyy,jetzz,jetst, &
-!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-!$acc& y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y2xx,y2yy,y2zz,y2st, &
-!$acc& y2vx,y2vy,y2vz,jetfr) private(j,stoc)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
-! eom4 gives no stochastic force to the nozzle, to a collected (frozen)
-! bead, or to the bead still being inserted at the nozzle.
-    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
-     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
-    y1xx(ipoint)=jetxx(ipoint)+h*f1xx(j)
-    y1yy(ipoint)=jetyy(ipoint)+h*f1yy(j)
-    y1zz(ipoint)=jetzz(ipoint)+h*f1zz(j)
-    y1st(ipoint)=jetst(ipoint)+h*f1st(j)
-    y1vx(ipoint)=jetvx(ipoint)+h*f1vx(j)+dsqrh*stoc
-    y1vy(ipoint)=jetvy(ipoint)+h*f1vy(j)+dsqrh*stoc
-    y1vz(ipoint)=jetvz(ipoint)+h*f1vz(j)+dsqrh*stoc
-    y2xx(ipoint)=y1xx(ipoint)
-    y2yy(ipoint)=y1yy(ipoint)
-    y2zz(ipoint)=y1zz(ipoint)
-    y2st(ipoint)=y1st(ipoint)
-    y2vx(ipoint)=jetvx(ipoint)+h*f1vx(j)-dsqrh*stoc
-    y2vy(ipoint)=jetvy(ipoint)+h*f1vy(j)-dsqrh*stoc
-    y2vz(ipoint)=jetvz(ipoint)+h*f1vz(j)-dsqrh*stoc
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_platen_predict
-
- subroutine accelerator_platen_evap_predict(firstpoint,lastpoint,h,airamp, &
+ subroutine accelerator_platen_predict(firstpoint,lastpoint,h,airamp, &
    noisediff,evlim,jetms,jetvl,jetve,jetxx,jetyy,jetzz,jetst,jetvx,jetvy, &
    jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz,f1ev, &
    y1xx,y1yy,y1zz,y1st,y1vx,y1vy,y1vz,y1ev, &
-   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,y2ev,linserted,jetfr)
+   y2xx,y2yy,y2zz,y2st,y2vx,y2vy,y2vz,y2ev,linserted,jetfr,evaporative)
+! The two predicted states of a Platen step, with or without evaporation
+! (evaporative: jetve, f1ev, y1ev and y2ev are not referenced without it,
+! and the mass correction is 1).  Two kernels, accelerator_platen_predict
+! and accelerator_platen_evap_predict, until 2026-10-06.
   implicit none
   integer, intent(in) :: firstpoint,lastpoint
-  logical, intent(in) :: linserted,jetfr(0:)
+  logical, intent(in) :: linserted,jetfr(0:),evaporative
   double precision, intent(in) :: h,airamp,noisediff,evlim
   double precision, intent(in) :: jetms(0:),jetvl(0:),jetve(0:)
   double precision, intent(in) :: jetxx(0:),jetyy(0:),jetzz(0:),jetst(0:)
@@ -1417,9 +1199,10 @@ contains
 #endif
   do ipoint=firstpoint,lastpoint
     j=ipoint-firstpoint
-    cmass=jetve(ipoint)/jetvl(ipoint)
+    cmass=1.d0
+    if(evaporative)cmass=jetve(ipoint)/jetvl(ipoint)
     stoc=dsqrt(2.d0*(airamp/(jetms(ipoint)*cmass)+noisediff))
-! eom4_ev gives no stochastic force to the nozzle, to a collected (frozen)
+! eom4(_ev) gives no stochastic force to the nozzle, to a collected (frozen)
 ! bead, or to the bead still being inserted at the nozzle.
     if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
      (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
@@ -1430,9 +1213,6 @@ contains
     y1vx(ipoint)=jetvx(ipoint)+h*f1vx(j)+dsqrh*stoc
     y1vy(ipoint)=jetvy(ipoint)+h*f1vy(j)+dsqrh*stoc
     y1vz(ipoint)=jetvz(ipoint)+h*f1vz(j)+dsqrh*stoc
-    ve=jetve(ipoint)+h*f1ev(j)
-    if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
-    y1ev(ipoint)=ve
     y2xx(ipoint)=y1xx(ipoint)
     y2yy(ipoint)=y1yy(ipoint)
     y2zz(ipoint)=y1zz(ipoint)
@@ -1440,290 +1220,41 @@ contains
     y2vx(ipoint)=jetvx(ipoint)+h*f1vx(j)-dsqrh*stoc
     y2vy(ipoint)=jetvy(ipoint)+h*f1vy(j)-dsqrh*stoc
     y2vz(ipoint)=jetvz(ipoint)+h*f1vz(j)-dsqrh*stoc
-    y2ev(ipoint)=ve
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_platen_evap_predict
-
- subroutine accelerator_platen_velocity(firstpoint,lastpoint,mxnpjet, &
-   historysteps,k,h, &
-   airamp,noisediff,jetms,gaussianhistory,jetvx,jetvy,jetvz, &
-   f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz, &
-   historybase,historywindow,historyvalues,linserted,jetfr)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,mxnpjet,historysteps,k
-  logical, intent(in) :: linserted,jetfr(0:)
-! Sequential-pool slice for this timestep (see begin_gaussian_history_step
-! in utility_mod.f90).
-  integer, intent(in) :: historybase,historywindow,historyvalues
-  double precision, intent(in) :: h,airamp,noisediff,jetms(0:)
-  double precision, intent(in) :: gaussianhistory(0:)
-  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
-  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
-  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
-  double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
-  integer :: ipoint,j,component,index1,index2
-  integer :: hbase,hstride,hvalues,hfirst
-  double precision :: dsqrh,tsqh,prefactor,stoc,u1,u2,ww,zz
-  dsqrh=dsqrt(dabs(h)); tsqh=dsqrh**3.d0; prefactor=0.5d0/dsqrh
-! The index is base + bead offset + stride*(component,draw) inside this
-! step's slice of the sequential pool; the modulo lets a slice straddle the
-! end of the sequence.
-  hbase=historybase; hstride=historywindow; hvalues=historyvalues
-  hfirst=firstpoint
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector present(jetms,gaussianhistory,jetvx,jetvy, &
-!$acc& jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz,jetfr) &
-!$acc& private(j,component,index1,index2,stoc,u1,u2,ww,zz)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    stoc=dsqrt(2.d0*(airamp/jetms(ipoint)+noisediff))
-! Same exclusions as accelerator_platen_predict.
-    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
-     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
-    component=1
-    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
-    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
-    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
-    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
-    jetvx(ipoint)=jetvx(ipoint)+stoc*ww+prefactor*(f2vx(j)-f3vx(j))*zz+ &
-     0.25d0*h*(f2vx(j)+2.d0*f1vx(j)+f3vx(j))
-    component=2
-    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
-    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
-    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
-    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
-    jetvy(ipoint)=jetvy(ipoint)+stoc*ww+prefactor*(f2vy(j)-f3vy(j))*zz+ &
-     0.25d0*h*(f2vy(j)+2.d0*f1vy(j)+f3vy(j))
-    component=3
-    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
-    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
-    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
-    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
-    jetvz(ipoint)=jetvz(ipoint)+stoc*ww+prefactor*(f2vz(j)-f3vz(j))*zz+ &
-     0.25d0*h*(f2vz(j)+2.d0*f1vz(j)+f3vz(j))
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_platen_velocity
-
- subroutine accelerator_platen_evap_velocity(firstpoint,lastpoint,mxnpjet, &
-   historysteps,k,h,airamp,noisediff,jetms,jetvl,jetve,gaussianhistory, &
-   jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz, &
-   historybase,historywindow,historyvalues,linserted,jetfr)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,mxnpjet,historysteps,k
-  logical, intent(in) :: linserted,jetfr(0:)
-! Sequential-pool slice for this timestep (see begin_gaussian_history_step
-! in utility_mod.f90).
-  integer, intent(in) :: historybase,historywindow,historyvalues
-  double precision, intent(in) :: h,airamp,noisediff
-  double precision, intent(in) :: jetms(0:),jetvl(0:),jetve(0:)
-  double precision, intent(in) :: gaussianhistory(0:)
-  double precision, intent(inout) :: jetvx(0:),jetvy(0:),jetvz(0:)
-  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
-  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
-  double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
-  integer :: ipoint,j,component,index1,index2
-  integer :: hbase,hstride,hvalues,hfirst
-  double precision :: dsqrh,tsqh,prefactor,stoc,cmass,u1,u2,ww,zz
-  dsqrh=dsqrt(dabs(h)); tsqh=dsqrh**3.d0; prefactor=0.5d0/dsqrh
-! Same pool indexing as accelerator_platen_velocity.
-  hbase=historybase; hstride=historywindow; hvalues=historyvalues
-  hfirst=firstpoint
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector present(jetms,jetvl,jetve,gaussianhistory, &
-!$acc& jetvx,jetvy,jetvz,f1vx,f1vy,f1vz,f2vx,f2vy,f2vz,f3vx,f3vy,f3vz, &
-!$acc& jetfr) private(j,component,index1,index2,stoc,cmass,u1,u2,ww,zz)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    cmass=jetve(ipoint)/jetvl(ipoint)
-    stoc=dsqrt(2.d0*(airamp/(jetms(ipoint)*cmass)+noisediff))
-! Same exclusions as accelerator_platen_evap_predict.
-    if(ipoint==lastpoint .or. jetfr(ipoint) .or. &
-     (ipoint==lastpoint-1 .and. .not.linserted))stoc=0.d0
-    component=1
-    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
-    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
-    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
-    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
-    jetvx(ipoint)=jetvx(ipoint)+stoc*ww+prefactor*(f2vx(j)-f3vx(j))*zz+ &
-     0.25d0*h*(f2vx(j)+2.d0*f1vx(j)+f3vx(j))
-    component=2
-    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
-    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
-    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
-    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
-    jetvy(ipoint)=jetvy(ipoint)+stoc*ww+prefactor*(f2vy(j)-f3vy(j))*zz+ &
-     0.25d0*h*(f2vy(j)+2.d0*f1vy(j)+f3vy(j))
-    component=3
-    index1=mod(hbase+(ipoint-hfirst)+hstride*(component-1),hvalues)
-    index2=mod(hbase+(ipoint-hfirst)+hstride*(component-1+3),hvalues)
-    u1=gaussianhistory(index1); u2=gaussianhistory(index2)
-    ww=dsqrh*u1; zz=0.5d0*tsqh*(u1+u2/dsqrt(3.d0))
-    jetvz(ipoint)=jetvz(ipoint)+stoc*ww+prefactor*(f2vz(j)-f3vz(j))*zz+ &
-     0.25d0*h*(f2vz(j)+2.d0*f1vz(j)+f3vz(j))
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_platen_evap_velocity
-
- subroutine accelerator_platen_positions(firstpoint,lastpoint,npjet,h,pfreq, &
-   liniperturb,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,f1xx,f1yy,f1zz, &
-   linserted,jetfr)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: liniperturb,linserted,jetfr(0:)
-  double precision, intent(in) :: h,pfreq,jetvx(0:),jetvy(0:),jetvz(0:)
-  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
-  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:)
-  integer :: ipoint,j
-  double precision :: f2x,f2y,f2z,y1y,y1z
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
-!$acc& jetvz,f1xx,f1yy,f1zz,jetfr) private(j,f2x,f2y,f2z,y1y,y1z)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    f2x=jetvx(ipoint); f2y=jetvy(ipoint); f2z=jetvz(ipoint)
-! eom4_pos: a collected bead stays where the collector stopped it, and the
-! bead being inserted is placed by compute_posnoinserted.
-    if(jetfr(ipoint) .or. (ipoint==npjet-1 .and. .not.linserted))then
-      f2x=0.d0; f2y=0.d0; f2z=0.d0
+    if(evaporative)then
+      ve=jetve(ipoint)+h*f1ev(j)
+      if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
+      y1ev(ipoint)=ve
+      y2ev(ipoint)=ve
     endif
-    if(ipoint==npjet)then
-      f2x=0.d0
-      if(liniperturb)then
-        y1y=jetyy(ipoint)+h*f1yy(j)
-        y1z=jetzz(ipoint)+h*f1zz(j)
-        f2y=-pfreq*y1z; f2z=pfreq*y1y
-      else
-        f2y=0.d0; f2z=0.d0
-      endif
-    endif
-    jetxx(ipoint)=jetxx(ipoint)+0.5d0*h*(f1xx(j)+f2x)
-    jetyy(ipoint)=jetyy(ipoint)+0.5d0*h*(f1yy(j)+f2y)
-    jetzz(ipoint)=jetzz(ipoint)+0.5d0*h*(f1zz(j)+f2z)
   enddo
 #ifdef _OPENACC
 !$acc end parallel loop
 #endif
- end subroutine accelerator_platen_positions
-
- subroutine accelerator_platen_evap_positions(firstpoint,lastpoint,npjet,h, &
-   pfreq,liniperturb,evlim,jetxx,jetyy,jetzz,jetvx,jetvy,jetvz,jetvl, &
-   jetve,f1xx,f1yy,f1zz,f1ev,f2ev,linserted,jetfr)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint,npjet
-  logical, intent(in) :: liniperturb,linserted,jetfr(0:)
-  double precision, intent(in) :: h,pfreq,evlim
-  double precision, intent(in) :: jetvx(0:),jetvy(0:),jetvz(0:),jetvl(0:)
-  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:),jetve(0:)
-  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1ev(0:)
-  double precision, intent(in) :: f2ev(0:)
-  integer :: ipoint,j
-  double precision :: f2x,f2y,f2z,y1y,y1z,ve
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector present(jetxx,jetyy,jetzz,jetvx,jetvy, &
-!$acc& jetvz,jetvl,jetve,f1xx,f1yy,f1zz,f1ev,f2ev,jetfr) &
-!$acc& private(j,f2x,f2y,f2z,y1y,y1z,ve)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    f2x=jetvx(ipoint); f2y=jetvy(ipoint); f2z=jetvz(ipoint)
-! eom4_pos_ev: a collected bead stays where the collector stopped it, and
-! the bead being inserted is placed by compute_posnoinserted.
-    if(jetfr(ipoint) .or. (ipoint==npjet-1 .and. .not.linserted))then
-      f2x=0.d0; f2y=0.d0; f2z=0.d0
-    endif
-    if(ipoint==npjet)then
-      f2x=0.d0
-      if(liniperturb)then
-        y1y=jetyy(ipoint)+h*f1yy(j)
-        y1z=jetzz(ipoint)+h*f1zz(j)
-        f2y=-pfreq*y1z; f2z=pfreq*y1y
-      else
-        f2y=0.d0; f2z=0.d0
-      endif
-    endif
-    jetxx(ipoint)=jetxx(ipoint)+0.5d0*h*(f1xx(j)+f2x)
-    jetyy(ipoint)=jetyy(ipoint)+0.5d0*h*(f1yy(j)+f2y)
-    jetzz(ipoint)=jetzz(ipoint)+0.5d0*h*(f1zz(j)+f2z)
-    ve=jetve(ipoint)+0.5d0*h*(f1ev(j)+f2ev(j))
-    if(ve/jetvl(ipoint)<evlim)ve=jetvl(ipoint)*evlim
-    jetve(ipoint)=ve
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_platen_evap_positions
-
- subroutine accelerator_platen_stress_statistics(firstpoint,lastpoint,h, &
-   jetxx,jetyy,jetzz,jetst,f1st,f2st,counterlpath,ncounterlpath, &
-   maxstress,maxstressposx)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint
-  integer, intent(inout) :: ncounterlpath
-  double precision, intent(in) :: h,jetxx(0:),jetyy(0:),jetzz(0:)
-  double precision, intent(inout) :: jetst(0:)
-  double precision, intent(in) :: f1st(0:),f2st(0:)
-  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
-  integer :: ipoint,j
-  double precision :: newst,dx,dy,dz
-  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress,maxstressposx)
-#ifdef _OPENACC
-!$acc parallel loop async(accelerator_queue) gang vector present(jetxx,jetyy,jetzz,jetst,f1st,f2st, &
-!$acc& counterlpath,statistics_step_max) private(j,newst,dx,dy,dz) &
-!$acc& reduction(+:counterlpath) reduction(max:statistics_step_max)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    newst=jetst(ipoint)+0.5d0*h*(f1st(j)+f2st(j))
-    if(ipoint<lastpoint)then
-      dx=jetxx(ipoint)-jetxx(ipoint+1)
-      dy=jetyy(ipoint)-jetyy(ipoint+1)
-      dz=jetzz(ipoint)-jetzz(ipoint+1)
-      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
-    endif
-    jetst(ipoint)=newst
-    statistics_step_max=max(statistics_step_max,newst)
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
-! The sample count and the maximum stress are updated once per timestep by
-! statistic_driver (accelerator_store_statistics), as for the Euler and RK
-! paths.  Calling it here as well counted every Platen step twice while the
-! path length was added once, so the printed mean path length (lp) of a
-! persistent Platen run was half the host value (fixed 2026-09-30).
- end subroutine accelerator_platen_stress_statistics
+ end subroutine accelerator_platen_predict
 
  subroutine accelerator_platen_end_step(firstpoint,lastpoint,dt, &
    npjet,mxnpjet,inpjet,linserted,lremove,h,resolution,dresolution, &
    thresolution,ivelocity,istress,imassa,icharge,ivolume,jetxx,jetyy,jetzz, &
    jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetve,jetfr,f1st,yst, &
    evaporative,consistency,findex,yieldstress,cp0,Bev,mev,tev, &
-   counterlpath,ncounterlpath,maxstress,maxstressposx)
-! The end of a fused persistent dynamic Platen step, evaporative or not, in
-! one single-gang kernel, which a few hundred beads keep busy: restore the
-! smoothed nozzle charge, update the stress with the path-length and maximum
-! statistics (accelerator_platen_stress_statistics), place the inserting
+   counterlpath,ncounterlpath,maxstress,maxstressposx,linserting,restore)
+! The end of every Platen device step (device_platen_step), evaporative or
+! not, in one single-gang kernel, which a few hundred beads keep busy:
+! restore the smoothed nozzle charge (restore: not in the oracle builds,
+! which smooth on the host), update the stress with the path-length and
+! maximum statistics, and, with insertion (linserting), place the inserting
 ! bead, decide the topology and freeze beads at the collector
-! (accelerator_topology_check), and store the step's statistics over the
-! active range the topology leaves (accelerator_store_statistics).  Until
+! (accelerator_topology_check); then store the step's statistics over the
+! active range the topology leaves (accelerator_store_statistics).  A fixed
+! bead set makes no topology decision here; device_platen_step freezes its
+! beads at the collector (accelerator_freeze_at_collector).  Until
 ! 2026-10-05 these were eight or nine kernels.  accelerator_topology_check
 ! then only reads the flags back.  Only the order of the path-length sum
 ! changes.
 ! Since 2026-10-06 the stress loop also evaluates the stress derivative at
 ! the end of the step from the new positions and velocities and the
-! predicted stress yst: the Maxwell law of the evaporating jet
-! (accelerator_maxwell_stress_3d, one kernel before) or, without
+! predicted stress yst: the Maxwell law of the evaporating jet (as
+! xpsys_stress_ev; one kernel before) or, without
 ! evaporation, the arithmetic of accelerator_eom3_stage (a fourth EOM stage
 ! before, which computed all the derivatives for this one).  Without
 ! evaporation jetve is not referenced.
@@ -1739,7 +1270,7 @@ contains
   double precision, intent(in) :: jetve(0:)
   logical, intent(inout) :: jetfr(0:)
   double precision, intent(in) :: f1st(0:),yst(0:)
-  logical, intent(in) :: evaporative
+  logical, intent(in) :: evaporative,linserting,restore
   double precision, intent(in) :: consistency,findex,yieldstress
   double precision, intent(in) :: cp0,Bev,mev,tev
   double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
@@ -1756,7 +1287,10 @@ contains
 !$acc& statistics_step_max,statistics_step_index,accelerator_topology_flags) &
 !$acc& private(lpsum,stmax,first,last,idx)
 #endif
-  if(.not.linserted)jetch(npjet-1)=accelerator_smoothed_charge
+! restore: the step's force evaluations smoothed the nozzle charge on the
+! device (accelerator_platen_stage_prep), which saved the charge to restore;
+! the oracle builds smooth and restore it on the host instead.
+  if(restore .and. .not.linserted)jetch(npjet-1)=accelerator_smoothed_charge
   lpsum=0.d0
   stmax=-huge(0.d0)
 #ifdef _OPENACC
@@ -1781,7 +1315,7 @@ contains
         dzu=jetzz(ipoint)-jetzz(ipoint+1)
       endif
       if(evaporative)then
-! accelerator_maxwell_stress_3d.
+! The Maxwell law of the evaporating jet, as in xpsys_stress_ev.
         beadlen=dsqrt(dxu*dxu+dyu*dyu+dzu*dzu)
         if(beadlen>0.d0 .and. jetve(ipoint)>0.d0 .and. jetvl(ipoint)>0.d0)then
           if(ipoint==npjet-2 .and. .not.linserted)then
@@ -1829,12 +1363,18 @@ contains
   enddo
   counterlpath=counterlpath+lpsum
   statistics_step_max=max(statistics_step_max,stmax)
-  if(.not.linserted)call device_place_inserting_bead(npjet,resolution, &
-   jetxx,jetyy,jetzz)
-  call device_topology_decide(npjet,mxnpjet,inpjet,linserted,lremove,h, &
-   resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
-   ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
-  if(lremove)then
+! Without insertion (a fixed bead set, Tests 12 and 20; since 2026-10-06
+! through this kernel too) there is no topology to decide and the
+! statistics cover inpjet..npjet.
+  first=inpjet
+  last=npjet
+  if(linserting)then
+    if(.not.linserted)call device_place_inserting_bead(npjet,resolution, &
+     jetxx,jetyy,jetzz)
+    call device_topology_decide(npjet,mxnpjet,inpjet,linserted,lremove,h, &
+     resolution,dresolution,thresolution,ivelocity,istress,imassa,icharge, &
+     ivolume,jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz,jetms,jetch,jetvl,jetfr)
+! Beads at the collector are frozen with or without removal (remove_jetbead).
 #ifdef _OPENACC
 !$acc loop vector
 #endif
@@ -1847,10 +1387,10 @@ contains
         endif
       endif
     enddo
-  endif
 ! accelerator_store_statistics over the range left by the topology step.
-  first=inpjet+accelerator_topology_flags(5)
-  last=accelerator_topology_flags(1)
+    first=inpjet+accelerator_topology_flags(5)
+    last=accelerator_topology_flags(1)
+  endif
   idx=statistics_step_index
 #ifdef _OPENACC
 !$acc loop vector reduction(max:idx)
@@ -1869,7 +1409,7 @@ contains
 #ifdef _OPENACC
 !$acc end parallel
 #endif
-  accelerator_topology_decided=.true.
+  accelerator_topology_decided=linserting
   accelerator_statistics_stored=.true.
  end subroutine accelerator_platen_end_step
 
@@ -2021,125 +1561,6 @@ contains
 #endif
  end subroutine accelerator_platen_update
 
- subroutine accelerator_euler_final_statistics(firstpoint,lastpoint,h, &
-   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-   fxx,fyy,fzz,fst,fvx,fvy,fvz,counterlpath,ncounterlpath, &
-   maxstress,maxstressposx)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint
-  integer, intent(inout) :: ncounterlpath
-  double precision, intent(in) :: h
-  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
-  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
-  double precision, intent(in) :: fxx(0:),fyy(0:),fzz(0:),fst(0:)
-  double precision, intent(in) :: fvx(0:),fvy(0:),fvz(0:)
-  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
-  integer :: ipoint,j,jn
-  double precision :: newxx,newyy,newzz,newst,nextxx,nextyy,nextzz,dx,dy,dz
-
-  if(.not.(accelerator_persistent .or. accelerator_topology_enabled))return
-  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress, &
-   maxstressposx)
-#ifdef _OPENACC
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
-!$acc& jetvx,jetvy,jetvz,fxx,fyy,fzz,fst,fvx,fvy,fvz, &
-!$acc& counterlpath,statistics_step_max) &
-!$acc& private(j,jn,newxx,newyy,newzz,newst,nextxx,nextyy,nextzz, &
-!$acc& dx,dy,dz) reduction(+:counterlpath) &
-!$acc& reduction(max:statistics_step_max)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    newxx=jetxx(ipoint)+h*fxx(j)
-    newyy=jetyy(ipoint)+h*fyy(j)
-    newzz=jetzz(ipoint)+h*fzz(j)
-    newst=jetst(ipoint)+h*fst(j)
-    if(ipoint<lastpoint)then
-      jn=j+1
-      nextxx=jetxx(ipoint+1)+h*fxx(jn)
-      nextyy=jetyy(ipoint+1)+h*fyy(jn)
-      nextzz=jetzz(ipoint+1)+h*fzz(jn)
-      dx=newxx-nextxx
-      dy=newyy-nextyy
-      dz=newzz-nextzz
-      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
-    endif
-    statistics_step_max=max(statistics_step_max,newst)
-    jetxx(ipoint)=newxx
-    jetyy(ipoint)=newyy
-    jetzz(ipoint)=newzz
-    jetst(ipoint)=newst
-    jetvx(ipoint)=jetvx(ipoint)+h*fvx(j)
-    jetvy(ipoint)=jetvy(ipoint)+h*fvy(j)
-    jetvz(ipoint)=jetvz(ipoint)+h*fvz(j)
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_euler_final_statistics
-
- subroutine accelerator_rk2_final_statistics(firstpoint,lastpoint,h, &
-   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-   f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-   f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
-   counterlpath,ncounterlpath,maxstress,maxstressposx)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint
-  integer, intent(inout) :: ncounterlpath
-  double precision, intent(in) :: h
-  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
-  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
-  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1st(0:)
-  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
-  double precision, intent(in) :: f2xx(0:),f2yy(0:),f2zz(0:),f2st(0:)
-  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
-  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
-  integer :: ipoint,j,jn
-  double precision :: scale,newxx,newyy,newzz,newst,nextxx,nextyy,nextzz
-  double precision :: dx,dy,dz
-
-  if(.not.accelerator_persistent)return
-  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress, &
-   maxstressposx)
-#ifdef _OPENACC
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
-!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,counterlpath, &
-!$acc& statistics_step_max) private(j,jn,scale,newxx,newyy,newzz, &
-!$acc& newst,nextxx,nextyy,nextzz,dx,dy,dz) &
-!$acc& reduction(+:counterlpath) reduction(max:statistics_step_max)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    scale=h/2.d0
-    newxx=jetxx(ipoint)+scale*(f1xx(j)+f2xx(j))
-    newyy=jetyy(ipoint)+scale*(f1yy(j)+f2yy(j))
-    newzz=jetzz(ipoint)+scale*(f1zz(j)+f2zz(j))
-    newst=jetst(ipoint)+scale*(f1st(j)+f2st(j))
-    if(ipoint<lastpoint)then
-      jn=j+1
-      nextxx=jetxx(ipoint+1)+scale*(f1xx(jn)+f2xx(jn))
-      nextyy=jetyy(ipoint+1)+scale*(f1yy(jn)+f2yy(jn))
-      nextzz=jetzz(ipoint+1)+scale*(f1zz(jn)+f2zz(jn))
-      dx=newxx-nextxx
-      dy=newyy-nextyy
-      dz=newzz-nextzz
-      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
-    endif
-    statistics_step_max=max(statistics_step_max,newst)
-    jetxx(ipoint)=newxx
-    jetyy(ipoint)=newyy
-    jetzz(ipoint)=newzz
-    jetst(ipoint)=newst
-    jetvx(ipoint)=jetvx(ipoint)+scale*(f1vx(j)+f2vx(j))
-    jetvy(ipoint)=jetvy(ipoint)+scale*(f1vy(j)+f2vy(j))
-    jetvz(ipoint)=jetvz(ipoint)+scale*(f1vz(j)+f2vz(j))
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
- end subroutine accelerator_rk2_final_statistics
-
  subroutine accelerator_map_statistics(counterlpath,ncounterlpath, &
    maxstress,maxstressposx)
   implicit none
@@ -2153,83 +1574,6 @@ contains
   endif
 #endif
  end subroutine accelerator_map_statistics
-
- subroutine accelerator_rk4_final_statistics(firstpoint,lastpoint,h, &
-   jetxx,jetyy,jetzz,jetst,jetvx,jetvy,jetvz, &
-   f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-   f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz, &
-   f3xx,f3yy,f3zz,f3st,f3vx,f3vy,f3vz, &
-   f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz, &
-   counterlpath,ncounterlpath,maxstress,maxstressposx)
-  implicit none
-  integer, intent(in) :: firstpoint,lastpoint
-  integer, intent(inout) :: ncounterlpath
-  double precision, intent(in) :: h
-  double precision, intent(inout) :: jetxx(0:),jetyy(0:),jetzz(0:)
-  double precision, intent(inout) :: jetst(0:),jetvx(0:),jetvy(0:),jetvz(0:)
-  double precision, intent(in) :: f1xx(0:),f1yy(0:),f1zz(0:),f1st(0:)
-  double precision, intent(in) :: f1vx(0:),f1vy(0:),f1vz(0:)
-  double precision, intent(in) :: f2xx(0:),f2yy(0:),f2zz(0:),f2st(0:)
-  double precision, intent(in) :: f2vx(0:),f2vy(0:),f2vz(0:)
-  double precision, intent(in) :: f3xx(0:),f3yy(0:),f3zz(0:),f3st(0:)
-  double precision, intent(in) :: f3vx(0:),f3vy(0:),f3vz(0:)
-  double precision, intent(in) :: f4xx(0:),f4yy(0:),f4zz(0:),f4st(0:)
-  double precision, intent(in) :: f4vx(0:),f4vy(0:),f4vz(0:)
-  double precision, intent(inout) :: counterlpath,maxstress,maxstressposx
-  integer :: ipoint,j,jn
-  double precision :: scale,newxx,newyy,newzz,newst,nextxx,nextyy,nextzz
-  double precision :: dx,dy,dz
-
-  if(.not.accelerator_persistent)return
-  call accelerator_map_statistics(counterlpath,ncounterlpath,maxstress, &
-   maxstressposx)
-#ifdef _OPENACC
-!$acc parallel loop gang vector present(jetxx,jetyy,jetzz,jetst, &
-!$acc& jetvx,jetvy,jetvz,f1xx,f1yy,f1zz,f1st,f1vx,f1vy,f1vz, &
-!$acc& f2xx,f2yy,f2zz,f2st,f2vx,f2vy,f2vz,f3xx,f3yy,f3zz, &
-!$acc& f3st,f3vx,f3vy,f3vz,f4xx,f4yy,f4zz,f4st,f4vx,f4vy,f4vz, &
-!$acc& counterlpath,statistics_step_max) &
-!$acc& private(j,jn,scale,newxx,newyy,newzz,newst,nextxx,nextyy, &
-!$acc& nextzz,dx,dy,dz) reduction(+:counterlpath) &
-!$acc& reduction(max:statistics_step_max)
-#endif
-  do ipoint=firstpoint,lastpoint
-    j=ipoint-firstpoint
-    scale=h/6.d0
-    newxx=jetxx(ipoint)+scale*(f1xx(j)+2.d0*(f2xx(j)+f3xx(j))+f4xx(j))
-    newyy=jetyy(ipoint)+scale*(f1yy(j)+2.d0*(f2yy(j)+f3yy(j))+f4yy(j))
-    newzz=jetzz(ipoint)+scale*(f1zz(j)+2.d0*(f2zz(j)+f3zz(j))+f4zz(j))
-    newst=jetst(ipoint)+scale*(f1st(j)+2.d0*(f2st(j)+f3st(j))+f4st(j))
-    if(ipoint<lastpoint)then
-      jn=j+1
-      nextxx=jetxx(ipoint+1)+scale*(f1xx(jn)+ &
-       2.d0*(f2xx(jn)+f3xx(jn))+f4xx(jn))
-      nextyy=jetyy(ipoint+1)+scale*(f1yy(jn)+ &
-       2.d0*(f2yy(jn)+f3yy(jn))+f4yy(jn))
-      nextzz=jetzz(ipoint+1)+scale*(f1zz(jn)+ &
-       2.d0*(f2zz(jn)+f3zz(jn))+f4zz(jn))
-      dx=newxx-nextxx
-      dy=newyy-nextyy
-      dz=newzz-nextzz
-      counterlpath=counterlpath+dsqrt(dx*dx+dy*dy+dz*dz)
-    endif
-    statistics_step_max=max(statistics_step_max,newst)
-    jetxx(ipoint)=newxx
-    jetyy(ipoint)=newyy
-    jetzz(ipoint)=newzz
-    jetst(ipoint)=newst
-    jetvx(ipoint)=jetvx(ipoint)+scale*(f1vx(j)+ &
-     2.d0*(f2vx(j)+f3vx(j))+f4vx(j))
-    jetvy(ipoint)=jetvy(ipoint)+scale*(f1vy(j)+ &
-     2.d0*(f2vy(j)+f3vy(j))+f4vy(j))
-    jetvz(ipoint)=jetvz(ipoint)+scale*(f1vz(j)+ &
-     2.d0*(f2vz(j)+f3vz(j))+f4vz(j))
-  enddo
-#ifdef _OPENACC
-!$acc end parallel loop
-#endif
-  return
- end subroutine accelerator_rk4_final_statistics
 
  subroutine accelerator_set_persistent(enabled)
   implicit none
@@ -2270,6 +1614,19 @@ contains
   implicit none
   accelerator_is_persistent=accelerator_persistent
  end function accelerator_is_persistent
+
+ logical function accelerator_statistics_on_device()
+! The step statistics live on the device once a device step has mapped
+! them, also at a capacity change: there the jet arrays are released and
+! rebound (persistent off, topology on) after the step has already added
+! its path length on the device.  Until 2026-10-06 that step took the host
+! branch of statistic_driver, so the device count missed it and the
+! printed path length of that interval was too large by one step in
+! 20,000 (RK device paths; the Platen end-of-step kernel counts it itself).
+  implicit none
+  accelerator_statistics_on_device=accelerator_statistics_mapped .and. &
+   (accelerator_persistent .or. accelerator_topology_enabled)
+ end function accelerator_statistics_on_device
 
  logical function accelerator_host_state_is_current(nstep)
   implicit none
@@ -2397,25 +1754,25 @@ contains
 #ifdef _OPENACC
 !$acc end serial
 #endif
-    if(lremove)then
-! The upper bound covers a bead added above; the device npjet decides.
-      lastpoint=min(npjet+1,mxnpjet)
+! Beads at the collector are frozen with or without removal
+! (remove_jetbead).  The upper bound covers a bead added above; the device
+! npjet decides.
+    lastpoint=min(npjet+1,mxnpjet)
 #ifdef _OPENACC
 !$acc parallel loop async(accelerator_queue) present(jetxx,jetfr,accelerator_topology_flags)
 #endif
-      do ipoint=inpjet,lastpoint
-        if(accelerator_topology_flags(4)==0 .and. &
-         ipoint<=accelerator_topology_flags(1))then
-          if(jetxx(ipoint)>=h)then
-            jetfr(ipoint)=.true.
-            jetxx(ipoint)=h
-          endif
+    do ipoint=inpjet,lastpoint
+      if(accelerator_topology_flags(4)==0 .and. &
+       ipoint<=accelerator_topology_flags(1))then
+        if(jetxx(ipoint)>=h)then
+          jetfr(ipoint)=.true.
+          jetxx(ipoint)=h
         endif
-      enddo
+      endif
+    enddo
 #ifdef _OPENACC
 !$acc end parallel loop
 #endif
-    endif
   endif
 #ifdef _OPENACC
 !$acc update self(accelerator_topology_flags) async(accelerator_queue)
@@ -2522,7 +1879,8 @@ contains
       ins=.false.
     endif
   endif
-! A step that must first grow the capacity skips removal, as on the host.
+! A step that must first grow the capacity stops here: the host grows the
+! arrays and decides the step again (main), insertion and removal included.
 ! Clamping a bead at the collector keeps it at x>=h, so the test can precede
 ! the freezing loop below.
   if(lremove .and. newresize==0)then
@@ -2628,7 +1986,7 @@ contains
     accelerator_statistics_stored=.false.
     return
   endif
-  if(.not.accelerator_persistent)return
+  if(.not.accelerator_statistics_on_device())return
 #ifdef _OPENACC
 !$acc parallel loop async(accelerator_queue) gang vector present(jetst,statistics_step_max, &
 !$acc& statistics_step_index) reduction(max:statistics_step_index)
@@ -2745,7 +2103,9 @@ contains
     accelerator_eom_env_checked=.true.
   endif
   if(accelerator_eom_disabled)return
-  if(.not.lairdrag .or. lflorentz .or. luppot)return
+! Without air drag (lairdrag false) the loop leaves out the drag and lift
+! terms (use_airdrag), as eom3 does; until 2026-10-06 it returned .false.
+  if(lflorentz .or. luppot)return
   if(nfieldtype/=0 .or. lastpoint/=npjet)return
   nout=lastpoint-firstpoint
   ! Evaluate OPTIONAL presence on the host and pass a plain scalar into the

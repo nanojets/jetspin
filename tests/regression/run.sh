@@ -130,7 +130,8 @@ prepare_case() {
         "$destination/input.dat"
     if [ "$case_number" -eq 4 ]; then
         # Force the stochastic Platen case above the 10-bead minimum chunk,
-        # so both ranks consume their own part of the shared Gaussian block.
+        # so both ranks integrate beads; since 2026-10-06 both read the
+        # serial run's slice of the sequential Gaussian pool.
         sed -i 's/^[[:space:]]*points[[:space:]].*/ points 25/' \
             "$destination/input.dat"
         sed -i 's/^[[:space:]]*initial length[[:space:]].*/ initial length 0.2d0/' \
@@ -182,9 +183,10 @@ while [ "$case_number" -le "$last_case" ]; do
         comparison_rtol=$openacc_rtol
         comparison_atol=$openacc_atol
         if [ "$case_number" -eq 8 ]; then
-            # Maxwell evaporation is numerically sensitive to the GPU
-            # reduction order in the Coulomb sum. Keep the strict default
-            # for the other cases and use a documented case-specific bound.
+            # Historical bound: until 2026-10-05 every Coulomb sum ran on the
+            # GPU and the evaporating Maxwell trajectory amplified its
+            # reduction order. The cases now stay below the device gate (at
+            # most 25 beads), so the OpenACC build runs the host code here.
             comparison_rtol=$openacc_evap_rtol
             comparison_atol=$openacc_evap_atol
             comparison_ignore_columns='--ignore-columns n,curn,curc'

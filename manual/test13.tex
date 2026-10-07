@@ -7,9 +7,11 @@ An intentionally artificial nozzle velocity of 2,000 cm/s forces multiple
 topology events during a short 1,000-step run. Its input is stored in
 \texttt{examples/input-13/input.dat}.
 
-Both call-scoped and persistent executions contain 13 insertions and 13
-removals, finish with 1,024 active beads, and remain between 1,023 and 1,025
-active beads. A
+The CPU build and the OpenACC device step make 13 insertions and 13
+removals at the same steps, finish with 1,024 active beads, and remain
+between 1,023 and 1,025 active beads; the original call-scoped and
+persistent paths that preceded the device step made the same 13 insertions
+and 13 removals. A
 structured \texttt{Topology event:} line is printed whenever insertion or
 removal occurs.
 
@@ -23,21 +25,42 @@ execute on the device. One serial kernel decides release, insertion,
 capacity exhaustion, and removal, and the host receives the outcome as one
 20-byte record per step, plus the two new tail records only when insertion
 occurs. Removed records are synchronized individually for output and cleared
-on both host and device. Reallocation beyond the reserved capacity and
-general compaction remain future work. An initial call-scoped NVFORTRAN 24.3
+on both host and device. This run stays within its reserve; capacity growth,
+which reallocates the arrays on the host and rebuilds the device mapping, is
+exercised by Test Case 15. In version 2.0 this is the common device
+step of all RK runs. An initial call-scoped NVFORTRAN 24.3
 and NVIDIA A30 measurement required 40.659696 s on CPU and 3.834931 s with
 OpenACC. The bounded persistent path with host insertion required
 2.829376 s, and device-side insertion reduced this to 2.623558 s, or
-381.162 steps/s, before the changes of 1 October 2026.
+381.162 steps/s, before the nozzle-insertion fix described below. With the
+present Coulomb kernel Test Cases 13 and 14, like Test Cases 9--12, run 4.2
+to 4.8 times faster than with the previous one
+(Sec.~\ref{sec:Test-Case-9}).
 
-The persistent A30 run reproduces the 26 CPU topology events step for step,
+The A30 run reproduces the 26 CPU topology events step for step,
 and its statistics agree with the CPU within the paired tolerance
-$3\times10^{-4}$.  Until 1 October 2026 its insertions fell progressively
+$3\times10^{-4}$.  Before the nozzle-insertion fix, made during the
+development of version 2.0, the insertions of the persistent path fell progressively
 earlier (step 593 instead of 600 for the seventh): the persistent path placed
 the blocked nozzle bead only when it was created and smoothed its charge on
 the stale host copy, so the device Coulomb sum saw a full charge at the
 nozzle.  That drift had been attributed to GPU RK4 rounding.  With the
 environment variable \texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT=1}, JETSPIN writes
-the complete active state at every topology event for such comparisons, and
-\texttt{JETSPIN\_OPENACC\_DISABLE\_PERSISTENT=1} restores the call-scoped
-path.
+the complete active state at every topology event to
+\texttt{topology-state.dat} for such comparisons, and
+\texttt{JETSPIN\_OPENACC\_DISABLE\_PERSISTENT=1} keeps the device step
+closed, so that the OpenACC build runs the CPU code (with the Coulomb sums
+offloaded from 128 active beads).
+
+The directory \texttt{tests/performance/dynamic/} holds the reference event
+stream \texttt{topology-events.txt} (the historical streams of the
+persistent paths are in the other \texttt{topology-events*.txt} files) and
+the comparison tools. The command
+\texttt{tests/performance/dynamic/compare.sh CPU/run.log GPU/run.log
+CPU/statout.dat GPU/statout.dat} checks the \texttt{Topology event:} lines
+of both logs against the reference stream and compares the two statistics
+files with relative tolerance $3\times10^{-4}$ and absolute tolerance
+$10^{-6}$ (the environment variables \texttt{RTOL} and \texttt{ATOL}
+change them); \texttt{compare\_state.py} compares, event by event, two
+\texttt{topology-state.dat} files written with
+\texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT=1}.

@@ -1,7 +1,17 @@
 \section{Test Case 2: 1-D case with bead insertion at the nozzle activated}
 
-This input file (located in the \textit{input-2} sub-directory) provides
-the dimensionless parameter values $Q=12$, $V=2$ and $F_{ve}=12$,
-as in the previous test case, but here we have activated the injection
-of new beads by the directive \texttt{inserting yes} in the input
-file.
+This input file (located in the \textit{input-2} sub-directory) keeps the
+material parameters, the jet radius at the nozzle, the collector distance and
+the external potential of Test Case 1, but starts from an initial segment of
+0.1 cm (0.319 cm in Test Case 1), which sets the length scale: the
+dimensionless parameters are $Q\simeq122.1$, $V\simeq6.38$ (printed as
+\texttt{Phi}) and $F_{ve}\simeq122.1$ in the definition of Reneker et al.\
+(1727.5 with the definition of Tab.~\ref{tab:tabella-adimensionale}). Here
+we have activated the injection of new beads by the directive
+\texttt{inserting yes} and their removal at the collector by
+\texttt{removing yes}; the run uses the fourth-order Runge--Kutta integrator
+(\texttt{integrator 3}) with a timestep of $10^{-7}$ s up to a final time of
+2 s. In the OpenACC build this one-dimensional case runs the CPU build's
+code, since one-dimensional systems do not take the device step; its
+Coulomb sum is computed on the GPU, with copies at every call, only while
+the jet has at least 128 active beads.

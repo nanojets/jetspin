@@ -1,1 +1,29 @@
 \section{Test Case 4: Three-D simulation in presence of a gas counterflow}
+
+The input in the \textit{input-4} sub-directory repeats the PVP parameters
+of Test Case 3 (Sec.~\ref{sec:Test-Case-3:}) and enables the aerodynamic
+drag (\texttt{system 4}, \texttt{airdrag yes}) with a gas velocity of
+$-1000$ cm/s, opposed to the main jet direction; its random term requires
+the stochastic Platen integrator (\texttt{integrator 4}).  Since version
+2.0 the case reads its stochastic forcing from the pre-generated Gaussian
+pool (Sec.~\ref{sec:Noise-pool}), in the CPU build as in the OpenACC one;
+before, it drew a Gaussian block at every step.  The noise realization
+therefore differs from earlier records, and the regression baselines of the
+case were regenerated.  Seed ensembles over the first 5 million steps (means
+over 0.03--0.05 s) show that the physics is unchanged: 8 CPU seeds with the
+pool and 8 with the former step-by-step noise agree within about one
+standard error for every observable (off-axis distance 2.959 cm, 114.6
+active beads, cone angle 21.0 degrees, path length 177.5 cm).
+
+The OpenACC build runs the CPU code, byte for byte, until the jet has 100
+beads (about 1.12 million steps, 0.011 s), and then the common Platen device
+step; the jet reaches the collector at about 0.015 s and then carries about
+115 beads.  The device step inserts a bead in the step
+that grows the arrays, as the CPU build does.  In a development build of
+version 2.0 the first insertion
+after the engagement came one step late, the run left the CPU trajectory
+there, and the A30 seed ensemble gave an off-axis distance lower by
+$4.5\times10^{-4}$ cm than the CPU one; now 24 A30 seeds and 24 CPU seeds
+agree within about one standard error for the off-axis distance, the bead
+count, the cone angle and the path length.  One NVIDIA A30 runs the 5
+million steps in 539 s, against 1454 s on one CPU core.

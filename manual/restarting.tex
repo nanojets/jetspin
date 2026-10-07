@@ -2,26 +2,28 @@
 
 \section{Restarting JETSPIN\label{sec:Restarting-JETSPIN}}
 
-A simulation can be restarted after normal termination or error termination,
-if the last was due to inadequate time allocation. In order to restart
+A simulation can be restarted after normal termination or after it was
+stopped by its time limit (the directives \textit{job time} and
+\textit{close time}, measured as elapsed wall-clock time; see Section
+\ref{sec:Input-file}). In order to restart
 a JETSPIN job the file \texttt{input.dat} is again required together
 with the file \texttt{restart.dat}, which is the exact copy of the
 \texttt{save.dat} file created by the previous job. In particular,
-the \texttt{save.dat} file was written by JETSPIN at regular time
-interval during the previous simulation. The file \texttt{save.dat}
+the \texttt{save.dat} file was written by JETSPIN every
+\texttt{restart dump} steps (100,000 by default) and at the end of the
+previous simulation. The file \texttt{save.dat}
 is \textit{not} human readable, and it should be renamed as \texttt{restart.dat},
 and located in the same directory of input file. If the user attempts
 to restart JETSPIN without the \texttt{restart.dat} file, the job
 will immediately exit with error. Note that the directive ``\textit{restart
 yes}'' needs to be added in input file in order to restart a previous
-JETSPIN job (see Section \ref{sec:Input-file}). Further, whenever
-a job is restarted, it is also possible to reset the accumulated statistical
-data, collected in the previous run, by adding the directive ``\textit{restart
-reset}'' in input file. It is worth stressing that JETSPIN will append
-new data to the files \texttt{statout.dat} and \texttt{traj.xyz} (and to
-the developer binary \texttt{statdat.dat}, if enabled), while
-all the other output files will be \textbf{overwritten} (included
-the \texttt{save.dat} file). Thus, the user is advised to keep backup
+JETSPIN job (see Section \ref{sec:Input-file}); the directive
+``\textit{restart reset}'' is still accepted but has no effect (see below).
+It is worth stressing that JETSPIN will append new data to the files
+\texttt{statout.dat} and \texttt{traj.xyz} (and to the developer binaries
+\texttt{statdat.dat}, \texttt{traj.dat} and \texttt{bead.dat}, if
+enabled), creating them if they are missing, while all the other output
+files will be \textbf{overwritten} (included the \texttt{save.dat} file). Thus, the user is advised to keep backup
 copies of the \texttt{restart.dat} file, noting the times it was written,
 to help you avoid going right back to the start of a simulation.
 
@@ -40,22 +42,29 @@ word, a record such as ``\textit{timesteps 15000}'' would be read as
 seconds. Further,
 the restarting procedure can be useful in the event of machine failure.
 Here, the job can be restarted in the same way from the \texttt{save.dat}
-file, which is written at regular time intervals in order to meet
+file, which is written every \textit{restart dump} steps in order to meet
 just such an emergency. We stress that the procedure is not foolproof
 in the last event, since the job could be crash while the \texttt{save.dat}
 file is being written.
 
-Since 2026-10-06 the restart file stores the bead state in double precision,
-followed by the state of the run that the beads do not carry: the position in
-the pre-generated Gaussian pool (Sec.~\ref{sec:Noise-pool}), the state of the
-random-number generator, and the counters of the dynamic refinement and of the
-anchor tagging. With the same \texttt{input.dat} and the same executable, a
-restarted simulation therefore continues the uninterrupted one exactly, with
-or without evaporation; the script \texttt{tests/restart/run.sh} checks this
-for Tests 24 and 25. The statistics accumulated since the last print are not
+Since version 2.0 the restart file stores the bead state in double
+precision, followed by the state of the run that the beads do not carry: the
+position in the pre-generated Gaussian pool (Sec.~\ref{sec:Noise-pool}) and
+the number of times it has been read through, the state of the
+random-number generator, the counters of the dynamic refinement and of the
+anchor tagging, and whether the device step of the OpenACC build has engaged.
+This block carries a version number (currently 2); a file of an earlier
+version, written by development builds, restarts with the device gate
+closed. If the saved state of the random-number generator has a size
+different from this executable's (as with another compiler), it is not
+restored and a warning is printed.
+With the same \texttt{input.dat} and the same executable, a restarted
+simulation therefore continues the uninterrupted one exactly, with or without
+evaporation; the script \texttt{tests/restart/run.sh} checks this for Tests
+12, 13, 16, 17, 24 and 25 and Examples 4 and 8. The statistics accumulated since the last print are not
 restored, so that every printed row is reproduced when the restart interval
 is a multiple of the print interval; the directive ``\textit{restart reset}''
-has no further effect. Restart files written before that date are still
-read, in single precision and without the state of the run, so that the
-random sequence restarts from the beginning; a simulation with evaporation
-could not be restarted before.
+has no further effect. Restart files written by JETSPIN 1.22 or earlier
+are still read, in single precision and without the state of the run, so
+that the random sequence restarts from the beginning; those versions could
+not restart a simulation with evaporation.

@@ -26,5 +26,12 @@ The complete-force and Coulomb-only development oracles cover this same
 Platen sequence. Both reproduce the CPU record exactly in all written rows
 and columns; their intentional per-stage transfers exclude them from timing
 measurements.
-The versioned results and comparison helper are stored in
-\texttt{tests/performance/integrators/}.
+In version 2.0 the step is the common Platen device step with the fused
+two-kernel tail and a kernel that freezes the beads reaching the collector
+(Sec.~\ref{sec:Test-Case-9}): 13 kernel launches per step, against 18 for
+the earlier fixed-set path, which did not freeze them, and the CPU and A30
+rows are identical. The versioned results, regenerated on 7 October 2026,
+and the comparison helper are stored in
+\texttt{tests/performance/integrators/}. With the present Coulomb kernel
+the A30 loop took 0.354 s, against 1.659 s with the previous kernel
+(Sec.~\ref{sec:Test-Case-9}).

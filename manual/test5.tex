@@ -1,1 +1,20 @@
 \section{Test Case 5: Three-D simulation with dynamic refinement}
+
+The input in the \textit{input-5} sub-directory repeats the PVP parameters
+of Test Case 3 (Sec.~\ref{sec:Test-Case-3:}) with the fourth-order
+Runge--Kutta integrator and activates the dynamic refinement of
+Sec.~\ref{sec:Dynamic-refinement} (\texttt{dynamic refinement yes}):
+segments longer than the threshold of 0.4 cm trigger a remeshing of the jet,
+at most once every $10^{-3}$ s.  Coulomb forces use the multiple timestep
+algorithm of Sec.~\ref{sec:Multiple-Timestep-Algorithm}
+(\texttt{multiple step every 100}).  Test Cases 24 and 25 use the same
+refinement cadence.  The OpenACC build runs this case with the CPU build's
+code, since its device step does not cover multiple-step Coulomb sums and
+refinement with the Runge--Kutta schemes yet.
+
+Over $10^{6}$ steps (0.01 s) the multiple timestep algorithm agrees with the
+direct summation (\texttt{multiple step no}) within $6\times10^{-8}$ in
+every printed row, with the same 88 insertions, and two MPI ranks agree with
+the serial run within $2\times10^{-8}$ (NVFORTRAN 24.3 and GFortran builds;
+see Sec.~\ref{sec:Multiple-Timestep-Algorithm} for the corrections of
+version 2.0).

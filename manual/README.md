@@ -14,7 +14,9 @@ The build uses `latexmk` when available. Otherwise it falls back to
 `Build manual` GitHub Actions workflow, which uploads the resulting PDF as
 an artifact.
 
-Run `make -C manual clean` to remove intermediate LaTeX files.
+Run `make -C manual clean` to remove intermediate LaTeX files; it keeps
+`manual.pdf`, which is tracked (until 2026-10-07 the `latexmk` branch ran
+`latexmk -C`, which also deleted it).
 
 ## Alternative build script
 

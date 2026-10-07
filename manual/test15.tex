@@ -8,8 +8,9 @@ repeated insertions in the short run. The first insertion exceeds
 at shutdown; the acceptance condition is a value greater than zero and at
 least one topology addition. Each subsequent reallocation grows the capacity
 by 100 slots; the initial allocation remains governed by the normal
-100-slot increment. The small persistent GPU topology path is also enabled so
-that capacity growth and device remapping are exercised. Acceptance checks
+100-slot increment. In the OpenACC build the common device step runs from the
+first step (100 beads), so that device capacity growth and remapping are
+exercised. Acceptance checks
 completion, topology additions, and a positive reallocation count rather than
 bead-for-bead trajectory identity. The input is stored in
 \texttt{examples/input-15/input.dat}.
@@ -22,11 +23,18 @@ before the host array changed, so the device either failed with a
 \textit{partially present} error or silently reused the previous buffer. The
 GPU run produced NaN from its first printed line with the bead count frozen at
 103, against 211 beads and a final abscissa of 35.99 cm on the CPU. Once the
-mapping is released correctly, the two agree to eight significant digits. This
+mapping was released correctly, the two runs had the same bead count and
+final abscissas equal to about eight significant digits (35.99200794 and
+35.99201023 cm); this comparison predates the collector rule, and since the
+rule all statistics rows are identical (below). This
 test is consequently a genuine regression guard for that defect, and a future
 tightening of its acceptance criterion is justified.  On an NVIDIA A30 both
-builds make 111 additions and two reallocations, and all statistics rows
-agree within $5.1\times10^{-5}$ relatively.  Two insertions fall one step
-later on the GPU, because the device path first grows the capacity and
-inserts at the next step, whereas the CPU reallocates and inserts in the
-same step.
+builds make 111 additions and two reallocations, every insertion at the
+same step, and all statistics rows are identical (within
+$4.3\times10^{-5}$ before the collector rule of version 2.0: the test
+does not remove beads, and its leading bead then crossed the collector
+plane, keeping its charge and its Coulomb interactions, and reached
+35.99 cm; it is now frozen on the collector at 16 cm).  During the
+development of version 2.0 two insertions fell one step later on the
+GPU, because the device path first grew the capacity and inserted at the
+next step, whereas the CPU reallocates and inserts in the same step.

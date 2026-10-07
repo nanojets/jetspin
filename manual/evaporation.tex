@@ -16,6 +16,9 @@ model introduced by Yarin, Koombhongse and Reneker
 \end{equation}
 where $a_i$ is the local jet radius, $\nu_a$ is the kinematic viscosity
 of air, and $D_a$ is the diffusion coefficient of solvent vapour in air.
+The speed $|\mathbf{v}_i|$ in $Re$ is that of the bead in the laboratory
+frame: unlike the aerodynamic drag, it does not subtract the air velocity
+of \texttt{airdrag airvelocity}.
 For a discrete jet element of length $l_i$ and volume
 $V_i=\pi a_i^2l_i$, the corresponding evaporation equation is
 \begin{equation}
@@ -40,15 +43,29 @@ Eq.~\ref{eq:evap-volume-dimensional} is
 \end{equation}
 If $c_{s,\mathrm{eq}}(T)$ is not supplied explicitly, JETSPIN evaluates
 it from the temperature using the water-vapour correlation of Seaver,
-Galloway and Manuccia used by Yarin et al.  If $D_a$ is not supplied,
+Galloway and Manuccia used by Yarin et al., as the ratio
+$c_{s,\mathrm{eq}}(T)=p_{\mathrm{sat}}(T)/1013.25\,\mathrm{mbar}$ of
+the saturation pressure of water vapour to one atmosphere, where
+\begin{equation}
+ \frac{p_{\mathrm{sat}}(T)}{\mathrm{mbar}}=\sum_{k=0}^{6}a_k\vartheta^k,
+ \qquad
+ \vartheta=\frac{T}{\mathrm{K}}-273.15,
+ \label{eq:evap-psat}
+\end{equation}
+with $a_0=6.107799961$, $a_1=4.436518521\times10^{-1}$,
+$a_2=1.428945805\times10^{-2}$, $a_3=2.650648731\times10^{-4}$,
+$a_4=3.031240396\times10^{-6}$, $a_5=2.034080948\times10^{-8}$ and
+$a_6=6.136820929\times10^{-11}$.  If $D_a$ is not supplied,
 the same atmospheric-pressure parametrization is used,
 \begin{equation}
  D_a=0.211\left(\frac{T}{273.15\,\mathrm{K}}\right)^{1.94}
  \quad \mathrm{cm^2/s},
  \label{eq:evap-default-diffusivity}
 \end{equation}
-corresponding to air at one atmosphere.  A different diffusivity can be
-specified explicitly in the input file.
+corresponding to air at one atmosphere.  Both defaults are values for
+water; for another solvent $c_{s,\mathrm{eq}}(T)$ and $D_a$ should be
+specified explicitly in the input file.  The computed values are printed
+as warnings 102 and 105, respectively.
 
 \subsection{JETSPIN nondimensionalization}
 
@@ -146,6 +163,23 @@ constitutive equation is
  \label{eq:evap-maxwell}
 \end{equation}
 which is Eq.~(39) of Yarin et al. written in the JETSPIN scaling.
+JETSPIN integrates the general form
+\begin{equation}
+ \frac{d\bar\sigma_i}{d\bar t}=
+ \frac{1}{\theta_i/\theta_0}
+ \left[
+ \bar\sigma_Y+\bar k_{\upsilon e}\,\frac{\mu_i}{\mu_0}
+ \left(\frac{1}{\bar l_i}\frac{d\bar l_i}{d\bar t}\right)^{n_{\upsilon e}}
+ -\bar\sigma_i
+ \right],
+ \label{eq:evap-maxwell-hb}
+\end{equation}
+with the yield stress $\bar\sigma_Y$ (\texttt{yield stress}, zero by
+default) and the Herschel--Bulkley consistency $\bar k_{\upsilon e}$
+and flow index $n_{\upsilon e}$ of Sec.~\ref{subsec:Introduction-of-dimensionless}
+(both equal to one without \texttt{hbfluid yes}); only the consistency
+term is multiplied by $\mu_i/\mu_0$.  Eq.~\ref{eq:evap-maxwell} is the
+case $\bar\sigma_Y=0$, $\bar k_{\upsilon e}=n_{\upsilon e}=1$.
 
 \subsection{Kelvin--Voigt extension with concentration-dependent properties}
 
@@ -210,7 +244,11 @@ $\dot c_p=0$, Eq.~\ref{eq:evap-kv-product} reduces exactly to the
 pre-existing JETSPIN Kelvin--Voigt differential equation.  At the Yarin
 solidification cutoff, $\dot V_i=\dot c_{p,i}=0$, so $r_\mu$ and $r_G$
 remain frozen.  Euler, Heun (RK2) and classical RK4 integrations are
-supported for the coupled Kelvin--Voigt/evaporation model.
+supported for the coupled Kelvin--Voigt/evaporation model; \texttt{integrator 4}
+stops the run at the first step (Sec.~\ref{sec:Integration-schemes}).
+With Maxwell rheology, evaporation supports all four integrators,
+including the stochastic Platen scheme (\texttt{integrator 4}) with
+\texttt{system 4}.
 
 \subsection{Compatibility with dynamic refinement}
 
@@ -222,7 +260,13 @@ remeshing their totals over the refined portion of the jet are stored;
 after interpolation the two volume fields are reconstructed and each is
 renormalized to its own pre-refinement total.  Thus refinement preserves
 both the reference material represented by the beads and the current
-volume after solvent loss.
+volume after solvent loss.  After the renormalization the reference
+volume is raised where needed to a minimum bead radius of 1~nm, and the
+instantaneous volume to the floor $V_i\geq\mathrm{evlim}\,V_i^0$ of
+Eq.~\ref{eq:evap-evlim}, by a redistribution that preserves the two
+totals (Sec.~\ref{subsec:Refinement-robustness}); if a floor cannot
+be met with the total of the refined portion, the run stops with error
+21 (radius) or error 20 (evlim).
 
 After remeshing the local polymer concentration continues to be evaluated
 from Eq.~\ref{eq:evap-cp}, using the newly remapped local ratio
@@ -246,8 +290,12 @@ JETSPIN therefore uses
  \label{eq:evap-massratio}
 \end{equation}
 in the acceleration terms.  In particular, the external-electric,
-Coulomb, viscoelastic, surface-tension and aerodynamic accelerations
-are evaluated with the instantaneous mass.  This is the discrete
+Coulomb, viscoelastic, surface-tension and, for Maxwell rheology,
+aerodynamic accelerations are evaluated with the instantaneous mass;
+the Kelvin--Voigt equations, with or without evaporation, have no
+air-drag term.  The Coulomb accelerations use the instantaneous mass
+also in every summation of the multiple timestep algorithm
+(Sec.~\ref{sec:Multiple-Timestep-Algorithm}).  This is the discrete
 counterpart of the modified momentum balance in Eqs.~(35a)--(35d) of
 Yarin et al.
 
@@ -264,7 +312,15 @@ condition on the volume represented by a bead is
  \frac{V_i}{V_i^0}=\frac{c_{p,0}}{1-0.1}=\frac{c_{p,0}}{0.9}.
  \label{eq:evap-cutoff}
 \end{equation}
-The JETSPIN integrators enforce Eq.~\ref{eq:evap-cutoff} at every
-intermediate and final integration stage.  Once this limit is reached,
+The JETSPIN integrators enforce the corresponding floor
+\begin{equation}
+ \frac{V_i}{V_i^0}\geq\mathrm{evlim}=\min\left(1,\frac{c_{p,0}}{0.9}\right)
+ \label{eq:evap-evlim}
+\end{equation}
+at every intermediate and final integration stage.  Once this limit is reached,
 $V_i$, $c_{p,i}$, $\mu_i$, $\theta_i$, and $G_i$ remain constant, as in
 the solidification cutoff adopted in Ref.~\cite{yarin2001bending}.
+For $c_{p,0}\geq0.9$ the floor is one and no solvent evaporates.  The
+initial polymer fraction must satisfy $0<c_{p,0}<1$, which the input
+reading does not check: $c_{p,0}=0$ makes the ratio $c_{p,i}/c_{p,0}$
+of Eq.~\ref{eq:evap-relaxation} undefined ($0/0$).

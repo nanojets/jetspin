@@ -4,18 +4,31 @@ The PDB file written by JETSPIN can be easily visualized in VMD software
 package. The first step is to download and install VMD which can be
 found at website: \href{http://www.ks.uiuc.edu/Research/vmd/}{http://www.ks.uiuc.edu/Research/vmd/}.
 As VMD is installed, the PDB file can be opened using VMD: \textquotedbl{}vmd
-frame000001.pdb\textquotedbl{} in the terminal or click on \textquotedbl{}file\textquotedbl{}
+frame000001.pdb\textquotedbl{} in the terminal (frame000001 is the first
+frame of a new run), or, together with its bonds, \textquotedbl{}vmd -psf
+frame000001.psf -pdb frame000001.pdb\textquotedbl{}; alternatively, click on \textquotedbl{}file\textquotedbl{}
 in the main white box and then on \textquotedbl{}load molecule\textquotedbl{}
 (see Fig \ref{fig:vmd1}), browse for your PDB file frame000001.pdb
 and load it. In order to load the topological structure of the jet,
 it is possible to load the PSF file written by JETSPIN alongside the
-PDF file: right click on the just uploaded file (e.g. \textquotedbl{}frame000001.pdb\textquotedbl{})
+PDB file: right click on the just uploaded file (e.g. \textquotedbl{}frame000001.pdb\textquotedbl{})
 in the white box in the middle of the \textquotedbl{}MD Main\textquotedbl{}
 window, and select \textquotedbl{}Load Coordinates into Molecule\textquotedbl{}
 pull-down menu option (see Fig \ref{fig:vmd2}). Hence, browse for
 the PSF file (frame000001.psf) defining the bonds for each pair of
 consecutive jet beads, and load it. Finally, the jet will be displayed
 in the graphics window.
+
+The developer binary trajectory \texttt{traj.dat} (directive
+\texttt{print binary}, Tab \ref{tab:inputlist}) can be converted for VMD
+by the tool \texttt{tools/traj2dcd.f90}, which reads the parameter header
+and the frames of any \texttt{style} (1--9) written by JETSPIN, converts
+the coordinates to centimeters, and writes \texttt{trajout.xyz} (a single
+frame with the largest number of beads, used as structure) and the
+trajectory \texttt{trajout.dcd}. It is compiled and run in the directory
+holding \texttt{traj.dat}, e.g. \textquotedbl{}gfortran -O2 -o traj2dcd.x
+traj2dcd.f90; ./traj2dcd.x\textquotedbl{}, and the result is opened by
+\textquotedbl{}vmd trajout.xyz -dcd trajout.dcd\textquotedbl{}.
 
 \begin{figure}
 \begin{centering}

@@ -6,27 +6,41 @@ The evaporation directives listed in Table~\ref{tab:inputlist} activate
 and parameterize the model described in Section~\ref{sec:Evaporation}:
 \begin{description}
  \item[\texttt{evaporation yes}] activate solvent evaporation and the
- concentration-dependent rheology.
+ concentration-dependent rheology (default: no; \texttt{evaporation no}
+ is also accepted). With \texttt{evaporation yes} the directives
+ \texttt{polymer frac}, \texttt{airviscosity}, \texttt{temperature},
+ \texttt{umidity}, \texttt{bconstant} and \texttt{mconstant} are
+ mandatory: a missing one gives the warning listed below and the run
+ stops.
  \item[\texttt{evaporation polymer frac} $f$] initial polymer mass
- fraction $c_{p,0}$.
+ fraction $c_{p,0}$ (mandatory, warning 97). It must satisfy
+ $0<c_{p,0}<1$, which is not checked; for $c_{p,0}\geq0.9$ no solvent
+ evaporates (Eq.~\ref{eq:evap-evlim}).
  \item[\texttt{evaporation airviscosity} $f$] kinematic viscosity of
- air $\nu_a$ in $\mathrm{cm^2/s}$.
- \item[\texttt{evaporation temperature} $f$] temperature in kelvin.
+ air $\nu_a$ in $\mathrm{cm^2/s}$ (mandatory, warning 98). It is
+ independent of \texttt{airdrag airviscosity}, which enters only the
+ aerodynamic drag.
+ \item[\texttt{evaporation temperature} $f$] temperature in kelvin
+ (mandatory, warning 99, also when \texttt{relumidity} and
+ \texttt{diffusivity} are both given).
  \item[\texttt{evaporation umidity} $f$] relative humidity $RH$ in the
- interval $[0,1]$. The historical spelling \texttt{umidity} is retained
- for input-file compatibility.
+ interval $[0,1]$ (mandatory, warning 100; a value outside the interval
+ gives warning 106 and the run stops). The historical spelling
+ \texttt{umidity} is retained for input-file compatibility.
  \item[\texttt{evaporation diffusivity} $f$] vapour diffusion coefficient
  $D_a$ in $\mathrm{cm^2/s}$. If omitted,
- Eq.~\ref{eq:evap-default-diffusivity} is used at one atmosphere.
+ Eq.~\ref{eq:evap-default-diffusivity} for water vapour is used at one
+ atmosphere, and the value is printed as warning 105.
  \item[\texttt{evaporation relumidity} $f$] optional value of the
  saturation-vapour ratio $c_{s,\mathrm{eq}}(T)$. If omitted, it is
- evaluated from \texttt{evaporation temperature}. The historical keyword
- is retained for input-file compatibility.
+ evaluated for water from \texttt{evaporation temperature}
+ (Eq.~\ref{eq:evap-psat}), and the value is printed as warning 102.
+ The historical keyword is retained for input-file compatibility.
  \item[\texttt{evaporation bconstant} $f$] parameter $B$ in
- Eq.~\ref{eq:evap-viscosity}.
+ Eq.~\ref{eq:evap-viscosity} (mandatory, warning 103).
  \item[\texttt{evaporation mconstant} $f$] exponent $m$ in
- Eq.~\ref{eq:evap-viscosity}.
+ Eq.~\ref{eq:evap-viscosity} (mandatory, warning 104).
  \item[\texttt{evaporation tconstant} $f$] exponent
  $t_{\mathrm{ev}}$ in the generalized relaxation-time law; use $f=1$
- to reproduce Yarin et al. (2001).
+ to reproduce Yarin et al. (2001) (default: 1).
 \end{description}

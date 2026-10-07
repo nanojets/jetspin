@@ -3,11 +3,13 @@
 \section{Random noise\label{sec:Random-noise}}
 
 In JETSPIN, it is possible to add a random noise to Eq. \ref{eq:force-EOM}
+(directive \texttt{noise yes}, only with \texttt{system 4} and
+\texttt{integrator 4}, warnings 94 and 95)
 in order to model the instability at the nozzle triggering the bending
 motion. This procedure can be used as an alternative to (or in junction
 with) the strategy presented in Section \ref{sec:Perturbations-at-the}.
 
-In particular, collected in $\vec{\textbf{f}}_{old,i}=\vec{\textbf{f}}_{el,i}+\vec{\textbf{f}}_{c,i}+\vec{\textbf{f}}_{\upsilon e,i}+\vec{\textbf{f}}_{st,i}+\vec{\textbf{f}}_{g,i}+\vec{\textbf{f}}_{diss,i}+\vec{\textbf{f}}_{rand}$
+In particular, collected in $\vec{\textbf{f}}_{old,i}=\vec{\textbf{f}}_{el,i}+\vec{\textbf{f}}_{c,i}+\vec{\textbf{f}}_{\upsilon e,i}+\vec{\textbf{f}}_{st,i}+\vec{\textbf{f}}_{g,i}+\vec{\textbf{f}}_{diss,i}+\vec{\textbf{f}}_{rand,i}$
 all the force terms, we modify Eq. \ref{eq:force-EOM} as
 \begin{equation}
 m_{i}\frac{d\vec{\boldsymbol{\upsilon}}_{i}}{dt}=\vec{\textbf{f}}_{old,i}-m_{i}\gamma_{rand}\vec{\boldsymbol{\upsilon}}_{i}+\sqrt{2m_{i}^{2}D_{rand}}\vec{\boldsymbol{\eta}_{i}}(t),
@@ -18,30 +20,49 @@ coefficient in the velocity space (in cgs units, $\text{cm}^{2}/\text{s}^{3}$)
 and as $\gamma_{rand}$ a dissipative term ($\text{s}^{-1}$). We
 highlight that $D_{rand}$ sets the width of the fluctuations. In
 particular, it is possible to demonstrate \cite{gillespie2012simple}
-that the variance $\sigma_{rand}\left(t\right)^{2}$ of the velocity
+that the variance $\sigma_{rand}\left(t\right)^{2}$ of each Cartesian
+component $\upsilon_{i,\alpha}$ ($\alpha=x,y,z$) of the velocity
 $\vec{\boldsymbol{\upsilon}}_{i}$ ($\text{cm}^{2}/\text{s}^{2}$)
 due to only the random and dissipative terms at time $t$, computed
-over an ensemble of stochastic trajectories, is equal to $\sigma_{rand}\left(t\right)^{2}\equiv$$<\left[\vec{\boldsymbol{\upsilon}}_{i}-<\vec{\boldsymbol{\upsilon}}_{i}>\right]^{2}>$
+over an ensemble of stochastic trajectories, is equal to $\sigma_{rand}\left(t\right)^{2}\equiv$$<\left[\upsilon_{i,\alpha}-<\upsilon_{i,\alpha}>\right]^{2}>$
 $=\left(D_{rand}/\gamma_{rand}\right)\left(1-e^{-2\gamma_{rand}t}\right)$,
 and, consequently, $\lim\limits _{t\rightarrow\infty}\sigma_{rand}\left(t\right)^{2}=D_{rand}/\gamma_{rand}$,
 which is sometimes called fluctuation-dissipation Langevin relation.
 In \texttt{input} file, the user should specified both $D_{rand}$
-and $\sigma_{rand}{}^{2}$. The $\gamma_{rand}$ is automatically
+(\texttt{noise diffusivity}) and the variance per Cartesian component
+$\sigma_{rand}{}^{2}$ (\texttt{noise variance}). The $\gamma_{rand}$ is automatically
 set to be equal to $\gamma_{rand}=D_{rand}/\sigma_{rand}{}^{2}$ by
 exploiting the Langevin relation.
 
 \subsection{Pre-generated Gaussian pool\label{sec:Noise-pool}}
 
 When the stochastic Platen integrator (\texttt{integrator 4}) runs a
-three-dimensional serial jet that the OpenACC build can keep on the device
-(the fixed 1,000-bead benchmarks and the dynamic path with insertion,
-removal and dynamic refinement, with or without evaporation), its Gaussian
-numbers are not drawn
-during the run. Rank zero generates a pool of values once, before the time
-loop, and the OpenACC build copies it to the device once; CPU and GPU read
-the same values. Every time step reads the next $6\,n_{\mathrm{active}}$
-values, two draws for each of the three components of every active bead.
+three-dimensional jet (\texttt{system 4}) with a model that the OpenACC
+build can keep on the device (fixed bead sets and jets with insertion and
+removal, with or without dynamic refinement and evaporation), its
+Gaussian numbers are not drawn during the run, in every build and for any
+number of MPI ranks. Rank zero generates a pool of values once, before the
+time loop, and broadcasts it, and the OpenACC build copies it to the device
+once; CPU and GPU, serial and parallel runs read the same values. Every time
+step reads the next $6\,n_{\mathrm{active}}$ values, two draws for each of
+the three components of every active bead, indexed by the global bead
+number. The pool is not used with multiple-step Coulomb sums, a
+time-dependent field (\texttt{external potential type} other than 0),
+\texttt{dragvel yes}, bead tracking (\texttt{print binary} $f$
+\texttt{style 4}), a fixed bead set with \texttt{removing yes} and no
+insertion, or a developer option (see \texttt{device\_step\_supported} in
+\texttt{source/device\_step\_mod.f90}). In these Platen runs rank zero draws
+the Gaussian numbers step by step and broadcasts them, and
+\texttt{noise pool} has no effect.
 
+For a fixed topology the pool holds only the values the run needs, up
+to the requested size:
+\[
+\min\left(N_{\mathrm{steps}},\left\lfloor \frac{N_{\mathrm{pool}}}{6\,n_{\mathrm{active}}}\right\rfloor\right)\cdot6\,n_{\mathrm{active}}
+\]
+values for a run of $N_{\mathrm{steps}}$ time steps, so that a run
+shorter than one period never repeats its noise; a dynamic topology
+(bead insertion) takes exactly $N_{\mathrm{pool}}$ values.
 The pool is read cyclically, so the noise sequence repeats with a period of
 \begin{equation}
 N_{\mathrm{period}}=\frac{N_{\mathrm{pool}}}{6\,n_{\mathrm{active}}}
@@ -54,8 +75,13 @@ $2\times10^{9}$. A larger pool lengthens the period proportionally at a cost
 of 8 bytes per value on the host and again on the GPU ($4\times10^{8}$ values
 need about 3~GiB on each side). Whether the period is adequate is a choice
 left to the user. The run log reports the pool once, as
-\texttt{Gaussian history pool: values=}$N_{\mathrm{pool}}$ \texttt{covers}
-$N$ \texttt{steps at} $n$ \texttt{beads}; for a dynamic topology $n$ is the
-initial capacity rather than the active count. Since 2026-10-06 the pool position is saved in the restart
+\texttt{Gaussian history pool: values=}$N_{v}$ \texttt{covers}
+$N$ \texttt{steps at} $n$ \texttt{beads}, with $N_{v}$ the number of
+values held; for a dynamic topology $n$ is the
+initial capacity rather than the active count. The pool position is saved in the restart
 file: a restarted run regenerates the pool from the seed of the input file and
-continues from the saved position (Sec.~\ref{sec:Restarting-JETSPIN}).
+continues after the same number of consumed values
+(Sec.~\ref{sec:Restarting-JETSPIN}). A pool of another size, set by
+\texttt{noise pool} or, for a fixed jet, by a longer \texttt{final time},
+holds the same sequence up to the shorter size, so that the restarted run
+continues as an uninterrupted run with the new pool would.

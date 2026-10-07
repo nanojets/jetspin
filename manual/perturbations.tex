@@ -3,12 +3,15 @@
 \section{Perturbations at the nozzle\label{sec:Perturbations-at-the}}
 
 The spinneret nozzle is represented by a single mass-less point of
-charge $\bar{q}$ fixed at $x=0$ (nozzle bead). Its charge $\bar{q}$
-is assumed equal to the mean charge value of the jet beads. Such charged
+charge $\bar{q}$ fixed at $x=0$ (nozzle bead). Its charge is the
+nominal bead charge $\bar{q}=\rho_{V}\pi a_{0}^{2}l_{step}$ (Sec
+\ref{subsec:Introduction-of-dimensionless}). Such charged
 point can be also interpreted as a small portion of jet which is fixed
 to the nozzle. In JETSPIN it is possible to add small perturbations
 to the $y_{n}$ and $z_{n}$ coordinates of the nozzle bead in order
-to model fast mechanical oscillations of the spinneret\cite{coluzza2014ultrathin}.
+to model fast mechanical oscillations of the spinneret\cite{coluzza2014ultrathin}
+(directive \texttt{perturb yes}, only with \texttt{system 3} and
+\texttt{system 4}).
 Given the initial position of the nozzle
 
 \begin{subequations}
@@ -37,5 +40,9 @@ the equations of motion for the nozzle bead are
 
 \end{subequations}
 
-where $A$ denotes the amplitude of the perturbation, while $\omega$
-and $\varphi$ are its frequency and initial phase, respectively.
+where $A$ denotes the amplitude of the perturbation (\texttt{perturb ampl}),
+while $\omega$ and $\varphi$ are its angular frequency and initial
+phase, respectively. The value of \texttt{perturb freq} is used directly
+as the angular frequency $\omega$ in rad/s, without a factor $2\pi$.
+The initial phase $\varphi$ is drawn uniformly in $[0,2\pi)$ at the
+start of the run by rank zero from the random seed of the input file.

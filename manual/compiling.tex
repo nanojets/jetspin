@@ -59,8 +59,8 @@ make -C source -f ../build/Makefile nvfortran-openacc
 
 The OpenACC GPU and host-validation targets expose the standard
 \texttt{\_OPENACC} preprocessing macro.
-Accelerator imports, initialization, Coulomb dispatch, and equation-of-motion
-dispatch are enclosed by this macro. CPU targets preprocess the same sources
+Accelerator imports, initialization, Coulomb dispatch, and the dispatch to
+the device step are enclosed by this macro. CPU targets preprocess the same sources
 without defining it, so accelerator calls are absent from their compiled
 translation units rather than being retained as no-op runtime branches.
 
@@ -73,6 +73,31 @@ make -C source -f ../build/Makefile nvfortran-openacc \
   GPUCC=90 CUDA_VERSION=12.3
 \end{verbatim}
 
+HPC SDK 25.5 ships the CUDA 11.8 and 12.9 toolkits, so it is used with
+\texttt{CUDA\_VERSION=12.9}; such a build also runs with a driver of the
+CUDA 12.3 generation. NVFORTRAN 24.3 at \texttt{-O3} rewrites a division
+$x/y$ as $x\cdot(1/y)$ (\texttt{-Mrecip-div}), whereas 25.5, like GFortran,
+rounds divisions exactly: the results of the two compilers differ in the
+last digits, and trajectories that are sensitive to them separate. An
+OpenACC run should be compared with a CPU build of the same compiler
+version. NVFORTRAN 24.3 is the reference compiler of the GPU records of
+the test cases; 25.5 passes the same checks.
+
+Further Make variables, given on the command line like \texttt{GPUCC},
+select the executable name (\texttt{EX}, default \texttt{main.x}) and its
+directory (\texttt{BINROOT}, default \textit{execute}), the MPI wrapper
+(\texttt{MPIFC}, default \texttt{mpif90}) and the GFortran MPI option
+\texttt{MPI\_COMPAT\_FLAG} (default \texttt{-fallow-argument-mismatch};
+a GFortran older than version 10 needs \texttt{-Wno-argument-mismatch}),
+the NVIDIA compiler (\texttt{NVFORTRAN}), and extra preprocessor flags for
+the \texttt{nvfortran*} targets only (\texttt{FPPFLAGS\_EXTRA}, for the
+development macros; the oracle and comparison targets below set their
+own). Make also takes the variables that have a default (all but
+\texttt{EX} and \texttt{BINROOT}) from the environment, so that a
+\texttt{CUDA\_VERSION} exported by another tool reaches the build. The
+environment variables that control an OpenACC run are described in
+Sec.~\ref{sec:Running-GPU}.
+
 Target \texttt{nvfortran-openacc-host} compiles the OpenACC control path
 for host execution. It is intended for compiler and numerical validation when
 an NVIDIA device is unavailable and is not a GPU performance build. Before a
@@ -80,14 +105,15 @@ device run, \texttt{nvidia-smi} and \texttt{nvaccelinfo} should both
 confirm that the selected GPU is visible.
 
 Target \texttt{nvfortran-openacc-force-oracle} is a model-independent,
-development-only GPU build. For supported Euler, RK2, RK4, and fixed-topology
-Platen paths, with or without evaporation, it downloads the current force
-evaluation state, evaluates the complete trusted host equations, uploads only
-their derivatives, and leaves integration updates and dynamic topology on the
-GPU. It enables the single
-\texttt{JETSPIN\_DEV\_HOST\_FORCE\_ORACLE} macro and covers non-evaporative
-Platen, Maxwell evaporative Platen, and both deterministic evaporation
-rheologies.
+development-only GPU build. At every force evaluation of the device step,
+in every configuration that the step supports (Sec.~\ref{sec:Running-GPU}),
+it downloads the current stage, evaluates the complete trusted host
+equations, and uploads only their derivatives. Integration updates, dynamic
+topology, and the tail of the Platen step
+(\texttt{accelerator\_platen\_update} and
+\texttt{accelerator\_platen\_end\_step}, with the final stress
+derivative) stay on the GPU. It enables the single
+\texttt{JETSPIN\_DEV\_HOST\_FORCE\_ORACLE} macro.
 
 Target \texttt{nvfortran-openacc-coulomb-oracle} is the narrower diagnostic.
 It enables only \texttt{JETSPIN\_DEV\_HOST\_COULOMB\_ORACLE}, transfers the
@@ -113,22 +139,17 @@ evaporated volume, mass, and charge that follows the Akima interpolation
 (see Sec.~\ref{sec:Dynamic-refinement}). None of these targets is intended
 for performance measurements.
 
-Until 2026-10-05, the separate target
-\texttt{nvfortran-openacc-dynamic-platen} extended the device-resident path
-to non-evaporative Platen runs started from a single bead. It was removed:
-\texttt{nvfortran-openacc} now follows the evaporative case for these runs
-too, and both read the same pre-generated
-Gaussian pool as the CPU builds (Sec.~\ref{sec:Noise-pool}).
-
 On Windows system we advice the user to compile JETSPIN under the
 command-line interface Cygwin \cite{racine2000cygwin}. Finally, the
 binary executable file can be run in the \textit{execute} sub-directory.
-Note that a FORTRAN 90 compiler is necessary in order to compile JETSPIN.
-Further, a Message Passing Interface Implementation should be also
-present, if the user wishes to compile JETSPIN in parallel mode. We
-recommend GFORTRAN as FORTRAN 90 compiler, but IFORT-Intel(R) Fortran
-Compiler or G95 can also be used. As Message Passing Interface Implementation,
-we suggest to use that provided by the Open MPI Project.
+Note that a Fortran compiler that supports the few Fortran 2003 features
+used by JETSPIN (Sec.~\ref{sec:Structure}) is necessary in order to
+compile it. Further, a Message Passing Interface Implementation should be
+also present, if the user wishes to compile JETSPIN in parallel mode. The
+Makefile supports GFortran, Intel Fortran and NVIDIA NVFORTRAN; we
+recommend GFortran for the CPU builds and NVFORTRAN 24.3 for the OpenACC
+build. As Message Passing Interface Implementation, we suggest to use that
+provided by the Open MPI Project.
 
 \begin{table}[H]
 \begin{centering}

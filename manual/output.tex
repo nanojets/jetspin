@@ -1,7 +1,7 @@
 \section{Output files\label{sec:Output-files}}
 
 A series of specific directives causes the writing of output files
-(see Tab \ref{tab:inputlist}). In JETSPIN four kinds of output files can
+(see Tab \ref{tab:inputlist}). In JETSPIN five kinds of output files can
 be written: 1) the file \texttt{statout.dat} containing time-dependent
 statistical data of simulated process; 2) the file \texttt{traj.xyz}
 reporting the nanofiber trajectory in XYZ format file; 3) the files
@@ -11,7 +11,20 @@ reporting the nanofiber geometries in splitted PDB (Protein Data Bank)
 format files (a single file for each frame). Note that in the last
 case a topological file \texttt{frame\%06d.psf} in PSF (Protein Structure
 File) format will be printed alongside each pdb file. These two files
-(PDB and PSF) can be opened by VMD-Visual Molecular Dyanamics \cite{humphrey1996vmd}.
+(PDB and PSF) can be opened by VMD-Visual Molecular Dyanamics \cite{humphrey1996vmd};
+5) the binary restart file \texttt{save.dat}, written every
+\texttt{restart dump} steps and at the end of the run (Sec
+\ref{sec:Restarting-JETSPIN}). The developer binaries \texttt{traj.dat},
+\texttt{bead.dat} and \texttt{statdat.dat} are written only with the
+directives \texttt{print binary}, \texttt{print binary removed} and
+\texttt{printstat binary} (see Tab \ref{tab:inputlist}). With the
+environment variable \texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT=1}, the text
+file \texttt{topology-state.dat} records, at every insertion or removal,
+a line \texttt{event} \textit{step inpjet npjet active add} followed by
+one row per active bead (in reduced units). A restarted run appends
+to \texttt{statout.dat} (after a new three-line header block),
+\texttt{traj.xyz}, \texttt{statdat.dat}, \texttt{traj.dat} and
+\texttt{bead.dat}, creating them if they are missing.
 
 Various statistical data can be written on the text file \texttt{statout.dat},
 and the user can select them in input using the directive \texttt{printstat
@@ -19,7 +32,14 @@ list} followed by appropriate symbolic strings, whose the list with
 corresponding meanings is reported in Tab \ref{tab:outputlist}. The
 selected observables will be printed at time interval on the same
 line following the order specified in input file, preceded by the
-integration-step number. (The file \texttt{statdat.dat} is a different,
+integration-step number: each record is the step (format \texttt{i10})
+followed by one column per key (format \texttt{g20.10}). A three-line
+header beginning with \# names the columns at the top of the file (and
+again where a restarted run starts appending); on the terminal it is
+repeated every 100 records. In a new run the first record is written
+before the first integration step (step 0), then one every
+\texttt{print time}. (The file
+\texttt{statdat.dat} is a different,
 developer-only binary dump of all observables, written only with the
 directive \texttt{printstat binary}.) In the same way,
 a list of statistical data can be printed on computer terminal using
@@ -35,12 +55,35 @@ statistics, and scheduled output executed inside the loop are included. In
 MPI builds, ranks are synchronized at both boundaries and rank zero reports
 the elapsed duration of the slowest participating rank. This loop-only wall
 time is the recommended measurement for CPU, MPI, and accelerator performance
-comparisons.
+comparisons. The throughput counts the steps of the current run only (after
+a restart, the steps made before it are excluded).
+
+Besides the records of \texttt{print list}, rank zero prints a few log
+lines on the terminal (the complete list is in
+\texttt{docs/data/output.md}):
+\texttt{Gaussian history pool: values=}\textit{V} \texttt{covers}
+\textit{S} \texttt{steps at} \textit{N} \texttt{beads} before the loop of a run that reads the pre-generated
+Gaussian pool (Sec \ref{sec:Noise-pool}); in OpenACC builds,
+\texttt{OpenACC device step engaged (}\textit{scheme, model}\texttt{) at
+step} \textit{N} \texttt{with} \textit{M} \texttt{active beads} when the
+device step engages (\texttt{resumed} instead of \texttt{engaged} after a
+restart of an engaged run); \texttt{Topology event: step=}\textit{N}
+\texttt{add=}\textit{T/F} \texttt{remove=}\textit{R}
+\texttt{active=}\textit{M} at every step with an insertion or a removal;
+\texttt{Dynamic refinement event: ...}, followed by diagnostic lines, at
+every accepted refinement; at the end of the run, the totals
+\texttt{Topology additions}, \texttt{Topology removals} and
+\texttt{Array reallocations} (which include the steps made before a
+restart) and the final \texttt{Topology active beads}, then \texttt{Program closed
+correctly} and \texttt{CPU time = }\textit{T} \texttt{seconds on}
+\textit{N} \texttt{CPU(s)}, where \textit{T} is the processor time of rank
+zero since the program started (not the wall-clock time) and \textit{N}
+the number of MPI ranks.
 
 For performance diagnosis, setting the environment variable
 \texttt{JETSPIN\_PROFILE=1} prints an optional wall-clock breakdown for the
-integrator, Coulomb calculation, bead topology operations, statistics,
-scheduled output, and restart output. Profiling is disabled by default. The
+integrator, Coulomb calculation, bead topology operations, breakup check,
+statistics, scheduled output, and restart output. Profiling is disabled by default. The
 Coulomb value is a nested part of the integrator total and must not be added
 to it when interpreting percentages. The profiler prints cumulative wall
 time, percentage of the complete temporal-loop time, and call count on the
@@ -67,11 +110,21 @@ the given constant \texttt{maxnum}, the extra elements are printed
 in the origin point. On the other hand, the number of beads printed
 in the files \texttt{frame\%06d.xyz} and \texttt{frame\%06d.pdb} is
 exactly the actual number of beads used to discretized the jet at
-the given frame. Note that the unit of mesurement used in the files,
-\texttt{traj.xyz}, \texttt{frame\%06d.xyz} and \texttt{frame\%06d.pdb}
-is the centimeter multiplied by $f$, which was given in input file
-by the directve `` \textit{print xyz rescale} $f$ '' and `` \textit{print
-pdb rescalepdb} $f$ '' (see Table \ref{tab:inputlist}), respectively.
+the given frame. Note that the unit of mesurement used in the files
+\texttt{traj.xyz} and \texttt{frame\%06d.xyz}, and in the files
+\texttt{frame\%06d.pdb}, is the centimeter multiplied by $f$, which was given in input file
+by the directive `` \textit{print xyz rescalexyz} $f$ '' and `` \textit{print
+pdb rescalepdb} $f$ '' (see Table \ref{tab:inputlist}), respectively
+(default: $f=1$, i.e. centimeters). In versions up to 1.22,
+\texttt{traj.xyz} was written in reduced (internal) length units unless
+\textit{rescalexyz} was given, and the frame files applied the length
+unit twice when a rescale factor was given. The frame files are numbered
+by the step divided by the frame interval, so that the first frame of a
+new run is \texttt{frame000001} (a restarted run continues the
+numbering). Since the coordinates are written with the
+Fortran formats \texttt{f10.5} (XYZ) and \texttt{f8.2} (PDB), a rescale
+factor may be needed to resolve a thin jet, or to keep large coordinates
+within the field width.
 
 \begin{longtable}{cc}
 \caption{In JETSPIN a series of instantaneous and statistical data are available
@@ -81,8 +134,19 @@ Note by \textit{scaled} we mean that the observable was rescaled by
 the characteristic values provided in Tab\ref{tab:tabella-adimensionale}.
 The underlined keys correspond to data which are averaged on the time
 interval given by the directive \texttt{print time} in input file.
-Note by \textit{farest bead} we mean the farest bead from the nozzle
-(with greatest $x$ value). Note all the quantities are expressed
+Note by \textit{farest} (or \textit{farthest}) \textit{bead} we mean the
+leading bead of the jet (index \texttt{inpjet}), which is the bead
+farthest from the nozzle along the jet. A bead that
+reaches the collector is frozen there at $x=h$ (since version 2.0 also
+without \texttt{removing yes}) and remains the leading bead until it is
+removed: once the jet has reached the collector, these keys describe the
+first deposited bead without \texttt{removing yes}, and the last bead
+that reached the collector with it. The collector keys (curc, vc, svc,
+mfc, rc, rrr, visc, gc, evrc, emfc) are accumulated only when beads are
+removed at the collector, so that they are zero in a print interval
+without removals, and always zero without \texttt{removing yes}; curn
+and mfn are accumulated at each insertion and need \texttt{inserting yes}.
+Note all the quantities are expressed
 in centimeter\textendash gram\textendash second unit system, excepted
 the dimensionless scaled observables.}
 \tabularnewline
@@ -103,9 +167,15 @@ yz  & unscaled normal distance from the x axis of the farest bead\tabularnewline
 yzs  & scaled normal distance from the x axis of the farest bead\tabularnewline
 mass  & last inserted mass at the nozzle \tabularnewline
 q  & last inserted charge at the nozzle\tabularnewline
-cpu  & time for every print interval\tabularnewline
-cpur  & remaining time to the end \tabularnewline
-cpue  & elapsed time \tabularnewline
+cpu  & processor time of rank zero spent in the last print interval\tabularnewline
+ & \quad{}(the first record: since the program started)\tabularnewline
+cpur  & estimated remaining processor time: \texttt{cpu} times the records left,\tabularnewline
+ & \quad{}counted as all the records from $t=0$ to the final time minus those\tabularnewline
+ & \quad{}written by the current run (after a restart it overestimates)\tabularnewline
+cpue  & processor time of rank zero elapsed since the first record\tabularnewline
+ & \quad{}of the current run\tabularnewline
+ & \quad{}(these three keys use the processor time, \texttt{cpu\_time}, not the\tabularnewline
+ & \quad{}wall-clock time used by \texttt{job time})\tabularnewline
 n  & number of beads used to discretise the jet\tabularnewline
 f  & index of the first bead \tabularnewline
 l  & index of the last bead \tabularnewline
@@ -120,12 +190,14 @@ l  & index of the last bead \tabularnewline
 \uline{rrr}  & radius reduction ratio of jet \tabularnewline
 \uline{lp}  & length path of jet \tabularnewline
 \uline{rlp}  & length path of jet divided by the collector distance\tabularnewline
-mxst  & maximum stress along the jet\tabularnewline
-mxsx  & x position of the jet maximum stress\tabularnewline
+mxst  & maximum stress along the jet during the print interval\tabularnewline
+mxsx  & x position of that maximum stress\tabularnewline
 nref  & number of accepted dynamic-refinement events\tabularnewline
 angl  & bending angle of the farthest bead, $2\arctan\left(\sqrt{y^{2}+z^{2}}/|x|\right)$,\tabularnewline
  & \quad{}in degrees\tabularnewline
-v  & external electric potential at the current time\tabularnewline
+v  & external electric potential at the current time (the scalar\tabularnewline
+ & \quad{}\texttt{external potential} times the waveform of types 1 and 2; it\tabularnewline
+ & \quad{}does not reflect \texttt{external potential vector})\tabularnewline
 vol  & volume of the farthest bead (post-evaporation volume if\tabularnewline
  & \quad{}evaporation is active)\tabularnewline
 volr  & evaporated volume fraction $1-V_{i}/V_{i}^{0}$ of the farthest bead\tabularnewline
@@ -134,10 +206,17 @@ volr  & evaporated volume fraction $1-V_{i}/V_{i}^{0}$ of the farthest bead\tabu
 \uline{gc}  & elastic modulus of the jet collected at the collector\tabularnewline
 \uline{evrc}  & evaporated volume fraction of the jet collected at the collector\tabularnewline
 \uline{emfc}  & evaporated solvent mass flux at the collector\tabularnewline
-nms  & mean number of timesteps per multiple-timestep cycle\tabularnewline
- & \quad{}(see Sec \ref{sec:Multiple-Timestep-Algorithm})\tabularnewline
-erms  & mean error of the extrapolated Coulomb force in the multiple\tabularnewline
- & \quad{}timestep algorithm, averaged since the start of the run\tabularnewline
+nms  & mean number of timesteps per neighbor-list build of the multiple\tabularnewline
+ & \quad{}timestep algorithm during the print interval\tabularnewline
+ & \quad{}(see Sec \ref{sec:Multiple-Timestep-Algorithm}; zero without it, or when\tabularnewline
+ & \quad{}the list was not built in the interval)\tabularnewline
+erms  & error of the extrapolated outer Coulomb accelerations of the multiple\tabularnewline
+ & \quad{}timestep algorithm (cm/s$^{2}$): once per multiple-step interval (at the\tabularnewline
+ & \quad{}last step before a scheduled update) they are compared with those from\tabularnewline
+ & \quad{}the direct sum; the modulus of the difference, averaged over the beads,\tabularnewline
+ & \quad{}is averaged over the checks of the print interval. Computed only when\tabularnewline
+ & \quad{}\texttt{erms} is selected; the check does not change the forces; zero\tabularnewline
+ & \quad{}without multiple step\tabularnewline
 \hline
 \label{tab:outputlist}  & \tabularnewline
 \end{longtable}

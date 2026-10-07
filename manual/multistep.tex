@@ -7,30 +7,48 @@ The method is based on that described by Streett \textit{et al} in
 Ref \cite{streett1978multiple} and modified for the special context
 of electrospinning process.
 
-In the multiple timestep algorithm a primary cutoff $r_{pcut}$ for
-the Coulomb pair interactions is given. The cutoff $r_{pcut}$ is
-used to define a standard Verlet neighbor list \cite{allen1989computer}.
-Long-range Coulomb forces derived from beads in the neighbor list
+The algorithm is activated by \texttt{multiple step yes}. A primary
+cutoff $r_{pcut}$ for the Coulomb pair interactions is given by
+\texttt{primary cutoff} (mandatory, warning 74). The cutoff $r_{pcut}$
+is used to define a standard Verlet neighbor list \cite{allen1989computer},
+without a skin: the pairs of beads closer than $r_{pcut}$ when the list
+is updated stay in the list until the next update, and the other pairs
+stay outside it even if they come closer. Long-range Coulomb forces
+derived from beads in the neighbor list
 are usually larger than those due to remaining (far) beads not contained
-in the list. Therefore, it is possible to assess the Coulomb energy
+in the list. Therefore, it is possible to assess the Coulomb forces
 if the forces derived from the beads in the neighbor list are calculated
-at every timestep, while those from the remaining beads are calculated
-much less frequently, and are merely extrapolated over the interval.
-JETSPIN handles this procedure as follows: The Verlet neighbor list
-is updated at regular intervals $n_{mult}$. The interval between
-updates should be usually of the order of \ensuremath{\sim}50 timesteps
-$n_{step}$. Whenever the Verlet neighbor list is updated ($n_{step}=1$),
-the force contributions from both the beads of the list and outside
-the list are calculated. Then, the Coulomb forces are computed in
-total in the subsequent timestep ($n_{step}=2$), Hence, for $n_{step}>2$
-the Coulomb force acting on a single bead is assessed as sum of the
-forces derived from the beads in the neighbor list calculated explicitly,
-and those derived from the outer beads (outside the list) which are
-calculated by linear extrapolation of the exact forces obtained in
-the first two timesteps of the multi-step interval. As soon as the
-condition $n_{step}=n_{mult}$ is achieved, the procedure is restarted
-(the neighbor list is again updated). It is readily apparent how this
-scheme can lead to a significant saving in execution time.
+at every force evaluation, while those from the remaining beads (outer
+forces) are calculated much less frequently, and are merely extrapolated
+over the interval. JETSPIN handles this procedure as follows. The Verlet
+neighbor list is updated at regular intervals of $n_{mult}$ timesteps,
+set by \texttt{multiple step every} $n_{mult}$ (mandatory, warning 76;
+$n_{mult}$ must be greater than 2, warning 75). The interval between
+updates should be usually of the order of \ensuremath{\sim}50 timesteps.
+Whenever the Verlet neighbor list is updated, the Coulomb forces are
+computed by the complete direct summation, and the outer forces are
+stored. The complete summation is used again at the following force
+evaluations, up to the first one at a different time, which gives the
+outer forces at a second time. From then on, the Coulomb force acting
+on a bead is assessed as sum of the forces derived from the beads in
+the neighbor list, calculated explicitly, and of the outer forces,
+calculated by linear extrapolation of the two complete summations:
+their derivative is the difference of the two outer forces divided
+by the time between them, and it is centred at the midpoint of the two
+times. The integrators of Sec \ref{sec:Integration-schemes} pass to
+every stage of a timestep the time at the beginning of the step: the
+complete summation is then used at all the stages of the timestep of
+the update and at the first stage of the next one, and the extrapolated
+outer forces are constant within a timestep. Only the Kelvin\textendash Voigt
+integrators with evaporation pass the time of each stage, so that their
+second complete summation is the first stage at a later time. The scheduled
+update, at every timestep multiple of $n_{mult}$, waits until the
+derivative of the previous update has been taken. Every direct summation
+used by the algorithm is complete, in both the one and three dimensional
+models: the primary cutoff only selects the pairs of the neighbor list.
+With solvent evaporation all the summations use the instantaneous
+masses of the beads (Eq \ref{eq:evap-massratio}). It is readily apparent
+how this scheme can lead to a significant saving in execution time.
 
 Note that the accuracy of the algorithm is a function of the multiple
 step interval, and decreases as $n_{mult}$ increases. Further, the
@@ -38,10 +56,67 @@ neighbor list removes the need to scan over all the beads in the simulation
 at every timestep. It is worth to highlight that the algorithm is
 not time reversible.
 
-We remark that it is also possible to define in input file a maximum
-displacement $\Delta r_{pcut}$ in order to achieve a better control
-on the accuracy of the multiple timestep algorithm. The maximum displacement
-$\Delta r_{pcut}$ works as follows: whenever a bead has traveled
-for a distance larger than $\Delta r_{pcut}$ from its position at
-multi-step $n_{mult}=1$, the Verlet neighbor list is updated (even
-if $n_{step}<n_{mult}$).
+The neighbor list is also updated, at the next Coulomb force evaluation,
+after every insertion, removal and remeshing of the jet, after a bead
+is frozen at the collector (whether it is removed or not), when the
+arrays of the jet grow, and at the start of a run, also of a restarted
+one. We remark that it is also possible to define in input file a maximum
+displacement $\Delta r_{pcut}$ (\texttt{maximum displ}, optional) in
+order to achieve a better control on the accuracy of the multiple timestep
+algorithm. The maximum displacement $\Delta r_{pcut}$ works as follows:
+whenever at least two beads have traveled for a distance larger than
+$\Delta r_{pcut}/2$ from their positions at the last update of the
+list, the Verlet neighbor list is updated without waiting for the
+scheduled update.
+The test is made at every Coulomb force evaluation, and every bead
+is tested, on every rank, so that serial and parallel runs take the
+same decision. Without \texttt{maximum displ} no displacement test
+is made.
+
+When \texttt{erms} is printed (Tab \ref{tab:outputlist}), once per
+interval, at the last timestep before a scheduled update, JETSPIN also
+computes the complete direct summation and compares the extrapolated
+outer forces with the exact ones; \texttt{erms} is the mean deviation
+per bead, averaged over the intervals checked since the previous print. The
+check does not change the forces of that evaluation, which are computed
+as at every other evaluation of the interval, so that printing \texttt{erms}
+does not change the trajectory.
+
+The time covered by the extrapolation, $n_{mult}\,\Delta t$, must stay
+short compared with the time in which the beads move by a significant
+fraction of the cutoff, since the outer forces are extrapolated linearly
+over the whole interval and the list has no skin; \texttt{maximum displ}
+bounds this motion independently of $n_{mult}$. In versions up to 1.22
+the second direct summation of the one dimensional model was truncated
+at the cutoff, while the summation at the update of the list was not:
+the extrapolated far field had the wrong sign and grew over the interval.
+This defect, not the choice of the parameters, made a one dimensional
+variant of Test Case 2 with an update every 100 steps unstable. Without
+the multiple timestep algorithm the primary cutoff truncates only the
+direct summation of the one dimensional model (Sec \ref{sec:Input-file}),
+which changes the physics of the jet.
+
+With the corrections of version 2.0 (NVFORTRAN 24.3 and GFortran builds),
+the one dimensional variant of Test Case 2 with an update every 100 steps,
+a cutoff of 1 cm and a maximum displacement of 0.1 cm follows the direct
+summation within $1.4\times10^{-7}$ in the tip position over $2\times10^{6}$
+steps, with the same 130 insertions, and two MPI ranks reproduce the serial
+run exactly; with version 1.22 the same input left the tip at about 1.5 cm
+while the direct summation had carried it to 26 cm after 700,000 steps,
+and stopped on the numerical instability check at step 1,344,736. Test
+Cases 5 and 6 (cutoff 1 cm, update every 100 steps) follow the direct
+summation within $6\times10^{-8}$ and $4.4\times10^{-6}$ over $10^{6}$
+steps, with the same events. The extrapolation of the outer forces is the
+only approximation: Test Case 8 with evaporation and the algorithm switched
+on, with a cutoff longer than the jet, gives the rows of the direct
+summation exactly over 300,000 steps. With a cutoff of 1 cm, about 1,470
+beads and a jet whipping towards the collector, the same run keeps 1.1\%
+fewer active beads and makes 146 removals instead of 129 with an update
+every 100 steps, 0.1\% fewer and 131 removals with an update every 3 steps,
+and 1,990 removals without \texttt{maximum displ}: such a jet needs a short
+interval or a larger cutoff.
+
+In the OpenACC build a run with the multiple timestep algorithm executes
+the code of the CPU build, since the device step does not support it
+(Sec \ref{sec:Running-GPU}); only the complete direct summations of
+a jet without evaporation can be offloaded to the GPU.

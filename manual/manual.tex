@@ -20,13 +20,6 @@
  breaklinks=false,pdfborder={0 0 1},backref=section,colorlinks=true]
  {hyperref}
 
-\newcommand{\currentmonthyear}{%
-  \ifcase\month
-  \or January\or February\or March\or April\or May\or June%
-  \or July\or August\or September\or October\or November\or December%
-  \fi\space\number\year
-}
-
 \makeatletter
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LyX specific LaTeX commands.
@@ -95,7 +88,7 @@ Viale Regina Elena 291, 00161 Rome, Italy
 \medskip{}
 
 \begin{center}
-\textbf{\large version 2.0-alpha - \currentmonthyear}
+\textbf{\large version 2.0-beta.1 (pre-release) - October 2026}
 \end{center}
 
 \newpage{}
@@ -152,8 +145,26 @@ would be:
 
 Marco Lauricella, Giuseppe Pontrelli, Ivan Coluzza, Dario Pisignano,
 Sauro Succi, JETSPIN: A specific-purpose open-source software for
-electrospinning simulations of nanofibers, \textit{Computer Physics
+simulations of nanofiber electrospinning, \textit{Computer Physics
 Communications}, 197 (2015), 227-238.
+
+The models implemented in JETSPIN are reviewed, in the broader context of
+electrospinning and solution blowing, in the following works, which may
+also be cited:
+
+Marco Lauricella, Sauro Succi, Eyal Zussman, Dario Pisignano, Alexander L.
+Yarin, Models of polymer solutions in electrified jets and solution
+blowing, \textit{Reviews of Modern Physics}, 92 (2020), 035004.
+
+Alexander L. Yarin, Filippo Pierini, Eyal Zussman, Marco Lauricella,
+Modelling of nanofiber formation processes, in \textit{Materials and
+Electro-mechanical and Biomedical Devices Based on Nanofibers}, Springer
+(2024), 237-326.
+
+The revisions of this manual for version 2.0, like the Markdown
+documentation in the \textit{docs} sub-directory, were written with the
+assistance of an artificial-intelligence agent and reviewed against the
+source code.
 
 \newpage{} \tableofcontents{}
 
@@ -163,7 +174,9 @@ Communications}, 197 (2015), 227-238.
 
 \section*{Scope of Chapter}
 
-This chapter describes the design and directory structure of JETSPIN.
+This chapter describes the design and directory structure of JETSPIN, how
+to compile and run it (serial, MPI and single-GPU OpenACC), and how to
+restart a run.
 
 \input{jetspin_package}
 
@@ -224,8 +237,14 @@ This chapter describes all the input and output files of JETSPIN.
 
 \section*{Scope of Chapter}
 
-This chapter describes the standard test cases for JETSPIN, the input
-and output files for which are in the \textit{examples} sub-directory.
+This chapter describes the standard test cases for JETSPIN, whose input
+files are in the \textit{examples} sub-directory (\textit{input-N/input.dat});
+the \texttt{log.txt} files of Examples 1--7 were written by versions up to
+1.22 and are kept for reference only. Examples 1--8, shortened to 1,000
+steps, form the smoke and regression suites (\texttt{tests/smoke/run.sh},
+\texttt{tests/regression/run.sh}, against versioned baselines, serial and
+on two MPI ranks); Test Cases 9--25 have their own scripts and records under
+\textit{tests}, described in their sections.
 
 \input{test1}
 

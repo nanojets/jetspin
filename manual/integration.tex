@@ -1,18 +1,44 @@
-\section{Integration schemes}
+\section{Integration schemes\label{sec:Integration-schemes}}
 
 In order to integrate the homogeneous differential equations of motion
-we discretize time as $t_{i}=t_{0}+i\Delta t$ with $i=1,\ldots,n_{steps}$,
-where $n_{steps}$ denotes the number of sub-intervals. In JETSPIN
-three different integration schemes: the first-order accurate Euler
-scheme, the second-order accurate Heun scheme (sometimes called second-order
-accurate Runge-Kutta), and the fourth-order accurate Runge-Kutta scheme\cite{press2007numerical}.
-The user can select a specific scheme by using appropriate keys in
-the input file, as described in Sec \ref{sec:Input-file}. If the
-airdrag is activated, the explicit strong order scheme by Platen \cite{platen1987derivative,kloeden1992numerical,platen2010numerical}
-have to be selected, whereof the order of strong convergence was evaluated
-equal to 1.5.
+we discretize time as $t_{n}=n\Delta t$ with $n=1,\ldots,N$, where
+$\Delta t$ is the timestep (\texttt{timestep}) and $N=\left\lceil T/\Delta t\right\rceil $
+is the number of steps, $T$ being the \texttt{final time}. A ratio
+$T/\Delta t$ within a relative $10^{-12}$ of an integer counts as that
+integer, so that every compiler makes the same number of steps (at
+least one). The last step is a full $\Delta t$: a final time that is
+not a multiple of $\Delta t$ is overshot to $N\Delta t$. JETSPIN offers
+four integration schemes, selected by the directive \texttt{integrator}
+as described in Sec \ref{sec:Input-file}: the first-order accurate Euler
+scheme (\texttt{integrator 1}), the second-order accurate Heun scheme,
+sometimes called second-order accurate Runge-Kutta (\texttt{integrator 2}),
+the classical fourth-order accurate Runge-Kutta scheme\cite{press2007numerical}
+(\texttt{integrator 3}), and the stochastic scheme by Platen described
+below (\texttt{integrator 4}). The Kelvin\textendash Voigt model
+(\texttt{kvfluid yes}), with or without evaporation, supports only the
+integrators 1\textendash 3. The Maxwell model, with or without evaporation,
+supports all four, the Platen scheme with \texttt{system 4} only: with
+\texttt{system 1} or \texttt{3} it stops the run at the first step
+(message ``ERROR - ftype is wrong!''). The range of \texttt{integrator}
+is not checked when the input file is read: a value outside 1\textendash 4,
+or \texttt{integrator 4} with the Kelvin\textendash Voigt model, stops
+the run at the first step (message ``ERROR - ktype error.'').
 
-This scheme avoids the use of derivatives by corresponding finite
+The stochastic terms of the three dimensional model, namely the random
+airdrag force (\texttt{airdrag amplitude}) and the
+velocity noise (\texttt{noise yes}), require \texttt{system 4} (warnings
+35 and 95) and the explicit strong order scheme by Platen
+\cite{platen1987derivative,kloeden1992numerical,platen2010numerical}
+(\texttt{integrator 4}, warnings 34 and 94), whereof the order of strong
+convergence was evaluated equal to 1.5; in JETSPIN this order refers to
+the update of the velocities (see below). With \texttt{airdrag yes},
+\texttt{system 4} and \texttt{integrator 4}, the directive \texttt{airdrag
+amplitude} is mandatory (warning 33). The deterministic airdrag force
+alone can be integrated by any of the schemes; the one dimensional model
+(\texttt{system 1}) and the Kelvin\textendash Voigt model have no airdrag
+term.
+
+The Platen scheme avoids the use of derivatives by corresponding finite
 differences in the same way as Runge-Kutta schemes do for ODEs in
 a deterministic setting, and it is briefly summarized as follows.
 
@@ -20,7 +46,7 @@ Let us consider a Brownian motion vector process $\textbf{X}=\left\{ \textbf{X}_
 of \textit{d}-dimensional satisfying the stochastic differential equation
 
 \begin{equation}
-\frac{d\textbf{X}}{dt}=\textbf{a}\left(t,X^{1},\ldots,X^{d}\right)+\textbf{b}d\Omega\label{eq:generic-sde}
+d\textbf{X}=\textbf{a}\left(t,X^{1},\ldots,X^{d}\right)dt+\textbf{b}\,d\Omega\label{eq:generic-sde}
 \end{equation}
 where $\textbf{a}$ and $\textbf{b}$ are vectors of \textit{d}-dimensional
 usually called drift and diffusion vector coefficients, and $\Omega\left(t\right)$
@@ -35,10 +61,15 @@ Y_{t+\varDelta t}^{k}=Y_{t}^{k}+b^{k}\Delta\Omega+\frac{1}{2\sqrt{\Delta t}}\lef
 with the vector supporting values
 
 \begin{equation}
-\begin{alignedat}{1}\widetilde{\boldsymbol{\Upsilon}}_{\pm} & =\textbf{Y}_{t}+\textbf{a}\Delta t\pm\textbf{b}\sqrt{\Delta t}\\
-\widetilde{\boldsymbol{\Phi}}_{\pm} & =\widetilde{\boldsymbol{\Upsilon}}_{+}\pm\textbf{b}\left(\widetilde{\boldsymbol{\Upsilon}}_{+}\right)\sqrt{\Delta t}.
-\end{alignedat}
+\widetilde{\boldsymbol{\Upsilon}}_{\pm}=\textbf{Y}_{t}+\textbf{a}\Delta t\pm\textbf{b}\sqrt{\Delta t}.
 \end{equation}
+The general scheme contains further terms, with the differences of
+$\textbf{b}$ at the supporting values $\widetilde{\boldsymbol{\Upsilon}}_{\pm}$
+and $\widetilde{\boldsymbol{\Phi}}_{\pm}=\widetilde{\boldsymbol{\Upsilon}}_{+}\pm\textbf{b}\left(\widetilde{\boldsymbol{\Upsilon}}_{+}\right)\sqrt{\Delta t}$,
+which vanish for an additive noise. They are not needed in JETSPIN,
+whose diffusion coefficient does not depend on the velocities (it
+depends on the state only through the bead mass, which changes only
+by evaporation): $\textbf{b}$ is evaluated at the beginning of the step.
 
 Here, $\Delta\Omega$ and $\Delta\varPsi$ indicate normally distributed
 random variables constructed from two independent $N\left(0,1\right)$
@@ -52,6 +83,23 @@ by means of the following linear transformation:
 \label{eq:random-var-1}
 \end{equation}
 
-Note that in JETSPIN the time step $\Delta t$ is automatically rescaled
-by the quantity $\tau$, in accordance with the mentioned dimensionless
-scaling convention.
+JETSPIN applies Eq \ref{eq:integrator-platen} to the velocities only,
+the components that carry the noise; in the supporting values
+$\widetilde{\boldsymbol{\Upsilon}}_{\pm}$ the positions and the stresses
+are advanced by an Euler step, without noise. The positions are then
+advanced by a Heun step,
+\begin{equation}
+\textbf{x}_{n+1}=\textbf{x}_{n}+\frac{\Delta t}{2}\left(\textbf{f}_{1}+\textbf{f}_{2}\right),
+\end{equation}
+where $\textbf{f}_{1}$ is the derivative at the beginning of the step
+(the velocity $\textbf{v}_{n}$) and $\textbf{f}_{2}$ is evaluated at
+the Euler-predicted positions $\textbf{x}_{n}+\Delta t\,\textbf{f}_{1}$
+and at the new velocities $\textbf{v}_{n+1}$. The stresses are advanced
+by a Heun step as well, with $\textbf{f}_{2}$ evaluated at the new positions
+and velocities and at the Euler-predicted stresses. With solvent evaporation
+(Sec \ref{sec:Evaporation}) the volumes of the beads follow the same
+Heun step as the positions.
+
+Note that JETSPIN integrates the equations in the dimensionless units
+of Sec \ref{subsec:Introduction-of-dimensionless}: the timestep $\Delta t$
+is automatically divided by the time scale $t_{0}=\mu/G$.

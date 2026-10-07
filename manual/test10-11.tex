@@ -7,8 +7,9 @@ selects the second-order Heun (RK2) integrator. Their inputs are stored in
 \texttt{examples/input-10/input.dat} and
 \texttt{examples/input-11/input.dat}.
 
-Both integrators have an explicit persistent OpenACC path for this fixed
-configuration. Primary state, Coulomb force, equation-of-motion derivatives,
+Both integrators take the common OpenACC device step from the first step (10
+and 14 kernel launches per step, one of which freezes the beads that reach
+the collector). Primary state, Coulomb force, equation-of-motion derivatives,
 and intermediate arrays remain on the accelerator between timesteps. The
 final state update is fused with the path-length and maximum-stress
 reductions. Ordinary statistical samples transfer only the selected bead and
@@ -21,9 +22,14 @@ speedup of 13.20. RK2 required 19.464682 s on CPU and 1.254380 s with OpenACC,
 corresponding to a speedup of 15.52. Both six-sample trajectories passed the
 CPU/GPU comparison with relative tolerance $10^{-6}$ and absolute tolerance
 $10^{-9}$. The worst normalized differences were $4.00\,10^{-7}$ for Euler
-and $8.99\,10^{-7}$ for RK2. Versioned outputs and the comparison helper are
-stored in \texttt{tests/performance/integrators/}. These timings are specific
-to the measured system and are not portable performance guarantees.
+and $8.99\,10^{-7}$ for RK2. Since version 2.0 the leading bead is frozen
+on the collector (Sec.~\ref{sec:Test-Case-9}) and the A30 rows equal the CPU rows; the
+versioned outputs, regenerated on 7 October 2026, and the comparison helper are stored in
+\texttt{tests/performance/integrators/}. These timings are specific
+to the measured system and are not portable performance guarantees. With
+the present Coulomb kernel the A30 loops took 0.122 s (Euler) and 0.223 s
+(RK2), against 0.589 s and 1.078 s with the previous kernel
+(Sec.~\ref{sec:Test-Case-9}).
 
 The common development targets \texttt{nvfortran-openacc-force-oracle} and
 \texttt{nvfortran-openacc-coulomb-oracle} cover these non-evaporative stages

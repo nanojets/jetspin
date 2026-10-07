@@ -15,18 +15,24 @@ GPU.  No state, force, stress, or derivative array is transferred between
 stages.  Ordinary timesteps return only one 20-byte topology record.  Bead
 records are moved for actual topology or output events, while the complete
 active state is synchronized for capacity reallocation and the final
-checkpoint.
+checkpoint.  The run takes the common OpenACC device step
+(\texttt{source/device\_step\_mod.f90}) from the first step: the device step
+engages once the jet holds 100 beads and stays engaged, and this case starts
+with 100.  The step is still synchronous and its kernels are not yet fused.
 
 On an NVIDIA A30 the accepted 1,000-step topology for Euler, RK2, and RK4
 contains 111 additions, 122 removals, two reallocations, and 89 final active
 beads, equal to the CPU totals.  For Euler, RK2, and RK4, three-step pre-event
 \texttt{statout.dat} comparisons have zero difference with relative tolerance
 $10^{-12}$ and absolute tolerance $10^{-13}$; their written XYZ geometries are
-also byte-identical.  Floating-point ordering moves the first insertion from
-step 4 on the CPU to step 5 on the GPU.  A pointwise CPU/GPU trajectory after
-this threshold is not used as the acceptance criterion: the target-centric
-direct Coulomb kernel has a different summation order, and the physical
-bending instability amplifies the resulting roundoff-level perturbation.
+also byte-identical.  Since 2026-10-07 the 111 insertions and 122 removals
+occur at the same 222 steps on the CPU and the GPU, for each integrator;
+before, the GPU made the first insertion at step 5 instead of 4, because its
+topology path grew the full arrays and inserted one step later.  A pointwise
+CPU/GPU trajectory is not used as the acceptance criterion: the
+target-centric direct Coulomb kernel has a different summation order, and
+the transverse components, of order $10^{-12}$~cm, differ by up to their own
+size.
 
 The rheology-independent development target
 \texttt{nvfortran-openacc-force-oracle} evaluates each complete trusted

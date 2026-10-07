@@ -26,21 +26,35 @@ another directive: \texttt{timesteps 15000} would be read as
 record, scanning from the left, and directives expecting several values take
 the following numbers in order. There are no end-of-line comments: comments
 should be placed on separate records beginning with \#. An unknown directive
-stops the program with an error banner, as does the end of the file before
-the \texttt{finish} record; records after \texttt{finish} are ignored.
+stops the program with an error banner (\texttt{ERROR - unknown directive
+in input file}), as does the end of the file before the \texttt{finish}
+record; records after \texttt{finish} are ignored. For most directives an
+unknown sub-keyword prints warning 61, and the program stops after reading
+the input file (\texttt{ERROR - incomplete input file}); \texttt{primary},
+\texttt{maximum}, \texttt{multiple}, \texttt{restart}, \texttt{dragvel},
+\texttt{evaporation}, and \texttt{dynam} without \texttt{refin} ignore it
+silently instead, and \texttt{external potential} \textit{word} $f$,
+\texttt{print xyz} \textit{word} $f$ and \texttt{print binary} \textit{word}
+$f$ are read as \texttt{external potential} $f$, \texttt{print xyz} $f$ and
+\texttt{print binary} $f$ (e.g. \texttt{print xyz rescale 1000} writes
+\texttt{traj.xyz} every 1000 s). An unknown key in \texttt{print list} or
+\texttt{printstat list} gives warning 48 or 58, followed by warning 60 with
+the list of the valid keys, and the program stops after reading the input
+file.
 
-As in the example given in \texttt{input test}, the last record is
+As in the example input files \textit{examples/input-N/input.dat}
+described in the chapter of the example simulations, the last record is
 a \texttt{finish} directive, which marks the end of the input data.
 Before the \texttt{finish} directive, a wide list of directives may
-be inserted (see Tab \ref{tab:inputlist}). The key \texttt{systype}
+be inserted (see Tab \ref{tab:inputlist}). The directive \texttt{system}
 should be used to set the nanofiber model. In JETSPIN two models are
-available: 1) the one dimensional model similar to the model of Cap
-\ref{chap:JETSPIN-Model-and} but assuming the nanofiber to be straight
+available: 1) the one dimensional model similar to the model of
+Chapter~\ref{chap:JETSPIN-Model-and} but assuming the nanofiber to be straight
 along the $\vec{\textbf{x}}$ axis, and, therefore, neglecting the
 surface tension force $\vec{\textbf{f}}_{st}$; 2) the three dimensional
-model described in Cap \ref{chap:JETSPIN-Model-and}. Internally these
+model described in Chapter~\ref{chap:JETSPIN-Model-and}. Internally these
 options are handled by the integer variable \texttt{systype}, which
-assumes the values explained in Tab \ref{sec:Input-file}. Further
+assumes the values explained in Tab \ref{tab:inputlist}. Further
 details of the 1-D model can be found in Refs \cite{pontrelli2014electrospinning,carroll2011discretized}.
 A series of variables are mandatory and have to be defined. For example,
 \texttt{timestep}, \texttt{final time}, \texttt{initial length}, etc.
@@ -54,11 +68,31 @@ setting of the jet segments number (the number of segment in which
 the jet is discretised); 2) the jet segments number is declared by
 the directive \texttt{points}, while the value of the discretization
 step length is automatically set by the program (as in Example \textbf{Test
-Case 3} in Sec \ref{sec:Test-Case-3:}). The directive \texttt{cutoff}
-indicates the length of the upper and lower proximal jet sections,
-which interact via Coulomb force on any bead. It is worth stressing
-that the length value is set at the nozzle, so that the effective
-cutoff increases along the simulation as the nanofiber is stretched.
+Case 3} in Sec \ref{sec:Test-Case-3:}). Exactly one of the two directives
+must be given (warning 7 if neither is present, warning 22 if both are),
+and the resulting step length must not be smaller than the \texttt{nozzle
+cross} radius (warning 62, error 8). A few other values are checked when
+the input is read: the \texttt{elastic modulus} must be at least
+$10^{-4}$ (warning 88), the \texttt{initial length} must not be smaller
+than the \texttt{nozzle cross} radius (warnings 42--44), and the
+\texttt{perturb ampl} must not exceed the \texttt{initial length}
+(warnings 45--47). The values of \texttt{system} and \texttt{integrator}
+are not range-checked at input: an unsupported value, or combination
+(e.g. \texttt{integrator 4} with \texttt{kvfluid yes}), stops the run at
+the first step with \texttt{ERROR - ftype is wrong!} or \texttt{ERROR -
+ktype error.}, respectively. The directive \texttt{primary
+cutoff} sets a distance in centimeters. With \texttt{multiple step yes}
+it is the radius of the neighbor list of the multiple timestep algorithm
+for the Coulomb forces (Sec \ref{sec:Multiple-Timestep-Algorithm}), and it
+is mandatory; every direct Coulomb sum used by the algorithm is then
+complete. Without that algorithm it only truncates the direct Coulomb sum
+of the one dimensional model (\texttt{system 1}), skipping the pairs
+farther apart than the cutoff (and the image terms of the developer-only
+\texttt{mirror} option); the three dimensional direct sum ignores
+it. If it is omitted, no cutoff is applied. (Up to version 1.22 the
+cutoff was converted from centimeters only with the multiple timestep
+algorithm, and it truncated the one dimensional direct sum also under
+that algorithm, which corrupted the extrapolation.)
 The directive \texttt{restart yes} can be used to restart a JETSPIN
 job (for further information see Section \ref{sec:Restarting-JETSPIN}).
 
@@ -67,28 +101,59 @@ step given by the directive \texttt{timestep}, whose detailed considerations
 are provided in Ref \cite{lauricella2015jetspin}. The reader is referred
 to Tab \ref{tab:inputlist} for a complete listing of all directives
 defining the electrospinning setup parameters. Not all these quantities
-are mandatory, but the user is informed that whenever a quantity is
-missed, it is usually assumed equal to zero by default (exceptions
-are stressed in Tab \ref{tab:inputlist}). \textbf{Note all the quantities
+are mandatory: an omitted optional quantity is zero, or the feature is
+off, unless Tab \ref{tab:inputlist} gives another default. Several
+directives become mandatory once a feature is activated, as stated in the
+table; if one of them is missing, the program prints a warning and stops
+after reading the input file (\texttt{ERROR - incomplete input file}).
+\textbf{Note all the quantities
 have to be expressed in centimeter\textendash gram\textendash second
 unit system} (e.g. charge in statcoulomb, electric potential in statvolt,
 etc.).
 
-The \texttt{job time} and \texttt{close time} directives are required
-to ensure a controlled close down procedure when a job runs out of
+The optional \texttt{job time} and \texttt{close time} directives
+ensure a controlled close down procedure when a job runs out of
 time. The time specified by the job time directive indicates the total
-time allowed for the job. (This must obviously be set equal to the
+time allowed for the job, in seconds, or in minutes, hours or days when
+followed by \texttt{m}, \texttt{h} or \texttt{d}; \texttt{job time indef},
+like an omitted directive, sets no limit. The unit is best written as a
+separate word (\texttt{job time 12 h}): a \texttt{d} attached to the
+number is read as the exponent mark of a double-precision number, so that
+\texttt{job time 2d} means 2 seconds. (It should be set equal to the
 time specified to the operating system when the job is submitted.)
 The \texttt{close time} directive represents the time JETSPIN will
-require to write and close all the data files at the end of processing.
+require to write and close all the data files at the end of processing
+(default: 0).
 This means the effective processing time limit is equal to the job
-time minus the close time.
+time minus the close time: once it is reached, at the end of a time
+step, the integration loop stops, the output files are closed and
+\texttt{save.dat} is written as at the final time (no extra statistics
+record is forced: the last record is that of the last multiple of
+\texttt{print time}). The elapsed time is the wall-clock time since the
+program started, as a batch system counts it (up to version 1.22 it was
+the processor time of rank zero, which does not count waits and could
+fall behind the batch limit).
+
+A few directives are read only by developer builds, in which the logical
+parameter \texttt{ldevelopers} of \texttt{nanojet\_mod.f90} is set to
+\texttt{.true.} (it is \texttt{.false.} in released builds), and they are
+not listed in Tab \ref{tab:inputlist}: \texttt{lorentz},
+\texttt{magnetic field}, \texttt{variable mass}, \texttt{wall},
+\texttt{mirror}, \texttt{breakup}, \texttt{ultimate strength},
+\texttt{print pdb tagbead}, and the \texttt{type} option of
+\texttt{dragvel yes}. A released build stops at the first seven with
+\texttt{ERROR - unknown directive in input file}, gives warning 61 at
+\texttt{print pdb tagbead} and stops after reading the input file
+(\texttt{ERROR - incomplete input file}), and reads
+\texttt{dragvel yes type} $i$ as \texttt{dragvel yes}.
 
 \begin{longtable}{cc}
 \caption{Here, we report the list of directives available in JETSPIN. Note
 $i$, $f$, and $s$ denote an integer number, a floating point number,
-and a string, respectively. The underlined directives are mandatory.
-The default value is zero (exceptions are stressed in parentheses).}
+and a string, respectively. The underlined directives are mandatory;
+others become mandatory with the feature they belong to, as noted.
+An omitted optional value is zero, or the feature is off, unless another
+default is given in parentheses.}
 \tabularnewline
 \endlastfoot
 \hline
@@ -96,20 +161,22 @@ The default value is zero (exceptions are stressed in parentheses).}
 \hline
 \hline
 airdrag yes  & active the inclusion of the airdrag force in the model (default: no)\tabularnewline
- & (note that if yes the directive ``integrator 4'' is mandatory)\tabularnewline
-airdrag airdensity $f$  & mass density of the air surrounding the nanofiber (default: 0)\tabularnewline
-airdrag airviscosity $f$  & kinematic viscosity of the air surrounding the nanofiber (default:
-1)\tabularnewline
-airdrag airvelocity $f$  & velocity of the air with respect to the \textit{z} axis (default:
-0)\tabularnewline
-airdrag amplitude $f$  & amplitude of the randomic force rescaled by $\gamma$ (default: 1)\tabularnewline
+ & (any integrator; the 1d-model and \texttt{kvfluid yes} have no airdrag term;\tabularnewline
+ & with system 4 and integrator 4 \texttt{airdrag amplitude} becomes mandatory)\tabularnewline
+airdrag airdensity $f$  & mass density of the air surrounding the nanofiber\tabularnewline
+ & (mandatory with \texttt{airdrag yes}, warning 38)\tabularnewline
+airdrag airviscosity $f$  & kinematic viscosity of the air surrounding the nanofiber\tabularnewline
+ & (mandatory with \texttt{airdrag yes}, warning 39)\tabularnewline
+airdrag airvelocity $f$  & velocity of the air along the \textit{x} axis (the jet axis), subtracted\tabularnewline
+ & from the bead velocity in the airdrag term (default: 0, warning 49)\tabularnewline
+airdrag amplitude $f$  & amplitude of the randomic force rescaled by $\gamma$\tabularnewline
+ & (only with system 4 and integrator 4, warnings 35 and 34; mandatory\tabularnewline
+ & there with \texttt{airdrag yes}, warning 33)\tabularnewline
  & (note that the dissipation coefficient $\gamma$ is automatically\tabularnewline
  & computed by JETSPIN using the input data by Eq. \ref{eq:fric_dissip})\tabularnewline
-close time $f$ & Set job closure time to $f$ seconds\tabularnewline
+close time $f$ & Set job closure time to $f$ seconds (default: 0)\tabularnewline
 \uline{collector distance} $f$  & distance of collector along the x axis from the nozzle\tabularnewline
  & \quad{}(note the nozzle is assumed in the origin)\tabularnewline
-cutoff $f$  & length of the proximal jet sections interacting by Coulomb \tabularnewline
- & \quad{}force (default: equal to the collector distance)\tabularnewline
 \uline{density mass} $f$  & mass density of the nanofiber\tabularnewline
 \uline{density charge} $f$  & electric volume charge density of the nanofiber\tabularnewline
 dragvel yes  & give each bead inserted at the nozzle the dragging velocity\tabularnewline
@@ -132,25 +199,37 @@ dynam refin anchor $f$ & during the refinement procedure all the anchor beads in
  & (they are manteined as knots of both the old and new meshes)\tabularnewline
  & (default, if omitted: $5\times$ the discretization resolution;\tabularnewline
  & values below $1\times$ resolution are raised to that same $5\times$ floor)\tabularnewline
-dynam refin capacity $i$ & number of beads by which array capacity grows/is reserved\tabularnewline
- & at an accepted refinement event (default: 100; must be positive)\tabularnewline
-evaporation yes  & activate solvent evaporation and concentration-dependent rheology (default: no)\tabularnewline
-evaporation polymer frac $f$  & initial polymer mass fraction $c_{p,0}$\tabularnewline
-evaporation airviscosity $f$  & kinematic viscosity of air $\nu_a$ in $\mathrm{cm}^{2}/\mathrm{s}$\tabularnewline
+dynam refin capacity $i$ & capacity increment \texttt{incnpjet} in beads: the minimum initial\tabularnewline
+ & array capacity, the growth at an accepted refinement event and the\tabularnewline
+ & neighbor-list growth of the multiple timestep algorithm (default: 100;\tabularnewline
+ & a non-positive value gives warning 107 and is reset to 100)\tabularnewline
+evaporation yes  & activate solvent evaporation and concentration-dependent rheology (default: no;\tabularnewline
+ & \texttt{polymer frac}, \texttt{airviscosity}, \texttt{temperature}, \texttt{umidity},\tabularnewline
+ & \texttt{bconstant} and \texttt{mconstant} become mandatory)\tabularnewline
+evaporation polymer frac $f$  & initial polymer mass fraction $c_{p,0}$ (mandatory, warning 97)\tabularnewline
+evaporation airviscosity $f$  & kinematic viscosity of air $\nu_a$ in $\mathrm{cm}^{2}/\mathrm{s}$ (mandatory, warning 98)\tabularnewline
 evaporation temperature $f$  & temperature in kelvin used for the saturation-vapour correlation\tabularnewline
-evaporation umidity $f$  & relative humidity $RH$ in the interval $[0,1]$\tabularnewline
+ & (mandatory, warning 99)\tabularnewline
+evaporation umidity $f$  & relative humidity $RH$ in the interval $[0,1]$ (mandatory, warnings 100, 106)\tabularnewline
  & (historical spelling retained for input-file compatibility)\tabularnewline
 evaporation diffusivity $f$  & solvent-vapour diffusion coefficient $D_a$ in $\mathrm{cm}^{2}/\mathrm{s}$\tabularnewline
+ & (if omitted it is evaluated by Eq.~\ref{eq:evap-default-diffusivity})\tabularnewline
 evaporation relumidity $f$  & optional saturation-vapour ratio $c_{s,\mathrm{eq}}(T)$\tabularnewline
  & (if omitted it is evaluated from \texttt{evaporation temperature})\tabularnewline
 evaporation bconstant $f$  & parameter $B$ in the concentration-dependent viscosity law\tabularnewline
+ & (mandatory, warning 103)\tabularnewline
 evaporation mconstant $f$  & exponent $m$ in the concentration-dependent viscosity law\tabularnewline
+ & (mandatory, warning 104)\tabularnewline
 evaporation tconstant $f$  & exponent in the relaxation-time law; use $f=1$ for Yarin et al. (2001)\tabularnewline
-\uline{elastic modulus} $f$  & elastic modulus of the nanofiber\tabularnewline
+ & (default: 1)\tabularnewline
+\uline{elastic modulus} $f$  & elastic modulus of the nanofiber (at least $10^{-4}$, warning 88)\tabularnewline
 external potential $f$  & electric potential between the nozzle and collector\tabularnewline
- & (the resulting electric field is oriented along \textit{x-axis})\tabularnewline
+ & (the resulting electric field is oriented along \textit{x-axis}; not used\tabularnewline
+ & for the field when \texttt{external potential vector} is given)\tabularnewline
 external potential freq $f$  & frequency of the waveform describing the electric potential\tabularnewline
-external potential phase $f$  & initial phase of the waveform describing the electric potential\tabularnewline
+ & (mandatory when \texttt{external potential type} is not 0, warning 71)\tabularnewline
+external potential phase $f$  & initial phase in radians of the rotating components of type 3\tabularnewline
+ & (ignored by types 1 and 2; default: 0)\tabularnewline
 external potential type $i$  & set the waweform describing the time evolution of the external\tabularnewline
  & electric potential. The \textit{integer} can be equal to 0 for a static
 field,\tabularnewline
@@ -158,8 +237,14 @@ field,\tabularnewline
  & 2 for a rectangular waveform of a RC circuit,\tabularnewline
  & 3 for orthogonal rotating electric field (default: 0)\tabularnewline
 external potential time $f$  & time constant (relaxation time) of the RC circuit\tabularnewline
-external potential vector $3f$  & vector of the electric field for \textit{x y z} components\tabularnewline
-\uline{final time} $f$  & set the end time of the simulation \tabularnewline
+ & (mandatory with type 2, warning 78)\tabularnewline
+external potential vector $3f$  & potentials for the \textit{x y z} components of the electric field: each\tabularnewline
+ & component is the value divided by \texttt{collector distance}; the \textit{y} and \textit{z}\tabularnewline
+ & components rotate at \texttt{freq} (read in V with \texttt{units real}; the\tabularnewline
+ & output key \texttt{v} still prints the scalar \texttt{external potential})\tabularnewline
+ & (mandatory with type 3, warning 90, and accepted only with it, warning 92)\tabularnewline
+\uline{final time} $f$  & set the end time of the simulation: the run makes\tabularnewline
+ & \textit{final time}/\textit{timestep} steps, rounded up\tabularnewline
 \uline{finish}  & close the input file (last data record)\tabularnewline
 gravity yes  & active the inclusion of the gravity force in the model (default: no)\tabularnewline
 hbfluid yes  & allow the set of parameters needed to define\tabularnewline
@@ -168,66 +253,107 @@ JETSPIN \tabularnewline
  & will use the simple Maxwellian fluid model (default: no)\tabularnewline
 hbfluid consistency $f$  & flow consistency index rescaled by $\mu$ (in $\mu$ unit) as defined
 in \tabularnewline
- & Eq \ref{eq:rescaled-prefactor} (Note you should also set: hbfluid
-yes) (default: 1)\tabularnewline
-hbfluid index $f$  & flow behavior index (Note you should also set: hbfluid yes) (default:
-1)\tabularnewline
+ & Eq \ref{eq:rescaled-prefactor} (mandatory with \texttt{hbfluid yes}, warning 40;\tabularnewline
+ & without it the value is 1)\tabularnewline
+hbfluid index $f$  & flow behavior index (mandatory with \texttt{hbfluid yes}, warning 41;\tabularnewline
+ & without it the value is 1)\tabularnewline
 \uline{initial length} $f$  & length of the nanofiber at the initial time\tabularnewline
+ & (not smaller than \texttt{nozzle cross}, warnings 42--44)\tabularnewline
 \uline{integrator} $i$  & set the integration scheme. The \textit{integer} can be '1' for\tabularnewline
  & \quad{}Euler, '2' for Heun, '3' for Runge-Kutta, and '4'\tabularnewline
- & \quad{}for the Platen scheme (only if airdrag force is activated).\tabularnewline
-inserting yes  & inject new beads as explained in Subsec \tabularnewline
-job time $f$  & Set job time to $f$ seconds\tabularnewline
+ & \quad{}for the stochastic Platen scheme (required, with system 4, by\tabularnewline
+ & \quad{}\texttt{noise yes} and \texttt{airdrag amplitude}).\tabularnewline
+inserting yes  & inject new beads as explained in Subsec \ref{subsec:Jet-insertion}\tabularnewline
+job time $f$  & Set job time to $f$ seconds, or minutes, hours, days if followed\tabularnewline
+ & by the word \texttt{m}, \texttt{h}, \texttt{d} (e.g. \texttt{job time 12 h}); elapsed wall-clock\tabularnewline
+ & time; \texttt{job time indef}: no limit (default: no limit)\tabularnewline
 kvfluid yes  & activate the Kelvin\textendash Voigt model which is used instead of
 Maxwell\tabularnewline
- & model (default: no) (Note it is actually implemented only for working\tabularnewline
- & with the 3d-model without airdrag ativated: system 3 is mandatory)\tabularnewline
-maximum displ $f$ & set the maximum displacement of the neighbor list (see Sec \ref{sec:Multiple-Timestep-Algorithm})\tabularnewline
+ & model (default: no). It is implemented for system 1 or 3 (warning 89)\tabularnewline
+ & with integrators 1\textendash 3 (integrator 4 stops the run at the first step),\tabularnewline
+ & not together with \texttt{hbfluid yes} (warning 87); its equations have\tabularnewline
+ & no airdrag term, so \texttt{airdrag yes} has no effect\tabularnewline
+maximum displ $f$ & set the maximum displacement of the neighbor list (see Sec \ref{sec:Multiple-Timestep-Algorithm}):\tabularnewline
+ & the list is also rebuilt when at least two beads moved more than $f/2$\tabularnewline
+ & since the last rebuild (only with \texttt{multiple step yes}; default: off)\tabularnewline
 multiple step yes & activate the multiple timestep algorithm for Coulomb forces (default:
-no)\tabularnewline
-multiple step every $i$ & set the interval of multiple-steps (see Sec \ref{sec:Multiple-Timestep-Algorithm})\tabularnewline
+no;\tabularnewline
+ & \texttt{multiple step every} and \texttt{primary cutoff} become mandatory)\tabularnewline
+multiple step every $i$ & set the interval of multiple-steps (see Sec \ref{sec:Multiple-Timestep-Algorithm}): the neighbor\tabularnewline
+ & list is rebuilt every $i$ steps, and at the next Coulomb evaluation after\tabularnewline
+ & an insertion, a removal, a remesh, a bead frozen at the collector\tabularnewline
+ & or an array growth\tabularnewline
+ & (mandatory with \texttt{multiple step yes}, warning 76; it must be greater\tabularnewline
+ & than 2, warning 75)\tabularnewline
 noise yes & active the inclusion of a random noise in the model (default: no)\tabularnewline
- & (note that if yes the directive ``integrator 4'' is mandatory)\tabularnewline
-noise variance $f$ & variance of random noise in velocity space (default: 1 $\text{cm}^{2}/\text{s}^{2}$)\tabularnewline
-noise diffusivity $f$ & diffusivity of random noise in velocity space (default: 0 $\text{cm}^{2}/\text{s}^{3}$)\tabularnewline
+ & (system 4 and integrator 4 are required, warnings 95 and 94)\tabularnewline
+noise variance $f$ & variance of random noise in velocity space in $\text{cm}^{2}/\text{s}^{2}$\tabularnewline
+ & (mandatory with \texttt{noise yes}, warning 93)\tabularnewline
+noise diffusivity $f$ & diffusivity of random noise in velocity space in $\text{cm}^{2}/\text{s}^{3}$\tabularnewline
+ & (mandatory with \texttt{noise yes}, warning 96)\tabularnewline
 noise pool $f$ & number of pre-generated Gaussian values read cyclically by the\tabularnewline
- & stochastic Platen integrator when it uses the pre-generated pool, between\tabularnewline
- & $10^{6}$ and $2\times10^{9}$ (default: $10^{8}$); the noise repeats after\tabularnewline
- & $f/(6\,n_{\mathrm{active}})$ timesteps (see Sec.~\ref{sec:Noise-pool})\tabularnewline
+ & stochastic Platen runs that use the pool (see Sec.~\ref{sec:Noise-pool}),\tabularnewline
+ & between $10^{6}$ and $2\times10^{9}$ (default: $10^{8}$; a value outside gives\tabularnewline
+ & warning 109 and the run stops); the noise repeats after\tabularnewline
+ & $f/(6\,n_{\mathrm{active}})$ timesteps\tabularnewline
 \uline{nozzle cross} $f$  & cross section radius of the nanofiber at the nozzle\tabularnewline
 nozzle stress $f$  & viscoelastic stress of the nanofiber at the nozzle\tabularnewline
 nozzle velocity $f$  & bulk fluid velocity of the nanofiber at the nozzle\tabularnewline
 perturb yes  & active the periodic perturbation at the nozzle\tabularnewline
+ & (\texttt{perturb freq} and \texttt{perturb ampl} become mandatory)\tabularnewline
 perturb freq $f$  & frequency of the perturbation at the nozzle\tabularnewline
 perturb ampl $f$  & amplitude of the perturbation at the nozzle\tabularnewline
+ & (not larger than \texttt{initial length}, warnings 45--47)\tabularnewline
 points $i$  & number of segment in which the jet is discretised\tabularnewline
-primary cutoff $f$ & set the primary cutoff of the neighbor list (see Sec \ref{sec:Multiple-Timestep-Algorithm})\tabularnewline
+ & (exactly one of \texttt{points} and \texttt{resolution} is mandatory, warnings 7, 22)\tabularnewline
+primary cutoff $f$ & distance in cm: radius of the neighbor list of the multiple timestep\tabularnewline
+ & algorithm (see Sec \ref{sec:Multiple-Timestep-Algorithm}; mandatory with \texttt{multiple step yes},\tabularnewline
+ & warning 74); otherwise it truncates only the 1d-model direct Coulomb\tabularnewline
+ & sum (default: no cutoff)\tabularnewline
+print binary $f$ [style $i$]  & developer binary trajectory \texttt{traj.dat} every $f$ seconds, in reduced\tabularnewline
+ & \quad{}units, layout \texttt{style} 1--9 (default: 1; warning 63 for a style outside\tabularnewline
+ & \quad{}1--9, warning 77 for a style not allowed with the active options)\tabularnewline
+print binary removed  & developer binary record \texttt{bead.dat} of the beads removed at the\tabularnewline
+ & \quad{}collector (written only with \texttt{removing yes})\tabularnewline
 print list $s_{1}\,\ldots$  & print on terminal statistical data as indicated by symbolic\tabularnewline
  & \quad{}strings (see Tab \ref{tab:outputlist} for detailed informations)\tabularnewline
 print time $f$  & print data on terminal and output file every $f$ seconds\tabularnewline
-print pdb frame $f$  & print the jet geometry in a single PDB file format in centimeters\tabularnewline
-print pdb rescalepdb $f$  & print the PDB file format data rescaled by $f$ (default: 1)\tabularnewline
-print xyz $f$  & print the trajectory in XYZ file format in centimeters\tabularnewline
+ & (default: 1000 timesteps, warning 59)\tabularnewline
+print pdb frame $f$  & print the jet geometry in a single PDB file \texttt{frame\%06d.pdb},\tabularnewline
+ & \quad{}with its PSF file \texttt{frame\%06d.psf}, every $f$ seconds\tabularnewline
+print pdb rescalepdb $f$  & PDB coordinates in centimeters multiplied by $f$ (default: 1)\tabularnewline
+print xyz $f$  & print the trajectory \texttt{traj.xyz} in XYZ file format\tabularnewline
  & \quad{}every $f$ seconds \tabularnewline
-print xyz frame $f$  & print the jet geometry in a single XYZ file format in centimeters\tabularnewline
+print xyz frame $f$  & print the jet geometry in a single XYZ file format\tabularnewline
  & \quad{}every $f$ seconds (default name of files: frame\%06d.xyz)\tabularnewline
-print xyz maxnum $i$  & print the XYZ file format with $i$ beads starting from the\tabularnewline
- & \quad{}nearest bead to the collector (default: 100)\tabularnewline
-print xyz rescale $f$  & print the XYZ file format data rescaled by $f$ (default: 1)\tabularnewline
+print xyz maxnum $i$  & print \texttt{traj.xyz} with $i$ beads starting from the\tabularnewline
+ & \quad{}nearest bead to the collector (default: 100; frame files\tabularnewline
+ & \quad{}hold all the beads)\tabularnewline
+print xyz rescalexyz $f$  & XYZ coordinates (\texttt{traj.xyz} and \texttt{frame\%06d.xyz}) in\tabularnewline
+ & \quad{}centimeters multiplied by $f$ (default: 1)\tabularnewline
+printstat binary  & developer binary dump \texttt{statdat.dat} of all the observables of\tabularnewline
+ & \quad{}Tab \ref{tab:outputlist} at every \texttt{print time}\tabularnewline
 printstat list $s_{1}\,\ldots$  & print on output file statistical data as indicated by symbolic\tabularnewline
  & \quad{}strings (see Tab \ref{tab:outputlist} for detailed informations)\tabularnewline
-removing yes  & remove beads at collector\tabularnewline
+removing yes  & remove the beads collected at the collector (a bead that\tabularnewline
+ & \quad{}reaches the collector is frozen there in any case)\tabularnewline
 restart yes  & restart JETSPIN from a previous job (see Section \ref{sec:Restarting-JETSPIN})\tabularnewline
-restart dump $i$  & print the \texttt{save.dat} file every $i$ steps\tabularnewline
+restart dump $i$  & print the \texttt{save.dat} file every $i$ steps (default: 100000);\tabularnewline
+ & \texttt{save.dat} is also written at the end of the run\tabularnewline
 restart reset  & accepted for compatibility: the statistical data accumulated since\tabularnewline
  & the last print are not restored in any case\tabularnewline
-resolution $f$  & discretization step length of nanofiber\tabularnewline
-seed $i$  & seed control to the internal random number generator\tabularnewline
+resolution $f$  & discretization step length of nanofiber (exactly one of\tabularnewline
+ & \texttt{resolution} and \texttt{points} is mandatory, warnings 7, 22)\tabularnewline
+seed $i$  & seed control to the internal random number generator (default: 1)\tabularnewline
 surface tension $f$  & surface tension coefficient of the nanofiber\tabularnewline
 \uline{system} $i$  & set the nanofiber model. The \textit{integer} can be equal to \tabularnewline
  & \quad{}'1' for select the 1d-model, '3' for the 3d-model, and\tabularnewline
- &  '4' for the 3d-model with airdrag ativated\tabularnewline
+ &  '4' for the 3d-model with the stochastic airdrag and noise terms\tabularnewline
+ & \quad{}(integrator 4)\tabularnewline
 \uline{timestep} $f$  & set the time step for the integration scheme\tabularnewline
+units $s$  & \texttt{cgs} (default) or \texttt{real}: with \texttt{real} the charge density is\tabularnewline
+ & \quad{}read in C/L and the external potential (scalar and vector) in V,\tabularnewline
+ & \quad{}then converted\tabularnewline
 \uline{viscosity} $f$  & viscosity of the nanofiber\tabularnewline
 yield stress $f$  & yield stress (default: 0)\tabularnewline
 \hline

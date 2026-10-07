@@ -20,7 +20,7 @@ manual.pdf: manual.tex $(SECTION_TEX) bibliography.bib elsarticle-num.bst figure
 
 clean:
 	@if command -v $(LATEXMK) >/dev/null 2>&1; then \
-		$(LATEXMK) -C manual.tex; \
+		$(LATEXMK) -c manual.tex; \
 	else \
 		rm -f manual.aux manual.bbl manual.blg manual.log manual.out manual.toc; \
 	fi

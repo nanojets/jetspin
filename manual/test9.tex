@@ -1,10 +1,20 @@
-\section{Test Case 9: 1,000-bead CPU/GPU performance benchmark}
+\section{Test Case 9: 1,000-bead CPU/GPU performance benchmark\label{sec:Test-Case-9}}
 
 Test Case 9 is a performance-oriented three-dimensional Maxwell simulation
 derived from Test Case 7. It initializes 1,000 beads uniformly over the full
 16 cm distance from the nozzle to the collector and executes 1,000 integration
 steps. Insertion, removal, multiple-step Coulomb summation, and dynamic
-refinement are disabled, so the workload remains fixed.
+refinement are disabled, so the workload remains fixed. The leading bead
+starts on the collector; since version 2.0 it is frozen there, like any
+bead that reaches the collector, with or without removal (before, it crossed
+the collector plane by about $6\times10^{-4}$~cm over the 1,000 steps). The
+leading bead of Test Cases 10--12, 15 and 20 also starts on the collector
+and is frozen in the same way. With this rule the A30 rows equal the CPU
+rows in every printed row; the versioned records were regenerated, and the
+normalized differences quoted below predate this change. In version 2.0
+Test Cases 9--11 take the common OpenACC device step from the first step,
+with 22, 10 and 14 kernel launches per step for RK4, Euler and RK2 (one of
+them freezes the beads that reach the collector).
 
 The material, aerodynamic, gravity, and perturbation parameters are retained
 from Test Case 7. The orthogonal rotating field is replaced by a constant
@@ -33,11 +43,34 @@ executable, corresponding to a speedup of 10.742. Both runs retained exactly
 1,000 beads and agreed within the numerical regression tolerances. These
 timings are indicative and should be remeasured on each target system.
 
+The most recent timings were measured in October 2026 with NVFORTRAN 24.3,
+the process bound to the NUMA node of its GPU, and the present
+three-dimensional Coulomb kernel, which spreads the sources of each target
+bead over the vector lanes of one gang and no longer uploads array
+descriptors at every call. The Test Case 9 loop took 0.508 s on one A30,
+against 2.121 s with the previous kernel on the same node and 24.94 s for
+the NVFORTRAN CPU executable. Test Cases 10, 11 and 12 took 0.122, 0.223 and
+0.354 s, against 0.589, 1.078 and 1.659 s with the previous kernel; Test
+Cases 9--14 run 4.2 to 4.8 times faster than with it. Only the summation
+order changes, and the outputs still passed their recorded comparisons. The
+other timings of this section and of Test Cases 10--14 were measured with
+earlier kernels.
+
 An optional internal subroutine profiler is enabled at run time with
 \texttt{JETSPIN\_PROFILE=1 ./main.x}; no rebuild is required. The report
-separates the integrator, Coulomb force, bead topology operations, statistics,
-scheduled output, and restart output. The Coulomb region is nested within the
-integrator total and the two values must not be added.
+lists the integrator total, the Coulomb force, the equation-of-motion
+evaluation, the Runge--Kutta update, the bead topology operations (add,
+remove and erase bead, breakup check), statistics, scheduled output, and
+restart output. The Coulomb, equation-of-motion and Runge--Kutta regions are
+nested within the integrator total, and their values must not be added to
+it. The equation-of-motion and Runge--Kutta regions are instrumented only in
+the CPU code of the Euler, RK2 and RK4 integrators
+(\texttt{integrator\_mod.f90}); the OpenACC device step has no such regions,
+so a run that takes it, as Test Case 9 does from its first step, reports
+zero for them and, within the integrator, times only the Coulomb region. The
+equation-of-motion and Runge--Kutta times quoted below were measured with
+the accelerator paths of the porting milestones, which ran inside those
+integrators.
 
 The report is written only to the terminal and gives cumulative wall time,
 percentage of the complete temporal loop, and call count for each explicitly
@@ -57,9 +90,9 @@ complete loop and 17.67 for Coulomb alone. Repeating this profile after each
 porting milestone provides a direct view of time moving from the Coulomb
 kernel to remaining host work, device transfers, or other force terms.
 
-The complete sampled CPU and A30 OpenACC numerical outputs from this initial
-measurement are versioned in
-\texttt{tests/performance/test9/}. The accompanying comparison script checks
+The complete sampled CPU and A30 OpenACC numerical outputs are versioned in
+\texttt{tests/performance/test9/} (regenerated on 7 October 2026 for the
+collector rule; CPU and A30 records identical). The accompanying comparison script checks
 later CPU and GPU results with relative tolerance $10^{-6}$ and absolute
 tolerance $10^{-9}$. These records remain outside the automatic regression
 matrix because of the benchmark's longer execution time.
@@ -74,19 +107,22 @@ differences of $7.97\,10^{-5}$, $3.00\,10^{-7}$, and $8.52\,10^{-5}$,
 respectively. Thus Coulomb accumulation order is not the dominant Test Case 9
 RK4 difference. Oracle builds are not performance configurations.
 
-A subsequent profiler refinement measured 2.026551 s (56.28%) in Coulomb,
-1.420609 s (39.45%) in the equation-of-motion evaluations, and 0.014712 s
-(0.41%) in the separate Runge--Kutta vector updates on the A30. Each
+A subsequent profiler refinement measured 2.026551 s (56.28\%) in Coulomb,
+1.420609 s (39.45\%) in the equation-of-motion evaluations, and 0.014712 s
+(0.41\%) in the separate Runge--Kutta vector updates on the A30. Each
 equation-of-motion and Coulomb region was called 4,000 times. This breakdown
-selects the three-dimensional equation-of-motion chain as the next meaningful
-accelerator target; porting the vector updates alone cannot materially improve
+selected the three-dimensional equation-of-motion chain as the next meaningful
+accelerator target; porting the vector updates alone could not materially improve
 this workload. The trajectory still matched the versioned A30 reference
 exactly at the saved output precision.
 
-The first equation-of-motion offload milestone uses one explicit OpenACC
+The following paragraphs record the porting milestones of August 2026,
+which the common device step of version 2.0 has superseded; their normalized
+differences refer to the records of that time. The first
+equation-of-motion offload milestone used one explicit OpenACC
 kernel per RK4 stage for the Test 9 force assembly. The local three-point
-curvature construction also executes entirely on the device: every bead reads
-only itself and its two neighbours, and no curvature array is transferred from
+curvature construction also executed entirely on the device: every bead read
+only itself and its two neighbours, and no curvature array was transferred from
 the host. Because the initially straight jet makes the circumcentre arithmetic
 sensitive to floating-point contraction, the OpenACC target uses the
 NVFORTRAN \texttt{nofma} GPU option. In an updated paired measurement built
@@ -101,50 +137,52 @@ saved trajectory passed the
 A30 baseline comparison with relative tolerance $10^{-6}$ and absolute
 tolerance $10^{-9}$; the worst normalized difference was $7.82\,10^{-5}$.
 That first EOM milestone used call-scoped transfers and was restricted to the fixed Test 9
-configuration; other configurations retain the CPU path.
+configuration; other configurations retained the CPU path.
 
-The subsequent persistent-data milestone maps the complete Test 9 state,
+The subsequent persistent-data milestone mapped the complete Test 9 state,
 Coulomb force, equation-of-motion derivatives, and Runge--Kutta scratch arrays
-once and retains them on the A30 across timesteps. Cross sections and all four
-Runge--Kutta updates are computed on the device, and the Coulomb result is
-consumed directly by the equation-of-motion kernel. The existing CPU
-statistics still require one update of the seven primary state arrays after
-each timestep, corresponding to 56,056 bytes per step for 1,001 beads.
+once and retained them on the A30 across timesteps. Cross sections and all four
+Runge--Kutta updates were computed on the device, and the Coulomb result was
+consumed directly by the equation-of-motion kernel. The CPU statistics of
+that time still required one update of the seven primary state arrays after
+each timestep, corresponding to 56,056 bytes per step for the 1,001 array
+entries (indices 0 to 1,000) of the 1,000-bead jet.
 
 In a representative profiled run, the persistent complete loop took 2.451978
 s, compared with 3.159748 s for the call-scoped A30 implementation and
 38.616119 s for the paired NVFORTRAN CPU run. The persistent Coulomb,
 equation-of-motion, and Runge--Kutta regions took 2.006970 s, 0.112892 s, and
-0.191860 s, respectively. The Runge--Kutta region includes the once-per-step
+0.191860 s, respectively. The Runge--Kutta region included the once-per-step
 full-state update to the host. The complete-loop speedup over the CPU was
 15.75. The trajectory passed the unchanged A30 baseline with relative
 tolerance $10^{-6}$ and absolute tolerance $10^{-9}$; its worst normalized
 difference was $7.8\,10^{-5}$.
 
 In the following device-resident-statistics milestone, the path length and
-maximum stress are accumulated on the accelerator after each step. Their
-scalar counters remain on the device. The complete primary state is copied to
-the host only at the five scheduled 200-step samples. The final restart records
-the last synchronized timestep and reuses the step-1000 host snapshot rather
+maximum stress were accumulated on the accelerator after each step. Their
+scalar counters remained on the device. The complete primary state was copied to
+the host only at the five scheduled 200-step samples. The final restart recorded
+the last synchronized timestep and reused the step-1000 host snapshot rather
 than downloading it again. Thus only five full-state synchronization events
-remain. A representative A30 run took
+remained. A representative A30 run took
 2.468580 s for the complete loop, of which 0.056676 s was attributed to the
 small statistic kernels. The trajectory passed the unchanged A30 baseline
 with relative tolerance $10^{-6}$ and absolute tolerance $10^{-9}$; the worst
 normalized difference was $7.97\,10^{-5}$.
 
-The next milestone fuses the path-length and maximum-stress reductions with
-the final Runge--Kutta state update. Each device thread reconstructs the
+The next milestone fused the path-length and maximum-stress reductions with
+the final Runge--Kutta state update. Each device thread reconstructed the
 updated position of the next bead from the same Runge--Kutta coefficients,
-avoiding a neighbour race. Two small follow-up kernels preserve the rule that
+avoiding a neighbour race. Two small follow-up kernels preserved the rule that
 the last bead index wins when maximum stresses are equal. In a representative
 A30 run, the statistics region decreased from 0.056676 s to 0.036373 s, and
 the complete loop took 2.457896 s. An extended comparison matched maximum
 stress and its position exactly; path length differed by at most
 $2\,10^{-8}$ cm because of reduction ordering.
 
-In the selective-output milestone, ordinary statistical output downloads only
-the seven state values of the selected bead and four scalar accumulators. The
+In the selective-output milestone, ordinary statistical output began to
+download only the seven state values of the selected bead and four scalar
+accumulators, as the device step of version 2.0 still does. The
 sampling interval is computed from \texttt{print time / timestep}; the value
 of 200 steps belongs to the standard Test 9 input and is not hardcoded. OpenACC
 transfer tracing reported 280 bytes for the five point samples, 140 bytes for

@@ -16,3 +16,8 @@ not be interpreted as a quantitative reproduction of the 6\% aqueous-PEO
 case used in the original Yarin et al. comparison. The orthogonal rotating
 field is a separate JETSPIN extension and is not part of the 2001
 evaporation model.
+
+The OpenACC build runs this case with the CPU build's code, since its device
+step does not cover time-dependent external fields; the three-dimensional
+Coulomb sums go to the GPU, with copies at every call, only while the jet
+has at least 128 active beads.

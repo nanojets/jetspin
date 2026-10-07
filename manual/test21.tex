@@ -24,10 +24,15 @@ the run ends.
 The OpenACC path keeps the Platen stages, pre-generated Gaussian pool,
 insertion, and state on the device. Repeated refinement checks return only
 three reduction results, in one transfer. At an accepted event the active state is downloaded,
-the host constructs normalized source and target knots, and Akima coefficient
-construction and all 11 spline interpolations execute on the GPU. Conservation
-and anchor restoration remain on the host, after which the remeshed state is
-uploaded once. The
+the host walks the mass boundaries and constructs normalized source and
+target knots, and Akima coefficient construction and all 11 spline
+interpolations execute on the GPU. The GPU then reconstructs the bead and
+evaporated volumes from the interpolated radii, rescales them to conserve
+the reference volumes, and converts the interpolated mass and charge
+densities back to per-bead quantities. The host keeps the anchor bookkeeping
+and the final assembly of the mesh, the conservative radius-floor and
+evaporation-limit corrections, and the invariant checks, after which the
+remeshed state is uploaded once. The
 initial allocation reserves 100 additional entries, so the validated event
 does not reallocate a mapped array. An additional capacity-growth mode reduces
 only this developer reserve to 50 entries. It releases the old persistent
@@ -52,9 +57,13 @@ All paths start with 79 interior anchors, finish with \texttt{nref=1}, and
 preserve anchor positions and fields within the $10^{-12}$ checker tolerance.
 Reference and evaporation-volume conservation errors are of order
 $10^{-16}$, with no capacity reallocation. The run pre-generates the
-$10^{8}$-value Gaussian pool once and uploads it once. A transfer audit observed only the three reduction results, returned in one
-transfer, during ordinary threshold checks, one full-state download and upload at the Akima
-event, and the independent final-shutdown download.
+$10^{8}$-value Gaussian pool once and uploads it once. A transfer audit
+observed, on ordinary steps, one 20-byte topology record and, during
+threshold checks, the three reduction results returned in one transfer; at
+the Akima event, one full-state download and
+upload, one upload of the source and target coordinates, one upload of each
+of the 11 source fields and one download of each interpolated field; and the
+independent final-shutdown download.
 
 In the capacity-growth mode capacity grows from 450 to 555 entries on all
 three paths. Events,

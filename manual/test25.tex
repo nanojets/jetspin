@@ -8,9 +8,11 @@ canonical electrostatic parameters (\texttt{density charge 44000},
 \texttt{collector distance 16}, \texttt{external potential 30.02076857}),
 Maxwell rheology with $\mu_0=20$ P and $G_0=5\times10^{4}$ dyn/cm$^{2}$,
 stochastic Platen air drag, nozzle insertion and collector removal from Test
-Case 23, the single-nozzle-bead start and print directives from Example 3,
-and Example 5's refinement cadence.  The evaporation law of
-Sec.~\ref{sec:Evaporation} is used with the coefficients of
+Case 23 with its anchor spacing (\texttt{dynamic refinement anchor 0.10} cm),
+the single-nozzle-bead start and print directives from Example 3,
+Example 5's refinement cadence, and \texttt{dynamic refinement start 2.5d-4},
+which allows no refinement during the first 50,000 steps.  The evaporation
+law of Sec.~\ref{sec:Evaporation} is used with the coefficients of
 Ref.~\cite{yarin2001bending} unchanged, $B=7$, $m=0.1$, $t_{\mathrm{ev}}=1$,
 and a relative humidity of 0.165 at 293.15 K; only the initial polymer mass
 fraction is raised from 0.06 to 0.50.\par}
@@ -22,10 +24,14 @@ has evaporated, the viscosity has grown by a factor of 2.49 (to 49.7 P), the
 relaxation time by 1.80, and the elastic modulus by 1.38.
 
 The initial polymer fraction of Ref.~\cite{yarin2001bending} does not survive
-this configuration.  With $c_{p,0}=0.06$ the run stops on the code's
-numerical instability check at step 1,078,685 on an NVIDIA A30 (step
-1,067,695 with the NVFORTRAN CPU build), with a stress NaN.  The cause lies
-in the parameter regime.  An evaporating element keeps its charge while its
+this configuration.  With $c_{p,0}=0.06$ a build of 29 September 2026,
+which still drew this case's noise step by step and, on the GPU, integrated
+on the host with only the Coulomb sums offloaded, stopped the run on the
+code's numerical instability check at step 1,078,685 on an NVIDIA A30 (step
+1,067,695 with the NVFORTRAN CPU build), with a stress NaN.  These runs and
+the diagnostic variants below were not repeated with the current build, in
+which the CPU and the A30 give identical results below 100 beads.  The cause
+lies in the parameter regime.  An evaporating element keeps its charge while its
 mass and cross-section decrease with its volume, down to $V/V_0=c_{p,0}/0.9$,
 that is one fifteenth; its charge-to-mass ratio therefore grows fifteenfold.
 Because $\theta\propto c_p$, the elastic modulus grows only 2.9 times, so the
@@ -34,39 +40,51 @@ than that of the fresh jet.  The dried head of the jet is then pushed
 laterally by Coulomb repulsion, its off-axis distance growing from 3 to 20 cm
 within 40,000 steps; the next accepted refinement event has to remesh a jet
 that has left the physical regime, and the stress NaN follows.  Diagnostic
-variants confirm that the outcome follows the elastic resistance of the dried
-jet: freezing viscosity, relaxation time and modulus leads to an earlier
-failure; keeping the relaxation time constant, so that the modulus grows with
-the viscosity, fails when the growth at the cutoff is 10 or less and runs
-cleanly when it is 30 or more.  With the relative humidity set to one, so
-that no net evaporation occurs, the evaporative code path reproduces Test
-Case 24.  Raising the initial polymer fraction bounds the mass loss without
+variants of 1.5 million steps on the CPU confirm that the outcome follows the
+elastic resistance of the dried jet: freezing viscosity, relaxation time and
+modulus leads to an earlier failure; keeping the relaxation time constant,
+so that the modulus grows with the viscosity, fails when the growth at the
+cutoff is 15 or less (with 15 the jet reaches the collector, then fails at
+step 1,430,536) and runs cleanly to 1.5 million steps when it is 30 or
+more.  With the relative humidity set to one, so that no net evaporation
+occurs, the evaporative code path reproduces Test Case 24.  Raising the initial polymer fraction bounds the mass loss without
 altering the concentration law, whose coefficients $B$ and $m$ were fitted by
 Yarin et al.\ to the envelope cone of a much more viscous 6\% PEO solution
 ($\mu_0=10^{4}$ P, $\theta_0=10$ ms).
 
 The reference run uses the NVFORTRAN 24.3 CPU build and is truncated at
-5,000,000 steps, 5\% of the target duration; it closes correctly.  The jet
-first reaches the collector at step 2,120,839.  Between 4 and 5 million steps
-the collector velocity is 2535 cm/s, the off-axis distance of the leading
+5,000,000 steps, 5\% of the target duration, by \texttt{final time 2.5d-2}
+and \texttt{print time 1.d-4} in a copy of the input; it closes correctly.
+The jet first reaches the collector at step 2,120,839.  Between 4 and
+5 million steps the collector velocity is 2535 cm/s, the off-axis distance of the leading
 bead 2.8 cm, the cone angle 19.7 degrees, the active-bead count between 242
 and 295, the path length 112 cm, and the fibre radius at the collector
 2.8~$\mu$m against a nozzle radius of 50~$\mu$m.  The envelope cone opens from
 the nozzle with a local half-angle growing from about 8 to 12 degrees.  Four
 more CPU seeds give mean active counts between 267.8 and 268.4 and the same
 path length, so the stationary regime does not depend on the noise
-realization.  One NVIDIA A30 runs the same 5 million steps in about 660 s
-against 5893 s for the CPU build; it reads the same Gaussian pool, stays on the CPU
-trajectory until about 3 million steps, and gives the same stationary
-values.
+realization.  On one NVIDIA A30 the time-integration loop of the same
+5 million steps takes 666 s, with the process bound to the NUMA node of its
+GPU, against 5863 s for the CPU build; the A30 reads the same Gaussian pool,
+follows the CPU trajectory after it engages the device-resident path (with
+seed 317 the active-bead count first differs at step 4.64 million), and gives the same
+stationary values.  With NVHPC 25.5 the run takes 706 s, against 664 s with
+NVHPC 24.3, the reference compiler, in the same session, and gives the same
+insertion and removal totals and 267.5 active beads between 4 and 5 million
+steps (267.9 with NVHPC 24.3).
 Compared with an NVFORTRAN CPU run of Test Case 24 over the same interval
 (3.8 cm, 27 degrees),
 evaporation and the stiffening it causes make the bending loops smaller, as
 reported in Ref.~\cite{yarin2001bending}.  On one A30 the full 100 million
-steps take about four hours: from 10 to 100 million steps the jet keeps 268
+steps took 15,192 s, about four hours, with a device-resident build of
+5 October 2026, whose output equals the current build's over the first
+5 million steps: from 10 to 100 million steps the jet keeps 268
 active beads on average (241 to 297), a path length of 112 cm, an off-axis
 distance of 2.8 cm and a cone angle of 19.7 degrees, the values of the window
-between 4 and 5 million steps.
+between 4 and 5 million steps.  As for Test Case 24, these statistics rest
+on periodically repeating noise: with the default pool of $10^{8}$ values
+(Sec.~\ref{sec:Noise-pool}) the noise repeats about every 62,000 steps at
+268 beads, so the 100 million steps go through the pool about 1,600 times.
 
 The A30 run has two phases.  Until the jet holds 100 beads (step 1,446,413
 with seed 317, right after an accepted refinement event) the whole step runs

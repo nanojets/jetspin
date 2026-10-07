@@ -14,47 +14,62 @@ that the jet discretization close the collector becomes rather coarse
 to model efficiently the nanofiber. To get around this problem the
 dynamic refinement procedure developed in Ref \cite{lauricella2016refinement}
 can be used in JETSPIN in order to maintain the the length of the
-elements $l_{i}$ below a prescribed characteristic length max $l_{max}$.
-Whenever a bead length $l_{i}$ is larger than $l_{max}$, the relevant portion
-of the nanofiber is remeshed so that the target element length is no larger
-than the value specified by \texttt{dynam refin threshold}. The base
+elements $l_{i}$ below a prescribed maximum length $l_{max}$, set by
+the directive \texttt{dynam refin threshold}.
+Whenever an element length $l_{i}$ is larger than $l_{max}$, the
+nanofiber is remeshed from the leading bead (or from the contact bead
+at the collector, see below) up to the collector-side bead of the element
+nearest to the nozzle that is longer than $l_{max}$; that element keeps
+its length, and the beads between it and the nozzle keep their positions,
+their $\lambda$ values and their volumes. The base
 insertion spacing $l_{step}$ does not define the refined mesh. The
 discretization is performed by Akima
 spline interpolations \cite{akima1970new,akima1991method} of the
-main quantities describing the jet beads (positions, fiber radius,
-stress, velocities). In order to perform the interpolation we proceed
+main quantities describing the jet beads (positions, velocities, stress,
+mass and charge densities, fiber radius and, with evaporation, the
+evaporation radius; both radii are fitted as $\ln\left(\pi a^{2}\right)$,
+see Sec \ref{subsec:Refinement-robustness}). In order to perform the interpolation we proceed
 following three steps. First of all, we introduce the variable $\lambda\in[0,1]$
-to parametrize the jet path, where $\lambda=0$ identifies the nozzle,
-and $\lambda=1$ the jet at the collector. For each bead we compute
+to parametrize the jet path, where $\lambda=0$ identifies the leading
+bead of the jet, and $\lambda=1$ the nozzle. For each bead we compute
 its respective $\lambda_{i}$ value by using the formula
 
 \begin{equation}
-\lambda_{i}=\frac{1}{l_{path}}\sum_{k=1}^{i}l_{k}
+\lambda_{i}=\frac{1}{l_{path}}\sum_{k=i+1}^{N_{beads}}l_{k}
 \end{equation}
 where $l_{path}=\sum_{k=1}^{N_{beads}}l_{k}$ is the jet path length
-from the nozzle to the collector, and $i=1$ and $i=N_{beads}$ denote
-the jet bead at the nozzle and collector, respectively ($i=0$ denotes
-the nozzle). The set of ${\lambda_{i}}$ values represent the mesh
+from the nozzle to the leading bead, $i=1$ and $i=N_{beads}$ denote
+the jet bead at the nozzle and the leading bead, respectively ($i=0$ denotes
+the nozzle), and $l_{k}$ is the length of the element joining bead $k-1$
+with bead $k$ (Sec \ref{sec:Equation-of-Motion}). The set of ${\lambda_{i}}$ values represent the mesh
 used to build the cubic spline. Given a generic quantity $y$, the
 data $y_{i}=y\left(\lambda_{i}\right)$ are tabulated and used in
 order to compute the coefficients of the \textit{Akima spline}, following
 the algorithm reported in Ref \cite{akima1991method}. Then, we enforce
-a target parametrization of the nanofiber. Without interior anchors, the new
+a target parametrization of the remeshed portion of the nanofiber,
+$\lambda_{a}\leq\lambda\leq\lambda_{e}$, where $\lambda_{a}$ is 0 at
+the leading bead (or the value of the contact bead) and $\lambda_{e}$
+the value at its nozzle-side end. Without interior anchors, the new
 mesh ${\lambda_{i}^{*}}$ can be represented schematically as
 
 \begin{equation}
-\lambda_{0}^{*}=0\;\lambda_{i}^{*}=\frac{i}{N_{beads}^{*}},\;i=1,2,\ldots,N_{beads}^{*}\text{.}
+\lambda_{i}^{*}=\lambda_{a}+\frac{i}{N_{beads}^{*}}\left(\lambda_{e}-\lambda_{a}\right),\;i=0,1,\ldots,N_{beads}^{*}\text{,}
 \end{equation}
-where $N_{beads}^{*}$ is chosen from the path length and the configured
-refinement threshold. In the implemented algorithm, each anchored segment of
-arc length $L_s$ receives $\left\lceil L_s/l_{max}\right\rceil$ intervals.
+where $N_{beads}^{*}=\left\lceil \left(\lambda_{e}-\lambda_{a}\right)l_{path}/l_{max}\right\rceil$.
+In the implemented algorithm, each anchored segment of
+arc length $L_s$ is divided in the same way into $\left\lceil L_s/l_{max}\right\rceil$
+equal intervals.
 Finally, the new values $y\left(\lambda_{i}^{*}\right)$
 are computed for any $i-th$ bead by the \textit{spline interpolation}.
-The procedure is repeated for positions, fiber radius, stress and
-velocities of the jet beads in order to provide the respective quantities
+The procedure is repeated for all the interpolated fields
+in order to provide the respective quantities
 in the new mesh ${\lambda_{i}^{*}}$. It is worth to dressing that
 the volume $V_{i}=\pi a_{i}^{2}\,l_{i}$ represented by each bead
 is not anymore constant, and, consequently, $\pi a_{i}^{2}\,l_{i}\neq\pi a_{0}^{2}l_{step}$.
+When the remeshed portion ends at the nozzle-side end of the jet, so that
+no kept bead follows it, the volume of its last bead is computed with the
+length of the element on its collector side, or with $l_{step}$ if the
+portion holds a single bead.
 It is also possible to keep selected beads in their positions before and after
 the refinement procedure in order to reduce possible errors introduced
 by the interpolation procedure. In other words, these anchor beads
@@ -84,7 +99,17 @@ refinement is accepted, and only then is the interval counter reset. A
 threshold crossing alone is not sufficient: the refinement is accepted only if
 the estimated target mesh contains more points than the current active mesh.
 The number of accepted refinements is available as the output key
-\texttt{nref} (see Tab \ref{tab:outputlist}).
+\texttt{nref} (see Tab \ref{tab:outputlist}).  After an accepted refinement
+the beads at or beyond the collector are frozen on it, as at every time
+step, with or without bead removal.  In versions up to 1.22 the time step froze
+them only with removal, so that a jet could cross the collector plane between
+two refinements and be pulled back at the next one.  Without removal the
+beads collected on the collector form a deposited fiber that stays in the jet
+arrays; the refinement ignores it: the acceptance test and the remeshed path
+start at the contact bead, the last collected bead joined to the free jet,
+and the deposited beads are kept unchanged at their indices.  A run without
+removal therefore accepts the same refinements as the same run with removal
+(Test Case 23 with and without removal: same events, same steps).
 
 For the serial Maxwell/Platen OpenACC path exercised by Test Case 21, the
 time integrator, Gaussian pool, insertion logic, and bead state remain in a
@@ -112,8 +137,9 @@ the host arrays are replaced; the Platen and Coulomb workspaces are resized
 and the completed state is bound once. The pre-generated Gaussian pool does
 not depend on capacity and stays mapped unchanged.
 
-This allocation increment is the \uline{dynam refin capacity} $i$ input
-directive (default 100 beads if omitted; the value must be positive). It sets
+This allocation increment is the \texttt{dynam refin capacity} $i$ input
+directive (default 100 beads if omitted; a value below 1 gives warning 107
+and is reset to 100). It sets
 both the headroom reserved for a pre-extended anchored jet and the growth
 increment applied whenever an accepted refinement event exceeds the current
 capacity.
@@ -273,11 +299,13 @@ in the refinement (see Sec.~\ref{sec:Test-Case-25}).  The cadence remains a
 workaround for the cross-event compounding, not a complete cure. The full investigation is recorded in
 \texttt{docs/refinement-robustness-investigation.md}. A corresponding advisory, warning 108, is
 issued whenever the
-configured or auto-derived \uline{dynam refin threshold} is set below
-twenty times the discretization resolution; it does not change behaviour,
-since the historical Example 5 and Tests 21--23 references themselves use
-values below that recommendation and remain validated short-window cases,
-but it flags the combination that produced this failure mode for any input
+configured or auto-derived \texttt{dynam refin threshold} is set below
+twenty times the discretization resolution. It does not change behaviour,
+since the Tests 21--23 references use a threshold below that recommendation
+($0.10$~cm, five times the resolution of $0.02$~cm) and remain validated
+short-window cases (Example 5 and Tests 24 and 25 use exactly twenty
+times the resolution, $0.4$~cm, and raise no warning), but it flags the
+combination that produced this failure mode for any input
 exercising many consecutive refinement events over a long integration
 window.
 

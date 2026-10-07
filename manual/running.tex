@@ -47,8 +47,70 @@ file, reports the same information in splitted files, one for each
 registered time frame. Further, as JETSPIN is running, a series of
 lines will be printed in the terminal window, providing several information
 as requested by suitable directives in input file (see Section \ref{sec:Input-file}).
-Also present will be the \texttt{save.dat} file, which contains the
-accumulated data for computing statistical quantities and other quantities
-defining the current simulation. This file is intended to be used
-together with the input file for restarting a JETSPIN job (see Section
-\ref{sec:Restarting-JETSPIN}), and it is \textit{not} human readable.
+Also present will be the binary \texttt{save.dat} file, which is
+\textit{not} human readable. It is written every \textit{restart dump}
+steps (100,000 by default) and at the end of the run, and holds the bead
+state in double precision followed by the state of the run: the position in
+the Gaussian pool, the state of the random-number generator, the counters of
+the dynamic refinement, and whether the device step of the OpenACC build has
+engaged. Together with \texttt{input.dat} it restarts the job (see Section
+\ref{sec:Restarting-JETSPIN}).
+
+\subsection{Running on a GPU\label{sec:Running-GPU}}
+
+The executable of the \texttt{nvfortran-openacc} target
+(Sec.~\ref{sec:Compiling-the-Source}) is a serial program that uses one
+GPU; it is started as \texttt{./main.x}. It moves the whole time step to
+the GPU (the device step) for the Euler, RK2, and RK4 integrators on
+\texttt{system 3}, Maxwell or Kelvin--Voigt, with or without evaporation and
+air drag, without dynamic refinement (or the other options that tag beads),
+and for the Platen integrator on \texttt{system 4}, Maxwell, with or
+without evaporation, insertion, and dynamic refinement. Multiple-step
+Coulomb sums, time-dependent external fields, the drag velocity, bead
+tracking, fixed bead sets with \textit{removing yes}, one-dimensional
+systems, MPI runs, and the developer options Lorentz force, upper potential
+(\textit{wall}), variable mass and breakup are not supported yet.
+
+The device step engages when \texttt{npjet}, the index of the nozzle bead,
+reaches 100 (it counts the beads in the arrays, collected ones included,
+not only the active ones), and stays engaged when a compaction lowers it
+and across a restart, since \texttt{save.dat} records it. The terminal then
+shows \texttt{OpenACC device step engaged (scheme, model) at step N with M
+active beads}, or \texttt{OpenACC device step resumed (...)} followed by
+\texttt{engaged before the restart} in a restarted run. Below that point
+the executable runs the code of the CPU build and reproduces, byte for byte,
+the results of a CPU build of the same compiler version. Above it the
+results agree with the CPU build within roundoff: the device sums
+accumulate in another order, so trajectories that amplify roundoff
+separate. The runs that the device step does not support execute the CPU
+code too, with only the direct Coulomb sums offloaded once the jet has at
+least 128 active beads. A device stage that cannot evaluate the equations
+of motion of a run stops it with error 22, a guard that a supported run
+does not reach.
+
+The following environment variables, set to \texttt{1} unless stated
+otherwise, change this behaviour:
+\begin{itemize}
+\item \texttt{JETSPIN\_OPENACC\_COULOMB\_MIN\_BEADS=}$n$ sets the 128-bead
+threshold of the offloaded Coulomb sums ($0$ offloads every call);
+\item \texttt{JETSPIN\_OPENACC\_DISABLE\_PERSISTENT} or
+\texttt{JETSPIN\_OPENACC\_DISABLE\_EOM} keeps the device step closed, so
+that the run executes the CPU code with the offloaded Coulomb sums above;
+\item \texttt{JETSPIN\_OPENACC\_DISABLE\_COULOMB} keeps the one-dimensional
+Coulomb sum on the host;
+\item \texttt{JETSPIN\_OPENACC\_SYNC} makes the Platen device step of a run
+with insertion synchronous (the other device steps always are);
+\item \texttt{JETSPIN\_PROFILE} (also \texttt{yes}, \texttt{true},
+\texttt{on}) prints the wall time of the main parts of the time loop at the
+end of the run;
+\item \texttt{JETSPIN\_TOPOLOGY\_SNAPSHOT} writes the active state at
+every insertion and removal to \texttt{topology-state.dat}.
+\end{itemize}
+The last two act in the CPU builds too. Two development variables, which
+set the spare capacity of refining runs, are described in
+\texttt{docs/introduction/compiling.md}.
+For timing, the process should be bound to the NUMA node of its GPU
+(\texttt{nvidia-smi topo -m} lists it), for instance with
+\texttt{numactl --cpunodebind=N --membind=N ./main.x}: the placement of
+the host process alone changes the time of latency-bound runs by up to
+8\%.

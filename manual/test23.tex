@@ -36,9 +36,12 @@ and charge at every Akima event.
 
 Removal is performed by the device topology primitive and does not download
 the full jet. Complete state transfers remain limited to accepted refinement
-events and final shutdown. Host code constructs the target mesh and applies
-conservation and anchor rules; Akima coefficient construction and all 11 field
-interpolations execute on the GPU.
+events and final shutdown. Host code walks the mass boundaries, constructs
+the target mesh, keeps the anchor bookkeeping and final assembly, applies the
+conservative radius-floor and evaporation-limit corrections, and checks the
+invariants; Akima coefficient construction, all 11 field interpolations, the
+volume reconstruction with its conservation rescale, and the conversion of
+mass and charge densities execute on the GPU.
 
 An NVIDIA A30 transfer audit records four complete state downloads, namely
 the three accepted Akima events and final shutdown, together with exactly
@@ -62,4 +65,9 @@ The commands
 \texttt{tests/refinement/run\_test23.sh force-oracle} run the CPU, native GPU,
 and force-oracle validations. Arguments \texttt{host-akima} and
 \texttt{akima-compare} select the historical spline oracle and the direct
-host/device spline comparison, respectively.
+host/device spline comparison, respectively. Argument
+\texttt{refinement-compare} (target
+\texttt{nvfortran-openacc-compare-refinement}) evaluates the host and device
+reconstruction of volume, mass, charge, and evaporated volume at every
+event; all three events agree at roundoff, at worst $8.9\times10^{-16}$
+absolutely and $1.4\times10^{-16}$ relatively.

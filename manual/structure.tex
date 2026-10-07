@@ -2,8 +2,10 @@
 
 \section{Structure\label{sec:Structure}}
 
-JETSPIN is written in free format FORTRAN90, and it consists of approximately
-430 subroutines and functions. The source exploits the modular approach provided
+JETSPIN is written in free-format Fortran 90 with a few Fortran 2003
+features (\texttt{get\_environment\_variable}, allocatable components of
+derived types), and it consists of approximately 430 subroutines and
+functions. The source exploits the modular approach provided
 by the programming language. All the variables having in common description
 of certain features or method are grouped in modules. The convention
 of explicit type declaration is adopted, and all the arguments passed
@@ -18,20 +20,34 @@ mentioned below. The variables describing the main features of nanofibers
 file, which also contains the main subroutines for the memory management
 of the fundamental data of the simulated system. Since the size system
 is strictly time-dependent, JETSPIN exploits the dynamic array allocation
-features of FORTRAN90 to assign the necessary array dimensions. In
+features of Fortran to assign the necessary array dimensions. In
 particular, the size system is modified by the routines \texttt{add\_jetbead}
 and \texttt{erase\_jetbead}, while the decision of the main array
 size, declared as \texttt{mxnpjet}, is handled by the routine \texttt{reallocate\_jet}.
 The sizes of various service bookkeeping arrays are handled within
-a parallel implementation strategy, witch exploits few dedicated subroutines
+a parallel implementation strategy, which exploits few dedicated subroutines
 (see Sec \ref{sec:Parallelization}). All the implemented time integrators
 are written in the \texttt{integrator\_mod.f90} file, which contains
 the routine \texttt{driver\_integrator} to select the proper integrator,
 as indicated in the input file. All the terms of equations of motion
 for the implemented model (see Sec \ref{sec:Equation-of-Motion})
-are computed by routines located in the \texttt{eom\_mod.f90} file,
-which call other subroutines in the files \texttt{coulomb\_force\_mod.f90},
-\texttt{viscoelastic\_force\_mod.f90} and \texttt{support\_functions\_mod.f90}.
+are computed by routines located in the \texttt{eom\_mod.f90} file
+(\texttt{eom\_ev\_mod.f90} for the evaporating jet), which use
+\texttt{support\_functions\_mod.f90} for the jet geometry and
+\texttt{electric\_field\_mod.f90} for the external field; the integrators
+compute the Coulomb sums (\texttt{coulomb\_force\_mod.f90}) and call the
+equations of motion through \texttt{driver\_eom\_mod.f90}, and the jet
+breakup is handled in \texttt{breaking\_mod.f90}. The Kelvin--Voigt
+model with evaporation has its integrators in
+\texttt{integrator\_kv\_ev\_mod.f90}; dynamic refinement is in
+\texttt{dynamic\_refinement\_mod.f90}, with its Akima interpolation in
+\texttt{fit\_mod.f90}; \texttt{utility\_mod.f90} holds the random-number
+generator and the Gaussian pool, and \texttt{profiling\_mod.f90} the
+optional region profiler. The OpenACC device step is in
+\texttt{device\_step\_mod.f90}; the module \texttt{accelerator\_mod} exists
+in two versions, \texttt{openacc\_accelerator\_mod.f90} with the device
+kernels for the OpenACC targets and \texttt{host\_accelerator\_mod.f90} with
+stubs for the CPU targets, chosen by the Makefile target.
 A summarizing scheme of the main JETSPIN program in the \texttt{main.f90}
 file has been sketched in Fig \ref{Fig:Structure-program}.
 
@@ -40,7 +56,7 @@ understanding of the structure of JETSPIN code. All the parameters
 governing the system can be defined in the input file (see Sec \ref{sec:Input-file}),
 which is read by routines located in the \texttt{io\_mod.f90} and
 \texttt{parse\_mod.f90} files. Instead, the user should be acquainted
-with the model described in Cap \ref{chap:JETSPIN-Model-and}. The
+with the model described in Chapter~\ref{chap:JETSPIN-Model-and}. The
 content of the output file is completely customizable by the input
 file as described in Sec \ref{sec:Input-file}, and it can report
 different time-averaged observables computed by routines of the module
@@ -49,8 +65,10 @@ in the \texttt{error\_mod.f90} file can display various warning or
 error banners on computer terminal, so that the user can easily correct
 the most common mistakes in the input file.
 
-JETSPIN is supplied as a single UNIX compressed (tarred and gzipped)
-directory with four sub-directories. All the source code files are
+JETSPIN is supplied as a single directory (a git repository) with the
+sub-directories described below, besides \textit{docs} (Markdown
+documentation), \textit{manual} (this manual), \textit{tests} (test suites
+and records) and \textit{tools}. All the source code files are
 contained in the \textit{source} sub-directory. The \textit{examples}
 sub-directory contains different test cases that can help the user
 to edit new input files. The \textit{build} sub-directory stores a
@@ -66,7 +84,10 @@ contains the binary executable file, where it can be run.
 \begin{centering}
 \includegraphics[scale=0.18]{figure01}
 \par\end{centering}
-\protect\caption{Structure of the main JETSPIN program.}
+\protect\caption{Simplified structure of the main JETSPIN program. The
+arrays are reallocated only when they are full; the restart, the freezing
+and removal of the beads at the collector, the breakup, the dynamic
+refinement and the job-time check are not shown.}
 
 \label{Fig:Structure-program}
 \end{figure}

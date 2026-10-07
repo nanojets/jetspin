@@ -14,25 +14,38 @@ the directive \texttt{external potential type} (see Table \ref{tab:inputlist})
 can be used to select the waveform of the oscillation. The user can
 select three types of waveform: a rectangular wave oriented along
 x-axis; a rectangular wave produced by a RC circuit; a rotating electric
-field of a sinusoidal wave. In the first case the electric field is
+field of a sinusoidal wave. For the static field (type 0) and the
+two rectangular waves (types 1 and 2) the amplitude is $E_{x}=\Phi_{0}/h$,
+with $\Phi_{0}$ given by \texttt{external potential}. In the first case the electric field is
 given by
 
 \begin{equation}
-\vec{E}=\left(E_{x}\left\lceil\sin\omega t+\varphi\right\rceil,\,0,\,0\right),
+\vec{E}=\left(E_{x}\,\Theta\left(\sin\omega t\right),\,0,\,0\right),
 \end{equation}
 
-where the symbol $\left\lceil .\right\rceil$ denotes the ceiling
-function. If the waveform is modeled as produced by an RC circuit,
-the exponential decay $E_{x}\exp\left(-t/RC\right)$ is added to the
-previous equation whenever the field is switched off, and the
-exponential increase $E_{x}\left[1-\exp\left(-t/RC\right)\right]$
-is added whenever the field is switched on. Here, $RC$ denotes a
-decay time (seconds). The last case describes an orthogonal rotating
+where $\omega=2\pi f$, $f$ is the frequency given by \texttt{external potential freq},
+and $\Theta$ denotes the step function, equal to 1 for a positive
+argument, $1/2$ for a vanishing one and 0 for a negative one; the
+phase given by \texttt{external potential phase} is not applied to
+the rectangular waves. If the waveform is modeled as produced by an RC circuit,
+the rectangular value is replaced by
+the exponential increase $E_{x}\left[1-\exp\left(-t'/RC\right)\right]$
+during the half-periods in which the field is switched on, and by the
+exponential decay $E_{x}\exp\left(-t''/RC\right)$ during those in which
+it is switched off, where $t'$ and $t''$ are the times elapsed since the
+field was switched on and off, respectively. Here, $RC$ denotes a
+decay time (seconds) given by \texttt{external potential time}. The last case describes an orthogonal rotating
 electric field. Here the electric field takes the form
 
 \begin{equation}
-\vec{E}=\left(E_{x},\,E_{y}\cos\omega t+\varphi,\,E_{z}\sin\omega t+\varphi\right).
+\vec{E}=\left(E_{x},\,E_{y}\cos\left(\omega t+\varphi\right),\,E_{z}\sin\left(\omega t+\varphi\right)\right),
 \end{equation}
+where $\left(E_{x},E_{y},E_{z}\right)=\left(\Phi_{x},\Phi_{y},\Phi_{z}\right)/h$,
+with the three components $\Phi_{x}$, $\Phi_{y}$, $\Phi_{z}$ given by
+\texttt{external potential vector}, and $\varphi$ is the initial phase
+given by \texttt{external potential phase}. A time-dependent field
+(type other than 0) is not run by the device step of the OpenACC build
+and does not use the pre-generated Gaussian pool (Sec \ref{sec:Noise-pool}).
 
 Details on the main effects of orthogonal rotating electric fields
 are available in Ref. \cite{lauricella2017effects}.

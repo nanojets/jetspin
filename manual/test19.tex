@@ -4,16 +4,22 @@ Test Case 19 is the Kelvin--Voigt counterpart of Test Case 18.  It uses the
 Kelvin--Voigt RK4 integrator with Yarin evaporation, nozzle insertion, and
 collector removal enabled.  The initial jet length is 16 cm with
 \texttt{points 800}, the same 0.02 cm nominal spacing as Test Case 18.
-Dynamic refinement is disabled and the case is serial.
+Dynamic refinement is disabled and the case is serial.  As in Test Case 16,
+the OpenACC build takes the common device step from the first step.
 
 The NVFORTRAN CPU reference completed in about 14.5 s with 500 topology
-additions, 76 removals, five reallocations, and 1,224 active beads.  A
-NVFORTRAN 24.3 run on an NVIDIA A30 completed normally with 498 additions, 77
-removals, five reallocations, and 1,221 active beads.  Both the complete-force
-oracle and the Coulomb-only oracle produced the same aggregate GPU totals.
+additions, 76 removals, five reallocations, and 1,224 active beads.  Since
+2026-10-07 an NVFORTRAN 24.3 run on an NVIDIA A30 gives the same events,
+step for step, with statistics rows within $10^{-5}$ relatively; before, its
+topology path inserted one step later whenever the arrays had to grow, and
+the run ended with 498 additions, 77 removals and 1,221 active beads.
+NVFORTRAN 25.5, which rounds divisions differently, gives 500 additions,
+61 removals and 1,239 active beads on CPU and GPU alike: at step 62 a bead
+stops a relative $1.8\times10^{-8}$ short of the collector instead of
+reaching it, and the removals that follow differ.  The reference values are
+those of NVFORTRAN 24.3.
 
-The remaining three-bead difference in the final count is consistent with
-threshold-sensitive topology after roundoff amplification.  Because the direct
+Because the direct
 Coulomb force is sensitive to both bead spacing and bending dynamics, CPU and
 GPU trajectories for this case should be compared within a tolerance rather
 than as bitwise-identical states.  Like Test Case 18 it is a porting and

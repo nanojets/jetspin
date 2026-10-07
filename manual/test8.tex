@@ -42,3 +42,15 @@ reference ratios are
 \end{equation}
 These values provide simple numerical targets for future regression
 checks of the evaporation cutoff and concentration-dependent rheology.
+
+The OpenACC build runs the CPU build's code, byte for byte, until the jet
+arrays reach index 100, and then the common RK4 device step with
+evaporation: it engages at step 13,699, with 89 active beads.  Over the full
+$10^{6}$ steps (up to about 7,000 beads) one NVIDIA A30 takes 521 s against
+1957 s on one CPU core.  Insertions fall at the CPU's steps up to step
+26,122 and removals up to step 34,783; then the two runs separate
+chaotically, with events a few tens of steps apart either way, and both make
+7,090 insertions and 130 removals.  NVFORTRAN 25.5 and 24.3 round divisions
+differently, and over the first 20,000 steps their runs separate after the
+128th topology event, with the same totals; the reference values are those
+of NVFORTRAN 24.3.

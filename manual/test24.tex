@@ -12,15 +12,18 @@ seconds, about 100 million steps.
 The case is assembled from three sources.  Its electrostatic parameters are
 JETSPIN's canonical set, \texttt{density charge 44000},
 \texttt{collector distance 16}, and \texttt{external potential 30.02076857},
-shared with Examples 3 and 6 and with Test Cases 10, 15 and 16--20.  Rheology,
+shared with Examples 3, 4 and 5 and with Test Cases 9--20.  Rheology,
 air drag, insertion and removal are those of Test Case 23: Maxwell rheology,
-stochastic Platen air drag, nozzle insertion, and collector removal.
+stochastic Platen air drag, nozzle insertion, and collector removal, with
+its anchor spacing, \texttt{dynamic refinement anchor 0.10} cm.
 Initialization and print directives are those of Example 3, so the jet grows
 from a single nozzle bead (\texttt{points 1}) rather than from the
 pre-extended 400-element mesh used to validate the refinement algorithm.  This
-last point is what distinguishes the case: every other validated refinement
-test starts from an already extended jet, so the young-jet growth regime had
-never been exercised.
+last point is what distinguishes the case: every other anchored
+stochastic-Platen refinement test (Test Cases 21--23) starts from an already
+extended jet, so the young-jet growth regime of this configuration had not
+been exercised.  Example 5 also grows from one bead with refinement, but
+with RK4, multiple-step Coulomb sums, and no anchors.
 
 Yarin evaporation, which Test Case 23 uses, is not enabled here, and this is a
 definition rather than a temporary state; the evaporation directives of the
@@ -28,9 +31,10 @@ input are read but unused.  The evaporative configuration is Test Case 25
 (Sec.~\ref{sec:Test-Case-25}), whose input differs from this one by two
 lines, \texttt{evaporation yes} and \texttt{evaporation polymer frac 0.50d0}.
 With the 6\% polymer fraction of Ref.~\cite{yarin2001bending} the evaporative
-configuration stops on a numerical instability near step 1.07 million,
-because the dried jet keeps its charge while losing fifteen times its mass
-and cross-section; Test Case 25 carries that analysis.
+configuration stopped on a numerical instability near step 1.07 million in
+runs of a build of 29 September 2026, because the dried jet keeps its charge
+while losing fifteen times its mass and cross-section; Test Case 25 carries
+that analysis.
 
 The dynamic-refinement cadence is taken from Example 5,
 \texttt{dynamic refinement threshold 0.4} cm and
@@ -45,32 +49,52 @@ collapsing bead mass toward zero until the resulting acceleration overflows
 the stress equation.  The advisory \texttt{warning(108)} is raised whenever a
 refinement threshold is set below twenty times the base discretization
 resolution.  It is informational and not enforced: Example 5 and Test Cases
-21--23 are themselves below that ratio and remain valid short-window
-references.
+24 and 25 sit exactly at that ratio (0.4 cm over a resolution of 0.02 cm)
+and raise no warning, while Test Cases 21--23, at five times the resolution,
+are below it and remain valid short-window references.  Refinement also
+starts late: \texttt{dynamic refinement start 2.5d-4}, a directive that
+neither Example 5 nor Test Case 23 sets, allows no refinement during the
+first $2.5\times10^{-4}$ s (50,000 steps).
 
 Since 5 October 2026 the case follows Test Case 25: CPU and GPU builds read
 the same pre-generated Gaussian pool (Sec.~\ref{sec:Noise-pool}), and the GPU
 runs the device-resident path once the jet holds 100 beads.  The reference
 run uses the NVFORTRAN 24.3 CPU build and is truncated at 5,000,000 steps, 5\%
-of the target duration; it closes correctly.  The first bead reaches the
+of the target duration, by \texttt{final time 2.5d-2} and
+\texttt{print time 1.d-4} in a copy of the input; it closes correctly.  The
+first bead reaches the
 collector at step 2,541,113.  Between 4 and 5 million steps the collector
 velocity is 1963 cm/s, the off-axis distance of the leading bead 3.8 cm, the
 cone angle 26.6 degrees, the active-bead count between 471 and 553 around a
 mean of 511, and the path length 211 cm, so the balanced insertion and removal
 regime is reached; four more CPU seeds give mean active counts between 511.3
 and 512.0.  One NVIDIA
-A30 runs the same 5 million steps in about 590 s: it reproduces the CPU run
+A30 runs the same 5 million steps in 596 s, with the process bound to the
+NUMA node of its GPU: it reproduces the CPU run
 exactly until step 1,379,105, where it engages the device-resident path,
-follows the CPU trajectory afterwards, and five seeds give between 511 and 512
-active beads and a path length of 211 cm over the same window.  The A30 step
-then costs between about 105 and 145~$\mu$s from 100 to 600 beads, against 4
-to 5 ms for the CPU build with about 500 beads; the standard GPU build of the
-same day, which kept this case on the host with only the Coulomb sums on the
-GPU, needed 4546 s.  On one A30 the full 100 million steps take about four
-hours: from 10 to 100 million steps the jet keeps 517 active beads on average
+follows the CPU trajectory afterwards (with seed 317 the active-bead count
+first differs at step 4.28 million; until 7 October 2026 the bead inserted at
+the array reallocation of step 1,963,389 came one step late on the GPU, and
+the counts separated at 2.66 million steps), and five seeds give between 511
+and 512 active beads and a path length of 211 cm over the same window.  The
+A30 step then costs between about 105 and 145~$\mu$s from 100 to 600 beads,
+against 4 to 5 ms for the CPU build with about 500 beads; the standard GPU
+build of the morning of 5 October 2026, which kept this case on the host
+with only the Coulomb sums on the GPU, needed 4546 s.  With NVHPC 25.5 the
+run takes 630 s, against 597 s with NVHPC 24.3, the reference compiler, in
+the same session, and gives the same insertion and removal totals and 511.2
+active beads between 4 and 5 million steps, as NVHPC 24.3 does.  On one A30
+the full 100 million steps took 14,906 s, about four hours, with a
+device-resident build of 5 October 2026, whose output equals the current build's up to the
+reallocation at step 1,963,389, where that build inserted one step late:
+from 10 to 100 million steps the jet keeps 517 active beads on average
 (474 to 560), a path length of 214 cm, an off-axis distance of 3.8 cm and a
 cone angle of 26.9 degrees, about 1\% above the values between 4 and 5
-million steps, where the jet is still settling.
+million steps, where the jet is still settling.  These long-run statistics
+rest on periodically repeating noise: with the default pool of $10^{8}$
+values (Sec.~\ref{sec:Noise-pool}) the noise repeats every
+$10^{8}/(6\,n_{\mathrm{active}})$ steps, about 32,000 steps at 517 beads, so
+the 100 million steps go through the pool about 3,100 times.
 
 Track the printed \texttt{n} column over time to observe the stationary
 oscillation.  The input is stored in
